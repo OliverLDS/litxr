@@ -1,0 +1,31 @@
+Package: litxr
+Type: Package
+Title: Lightweight Framework for Organizing and Enriching Academic Papers at Scale
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Oliver",
+           family = "Lee",
+           email = "olee7149@gmail.com",
+           role = c("aut", "cre"))
+Description: A lightweight R framework for organizing and enriching academic papers at scale. 
+    The package provides fast ingestion, indexing, metadata extraction, and 
+    enrichment of literature using data.table and R6-based objects. Designed to 
+    support large-scale repositories, arXiv workflows, BibTeX export, and 
+    LLM-assisted analysis.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 4.1.0)
+Imports:
+    data.table,
+    jsonlite,
+    R6,
+    xml2
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
