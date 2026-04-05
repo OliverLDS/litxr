@@ -1,0 +1,28 @@
+version: 1
+project:
+  name: litxr-project
+  data_root: data/literature
+journals:
+  - journal_id: journal_of_finance
+    title: Journal of Finance
+    remote_channel: crossref
+    local_path: data/literature/journal_of_finance
+    metadata:
+      publisher: Wiley
+      issn_print: 0022-1082
+      issn_electronic: 1540-6261
+    sync:
+      filters:
+        issn: 0022-1082
+      limit: 100
+  - journal_id: journal_of_financial_economics
+    title: Journal of Financial Economics
+    remote_channel: crossref
+    local_path: data/literature/journal_of_financial_economics
+    metadata:
+      publisher: Elsevier
+      issn_print: 0304-405X
+    sync:
+      filters:
+        issn: 0304-405X
+      limit: 100

@@ -1,27 +1,32 @@
 Package: litxr
 Type: Package
 Title: Lightweight Framework for Organizing and Enriching Academic Papers at Scale
-Version: 0.0.0.9000
+Version: 0.0.1
 Authors@R: 
     person(given = "Oliver",
-           family = "Lee",
-           email = "olee7149@gmail.com",
+           family = "Zhou",
+           email = "oliver.yxzhou@gmail.com",
            role = c("aut", "cre"))
+Author: Oliver Zhou [aut, cre]
+Maintainer: Oliver Zhou <oliver.yxzhou@gmail.com>
 Description: A lightweight R framework for organizing and enriching academic papers at scale. 
     The package provides fast ingestion, indexing, metadata extraction, and 
-    enrichment of literature using data.table and R6-based objects. Designed to 
+    enrichment of literature using data.table-based objects. Designed to 
     support large-scale repositories, arXiv workflows, BibTeX export, and 
     LLM-assisted analysis.
 License: MIT + file LICENSE
+URL: https://github.com/OliverLDS/litxr
+BugReports: https://github.com/OliverLDS/litxr/issues
 Encoding: UTF-8
-LazyData: true
 Depends: 
     R (>= 4.1.0)
 Imports:
     data.table,
+    httr,
+    httr2,
     jsonlite,
-    R6,
-    xml2
+    xml2,
+    yaml
 Suggests:
     testthat (>= 3.0.0),
     knitr,

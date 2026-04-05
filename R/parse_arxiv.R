@@ -1,9 +1,21 @@
+#' Extract text from an XML node or return `NA`
+#'
+#' @param node XML node.
+#' @param xpath XPath expression.
+#' @param ns Optional XML namespace mapping.
+#'
+#' @return Character scalar.
 #' @export
 xml_text_or_na <- function(node, xpath, ns = NULL) {
   x <- xml2::xml_find_first(node, xpath, ns = ns)
   if (is.na(x)) NA_character_ else xml2::xml_text(x)
 }
 
+#' Parse one arXiv entry into the unified litxr schema
+#'
+#' @param entry One arXiv Atom entry node.
+#'
+#' @return One-row `data.table`.
 #' @export
 parse_arxiv_entry_unified <- function(entry) {
   ns <- xml2::xml_ns(entry)
@@ -71,10 +83,13 @@ parse_arxiv_entry_unified <- function(entry) {
     day           = day,
     
     journal       = NA_character_,
+    container_title = NA_character_,
+    publisher     = NA_character_,
     volume        = NA_character_,
     issue         = NA_character_,
     pages         = NA_character_,
     doi           = doi,
+    note          = NA_character_,
     
     subject_primary = subject_primary,
     subject_all     = subject_all,
