@@ -1,73 +1,102 @@
-#' Return the default litxr config path
+#' Return the litxr config path from `LITXR_CONFIG`
 #'
-#' `litxr` keeps the user-specific project config in `.litxr/config.yaml` at the
-#' project root so the package can keep local sync settings out of version
-#' control.
-#'
-#' @param path Project root.
+#' `litxr` reads the config path from the `LITXR_CONFIG` environment variable.
+#' Users should set that variable in `.Renviron`.
 #'
 #' @return Character scalar path.
 #' @export
-litxr_config_path <- function(path = ".") {
-  file.path(normalizePath(path, winslash = "/", mustWork = FALSE), ".litxr", "config.yaml")
+litxr_config_path <- function() {
+  env_path <- Sys.getenv("LITXR_CONFIG", unset = "")
+  if (!nzchar(env_path)) {
+    stop(
+      "LITXR_CONFIG is not set. Add `LITXR_CONFIG=/absolute/path/to/config.yaml` ",
+      "to `.Renviron` and restart R.",
+      call. = FALSE
+    )
+  }
+
+  normalizePath(env_path, winslash = "/", mustWork = FALSE)
 }
 
 #' Initialize a litxr project
 #'
-#' Creates the `.litxr` config directory, writes a starter `config.yaml` when it
-#' does not exist yet, and makes sure the local config path is gitignored.
-#'
-#' @param path Project root.
-#' @param overwrite Whether to overwrite an existing config file.
+#' Reads the target config path from `LITXR_CONFIG`. If the file does not exist,
+#' `litxr_init()` writes a starter `config.yaml` there. If the file already
+#' exists, it refuses to overwrite it and instructs the user to edit that file
+#' manually. After creating the file, it reminds the user to update
+#' `project.data_root` and each journal `local_path`.
 #'
 #' @return Invisibly returns the config path.
 #' @export
-litxr_init <- function(path = ".", overwrite = FALSE) {
-  root <- normalizePath(path, winslash = "/", mustWork = FALSE)
-  config_dir <- file.path(root, ".litxr")
-  config_path <- litxr_config_path(root)
+litxr_init <- function() {
+  config_path <- litxr_config_path()
+  config_dir <- dirname(config_path)
+
+  if (file.exists(config_path)) {
+    stop(
+      "config.yaml already exists at ", config_path, ". ",
+      "Refusing to overwrite it with the default config. ",
+      "Modify that file manually following the litxr config format.",
+      call. = FALSE
+    )
+  }
 
   if (!dir.exists(config_dir)) {
     dir.create(config_dir, recursive = TRUE, showWarnings = FALSE)
   }
 
-  if (!file.exists(config_path) || isTRUE(overwrite)) {
-    yaml::write_yaml(.litxr_default_config(root), config_path)
-  }
-
-  .litxr_ensure_gitignore(root, ".litxr/config.yaml")
+  yaml::write_yaml(.litxr_default_config(.litxr_project_root_from_config(config_path)), config_path)
+  message(
+    "Wrote default config to ", config_path, ". ",
+    "Edit `project.data_root` and each journal `local_path` before syncing. ",
+    "`project.data_root` is the root folder for your literature data store. ",
+    "Each journal `local_path` is the folder where that journal's json/pdf/md/llm files will be stored."
+  )
   invisible(config_path)
 }
 
 #' Read a litxr config file
 #'
-#' @param path Project root or direct path to a config file.
+#' @param path Optional direct path to a config file. When omitted, `litxr`
+#'   reads `LITXR_CONFIG`.
 #'
 #' @return Parsed config list.
 #' @export
-litxr_read_config <- function(path = ".") {
-  config_path <- path
-  if (!grepl("config\\.ya?ml$", path)) {
-    config_path <- litxr_config_path(path)
-  }
+litxr_read_config <- function(path = NULL) {
+  config_path <- if (is.null(path)) litxr_config_path() else path
 
   if (!file.exists(config_path)) {
     stop("Config file not found: ", config_path, call. = FALSE)
   }
 
-  cfg <- yaml::read_yaml(config_path)
+  raw_lines <- readLines(config_path, warn = FALSE)
+  has_tab_indent <- any(grepl("^\t+", raw_lines))
+
+  cfg <- tryCatch(
+    yaml::read_yaml(config_path),
+    error = function(e) {
+      hint <- if (has_tab_indent) {
+        " YAML indentation must use spaces, not tabs."
+      } else {
+        ""
+      }
+      stop("Failed to parse config in ", config_path, ". ", conditionMessage(e), hint, call. = FALSE)
+    }
+  )
   attr(cfg, "config_root") <- dirname(config_path)
   .litxr_validate_config(cfg, config_path)
 }
 
 #' List journals registered in the config
 #'
-#' @param config Parsed config list or a path that `litxr_read_config()` accepts.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return `data.table` of journal registrations.
 #' @export
-litxr_list_journals <- function(config = ".") {
+litxr_list_journals <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
   journals <- cfg$journals
 
   data.table::rbindlist(lapply(journals, function(x) {
@@ -113,8 +142,7 @@ litxr_list_journals <- function(config = ".") {
         sync = list(
           filters = list(
             issn = "0022-1082"
-          ),
-          limit = 100L
+          )
         )
       ),
       list(
@@ -129,12 +157,32 @@ litxr_list_journals <- function(config = ".") {
         sync = list(
           filters = list(
             issn = "0304-405X"
-          ),
-          limit = 100L
+          )
+        )
+      ),
+      list(
+        journal_id = "arxiv_cs_ai",
+        title = "arXiv cs.AI",
+        remote_channel = "arxiv",
+        local_path = "data/literature/arxiv_cs_ai",
+        metadata = list(
+          archive = "arXiv",
+          category = "cs.AI"
+        ),
+        sync = list(
+          search_query = "cat:cs.AI"
         )
       )
     )
   )
+}
+
+.litxr_project_root_from_config <- function(config_path) {
+  config_dir <- dirname(normalizePath(config_path, winslash = "/", mustWork = FALSE))
+  if (basename(config_dir) == ".litxr") {
+    return(dirname(config_dir))
+  }
+  config_dir
 }
 
 .litxr_validate_config <- function(cfg, config_path) {
@@ -162,13 +210,4 @@ litxr_list_journals <- function(config = ".") {
   }
 
   cfg
-}
-
-.litxr_ensure_gitignore <- function(root, entry) {
-  gitignore_path <- file.path(root, ".gitignore")
-  current <- if (file.exists(gitignore_path)) readLines(gitignore_path, warn = FALSE) else character()
-
-  if (!(entry %in% current)) {
-    writeLines(c(current, entry), gitignore_path)
-  }
 }

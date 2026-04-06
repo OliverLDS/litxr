@@ -4,14 +4,25 @@
 \alias{fetch_arxiv_xml}
 \title{Fetch arXiv API XML}
 \usage{
-fetch_arxiv_xml(id_vec = NULL, search_query = NULL, max_results = 100L)
+fetch_arxiv_xml(
+  id_vec = NULL,
+  search_query = NULL,
+  start = NULL,
+  max_results = 100L,
+  retry_max = 3L
+)
 }
 \arguments{
 \item{id_vec}{Optional arXiv ids.}
 
 \item{search_query}{Optional arXiv search query.}
 
+\item{start}{Result offset.}
+
 \item{max_results}{Maximum number of records to request.}
+
+\item{retry_max}{Maximum number of retries after rate limiting or transient
+request failure.}
 }
 \value{
 XML document.

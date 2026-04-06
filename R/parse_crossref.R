@@ -17,20 +17,36 @@ parse_crossref_entry_unified <- function(cr_message) {
 
   # --- Authors (cr_message$author is a data.frame) ---
   authors_vec <- character(0)
-  if (!is.null(cr_message$author) && nrow(cr_message$author) > 0) {
-    adf <- cr_message$author
-    authors_vec <- vapply(
-      seq_len(nrow(adf)),
-      function(i) {
-        given  <- getf_chr(adf$given[i])
-        family <- getf_chr(adf$family[i])
-        parts  <- c(given, family)
-        parts  <- parts[!is.na(parts) & nzchar(parts)]
-        if (!length(parts)) "" else paste(parts, collapse = " ")
-      },
-      FUN.VALUE = character(1)
-    )
-    # remove empty
+  if (!is.null(cr_message$author)) {
+    if (is.data.frame(cr_message$author)) {
+      adf <- cr_message$author
+      if (nrow(adf) > 0) {
+        authors_vec <- vapply(
+          seq_len(nrow(adf)),
+          function(i) {
+            given  <- getf_chr(adf$given[i])
+            family <- getf_chr(adf$family[i])
+            parts  <- c(given, family)
+            parts  <- parts[!is.na(parts) & nzchar(parts)]
+            if (!length(parts)) "" else paste(parts, collapse = " ")
+          },
+          FUN.VALUE = character(1)
+        )
+      }
+    } else if (is.list(cr_message$author) && length(cr_message$author) > 0) {
+      authors_vec <- vapply(
+        cr_message$author,
+        function(author) {
+          given  <- getf_chr(author$given)
+          family <- getf_chr(author$family)
+          parts  <- c(given, family)
+          parts  <- parts[!is.na(parts) & nzchar(parts)]
+          if (!length(parts)) "" else paste(parts, collapse = " ")
+        },
+        FUN.VALUE = character(1)
+      )
+    }
+
     authors_vec <- authors_vec[nzchar(authors_vec)]
   }
   authors_str <- if (length(authors_vec)) paste(authors_vec, collapse = "; ") else ""
@@ -40,9 +56,19 @@ parse_crossref_entry_unified <- function(cr_message) {
     if (is.null(x) || is.null(x$`date-parts`)) return(NA)
     dp <- x$`date-parts`
     if (length(dp) < 1) return(NA)
-    year  <- dp[1,1]
-    month <- if (length(dp) >= 2) dp[1,2] else 1
-    day   <- if (length(dp) >= 3) dp[1,3] else 1
+
+    parts <- dp
+    if (is.list(dp)) {
+      parts <- dp[[1]]
+    }
+    parts <- unlist(parts, use.names = FALSE)
+    if (!length(parts)) return(NA)
+
+    year  <- as.integer(parts[1])
+    month <- if (length(parts) >= 2 && !is.na(parts[2])) as.integer(parts[2]) else 1L
+    day   <- if (length(parts) >= 3 && !is.na(parts[3])) as.integer(parts[3]) else 1L
+
+    if (is.na(year)) return(NA)
     as.POSIXct(sprintf("%04d-%02d-%02d", year, month, day), tz = "UTC")
   }
 
@@ -73,8 +99,24 @@ parse_crossref_entry_unified <- function(cr_message) {
 
   # pdf: look at link$URL if present
   url_pdf <- NA_character_
-  if (!is.null(cr_message$link) && nrow(cr_message$link) > 0) {
-    url_pdf <- getf_chr(cr_message$link$URL)
+  if (!is.null(cr_message$link)) {
+    link_url <- NULL
+
+    if (is.data.frame(cr_message$link)) {
+      if (nrow(cr_message$link) > 0 && "URL" %in% names(cr_message$link)) {
+        link_url <- cr_message$link$URL
+      }
+    } else if (is.list(cr_message$link)) {
+      if (!is.null(cr_message$link$URL)) {
+        link_url <- cr_message$link$URL
+      } else if (length(cr_message$link) > 0 && is.list(cr_message$link[[1]]) && !is.null(cr_message$link[[1]]$URL)) {
+        link_url <- vapply(cr_message$link, function(x) {
+          if (is.null(x$URL)) NA_character_ else as.character(x$URL)
+        }, character(1))
+      }
+    }
+
+    url_pdf <- getf_chr(link_url)
   }
 
   # --- Abstract ---

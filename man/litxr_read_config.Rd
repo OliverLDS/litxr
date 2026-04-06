@@ -4,10 +4,11 @@
 \alias{litxr_read_config}
 \title{Read a litxr config file}
 \usage{
-litxr_read_config(path = ".")
+litxr_read_config(path = NULL)
 }
 \arguments{
-\item{path}{Project root or direct path to a config file.}
+\item{path}{Optional direct path to a config file. When omitted, \code{litxr}
+reads \code{LITXR_CONFIG}.}
 }
 \value{
 Parsed config list.

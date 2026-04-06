@@ -4,10 +4,11 @@
 \alias{litxr_sync_all}
 \title{Sync all configured journals}
 \usage{
-litxr_sync_all(config = ".")
+litxr_sync_all(config = NULL)
 }
 \arguments{
-\item{config}{Parsed config list or a path that \code{litxr_read_config()} accepts.}
+\item{config}{Optional parsed config list or a direct config path. When
+omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 }
 \value{
 Named list of synced \code{data.table}s.

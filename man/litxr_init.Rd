@@ -4,17 +4,15 @@
 \alias{litxr_init}
 \title{Initialize a litxr project}
 \usage{
-litxr_init(path = ".", overwrite = FALSE)
-}
-\arguments{
-\item{path}{Project root.}
-
-\item{overwrite}{Whether to overwrite an existing config file.}
+litxr_init()
 }
 \value{
 Invisibly returns the config path.
 }
 \description{
-Creates the \code{.litxr} config directory, writes a starter \code{config.yaml} when it
-does not exist yet, and makes sure the local config path is gitignored.
+Reads the target config path from \code{LITXR_CONFIG}. If the file does not exist,
+\code{litxr_init()} writes a starter \code{config.yaml} there. If the file already
+exists, it refuses to overwrite it and instructs the user to edit that file
+manually. After creating the file, it reminds the user to update
+\code{project.data_root} and each journal \code{local_path}.
 }

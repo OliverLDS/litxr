@@ -4,12 +4,13 @@
 \alias{litxr_sync_journal}
 \title{Sync one configured journal}
 \usage{
-litxr_sync_journal(journal_id, config = ".")
+litxr_sync_journal(journal_id, config = NULL)
 }
 \arguments{
 \item{journal_id}{Journal identifier from \code{config.yaml}.}
 
-\item{config}{Parsed config list or a path that \code{litxr_read_config()} accepts.}
+\item{config}{Optional parsed config list or a direct config path. When
+omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 }
 \value{
 \code{data.table} of synced records.

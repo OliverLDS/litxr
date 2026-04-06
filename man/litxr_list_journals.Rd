@@ -4,10 +4,11 @@
 \alias{litxr_list_journals}
 \title{List journals registered in the config}
 \usage{
-litxr_list_journals(config = ".")
+litxr_list_journals(config = NULL)
 }
 \arguments{
-\item{config}{Parsed config list or a path that \code{litxr_read_config()} accepts.}
+\item{config}{Optional parsed config list or a direct config path. When
+omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 }
 \value{
 \code{data.table} of journal registrations.

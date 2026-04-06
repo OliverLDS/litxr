@@ -2,18 +2,14 @@
 % Please edit documentation in R/config.R
 \name{litxr_config_path}
 \alias{litxr_config_path}
-\title{Return the default litxr config path}
+\title{Return the litxr config path from \code{LITXR_CONFIG}}
 \usage{
-litxr_config_path(path = ".")
-}
-\arguments{
-\item{path}{Project root.}
+litxr_config_path()
 }
 \value{
 Character scalar path.
 }
 \description{
-\code{litxr} keeps the user-specific project config in \code{.litxr/config.yaml} at the
-project root so the package can keep local sync settings out of version
-control.
+\code{litxr} reads the config path from the \code{LITXR_CONFIG} environment variable.
+Users should set that variable in \code{.Renviron}.
 }

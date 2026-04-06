@@ -14,7 +14,6 @@ journals:
     sync:
       filters:
         issn: 0022-1082
-      limit: 100
   - journal_id: journal_of_financial_economics
     title: Journal of Financial Economics
     remote_channel: crossref
@@ -25,4 +24,12 @@ journals:
     sync:
       filters:
         issn: 0304-405X
-      limit: 100
+  - journal_id: arxiv_cs_ai
+    title: arXiv cs.AI
+    remote_channel: arxiv
+    local_path: data/literature/arxiv_cs_ai
+    metadata:
+      archive: arXiv
+      category: cs.AI
+    sync:
+      search_query: cat:cs.AI

@@ -5,20 +5,25 @@
 #' the journal's local path.
 #'
 #' @param journal_id Journal identifier from `config.yaml`.
-#' @param config Parsed config list or a path that `litxr_read_config()` accepts.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return `data.table` of synced records.
 #' @export
-litxr_sync_journal <- function(journal_id, config = ".") {
+litxr_sync_journal <- function(journal_id, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
   journal <- .litxr_get_journal(cfg, journal_id)
   local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  records <- switch(
+  incoming <- switch(
     journal$remote_channel,
     crossref = .litxr_sync_crossref_journal(journal),
     arxiv = .litxr_sync_arxiv_journal(journal),
     stop("Unsupported remote channel: ", journal$remote_channel, call. = FALSE)
   )
+
+  existing <- .litxr_read_journal_records(local_path)
+  records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
 
   .litxr_write_journal_records(records, local_path, journal)
   records
@@ -26,12 +31,14 @@ litxr_sync_journal <- function(journal_id, config = ".") {
 
 #' Sync all configured journals
 #'
-#' @param config Parsed config list or a path that `litxr_read_config()` accepts.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return Named list of synced `data.table`s.
 #' @export
-litxr_sync_all <- function(config = ".") {
+litxr_sync_all <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
   stats::setNames(
     lapply(cfg$journals, function(journal) litxr_sync_journal(journal$journal_id, cfg)),
     vapply(cfg$journals, `[[`, character(1), "journal_id")
@@ -41,26 +48,100 @@ litxr_sync_all <- function(config = ".") {
 #' Read locally stored records for one journal
 #'
 #' @param journal_id Journal identifier from `config.yaml`.
-#' @param config Parsed config list or a path that `litxr_read_config()` accepts.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return `data.table` of local records.
 #' @export
-litxr_read_journal <- function(journal_id, config = ".") {
+litxr_read_journal <- function(journal_id, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
   journal <- .litxr_get_journal(cfg, journal_id)
   .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
+}
+
+#' Repair or incrementally fill a journal's local store
+#'
+#' Intended for bounded repair runs that should respect remote rate limits. For
+#' arXiv journals, this can narrow the sync to a submitted-date window and/or a
+#' smaller batch.
+#'
+#' @param journal_id Journal identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param search_query Optional replacement query for this repair run.
+#' @param submitted_from Optional lower bound date/time for arXiv submittedDate.
+#' @param submitted_to Optional upper bound date/time for arXiv submittedDate.
+#' @param start Optional arXiv result offset for this repair run.
+#' @param limit Optional maximum number of records for this repair run.
+#'
+#' @return `data.table` of repaired or newly synced records.
+#' @export
+litxr_repair_journal <- function(
+  journal_id,
+  config = NULL,
+  search_query = NULL,
+  submitted_from = NULL,
+  submitted_to = NULL,
+  start = NULL,
+  limit = NULL
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, journal_id)
+
+  if (identical(journal$remote_channel, "arxiv")) {
+    base_query <- if (is.null(search_query)) journal$sync$search_query else search_query
+    journal$sync$search_query <- .litxr_build_arxiv_search_query(base_query, submitted_from, submitted_to)
+    if (!is.null(start)) journal$sync$start <- as.integer(start)
+    if (!is.null(limit)) journal$sync$limit <- as.integer(limit)
+  } else {
+    if (!is.null(limit)) journal$sync$limit <- as.integer(limit)
+  }
+
+  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+  incoming <- switch(
+    journal$remote_channel,
+    crossref = .litxr_sync_crossref_journal(journal),
+    arxiv = .litxr_sync_arxiv_journal(journal),
+    stop("Unsupported remote channel: ", journal$remote_channel, call. = FALSE)
+  )
+
+  existing <- .litxr_read_journal_records(local_path)
+  records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
+  .litxr_write_journal_records(records, local_path, journal)
+  records
+}
+
+#' Rebuild the local journal fst index from JSON files
+#'
+#' @param journal_id Journal identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the rebuilt fst index path.
+#' @export
+litxr_rebuild_journal_index <- function(journal_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, journal_id)
+  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+  records <- .litxr_read_journal_records_from_json(local_path)
+  .litxr_write_journal_index(records, local_path)
 }
 
 #' Export local references to a BibTeX file
 #'
 #' @param output Output `.bib` file path.
 #' @param journal_ids Optional character vector of journal ids to export.
-#' @param config Parsed config list or a path that `litxr_read_config()` accepts.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return Invisibly returns the output path.
 #' @export
-litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
+litxr_export_bib <- function(output, journal_ids = NULL, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
   selected <- cfg$journals
 
   if (!is.null(journal_ids)) {
@@ -124,7 +205,7 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
 
   records <- .litxr_deduplicate_records(data.table::rbindlist(rows, fill = TRUE))
   if (is.finite(limit) && nrow(records) > limit) {
-    records <- records[seq_len(limit)]
+    records <- records[seq_len(limit), ]
   }
 
   records
@@ -136,9 +217,33 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
     stop("arxiv journal entries require `sync.search_query` in config.yaml.", call. = FALSE)
   }
 
-  max_results <- if (is.null(journal$sync$limit)) 100L else as.integer(journal$sync$limit)
-  feed <- fetch_arxiv_xml(search_query = search_query, max_results = max_results)
-  entries <- xml2::xml_find_all(feed, ".//entry")
+  limit <- if (is.null(journal$sync$limit)) Inf else as.integer(journal$sync$limit)
+  batch_size <- if (is.null(journal$sync$rows)) 100L else as.integer(journal$sync$rows)
+  delay_seconds <- if (is.null(journal$sync$delay_seconds)) 3 else as.numeric(journal$sync$delay_seconds)
+  start <- if (is.null(journal$sync$start)) 0L else as.integer(journal$sync$start)
+  entries <- list()
+
+  repeat {
+    request_n <- if (is.finite(limit)) min(batch_size, limit - length(entries)) else batch_size
+    if (request_n <= 0L) break
+
+    .litxr_arxiv_delay(delay_seconds)
+
+    feed <- fetch_arxiv_xml(
+      search_query = search_query,
+      start = start,
+      max_results = request_n
+    )
+
+    page_entries <- xml2::xml_find_all(feed, ".//*[local-name()='entry']")
+    if (!length(page_entries)) break
+
+    entries <- c(entries, as.list(page_entries))
+    if (length(page_entries) < request_n) break
+
+    start <- start + length(page_entries)
+  }
+
   if (!length(entries)) {
     return(data.table::data.table())
   }
@@ -150,15 +255,21 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
     row
   })
 
-  data.table::rbindlist(rows, fill = TRUE)
+  records <- data.table::rbindlist(rows, fill = TRUE)
+  if (is.finite(limit) && nrow(records) > limit) {
+    records <- records[seq_len(limit), ]
+  }
+  records
 }
 
 .litxr_journal_paths <- function(local_path) {
   list(
     root = local_path,
+    index = file.path(local_path, "index"),
     json = file.path(local_path, "json"),
     pdf = file.path(local_path, "pdf"),
-    md = file.path(local_path, "md")
+    md = file.path(local_path, "md"),
+    llm = file.path(local_path, "llm")
   )
 }
 
@@ -174,6 +285,60 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
 
   file.path(root, local_path)
 }
+
+.litxr_build_arxiv_search_query <- function(base_query, submitted_from = NULL, submitted_to = NULL) {
+  if (is.null(submitted_from) && is.null(submitted_to)) {
+    return(base_query)
+  }
+
+  from_text <- if (is.null(submitted_from)) "*" else .litxr_format_arxiv_datetime(submitted_from, end = FALSE)
+  to_text <- if (is.null(submitted_to)) "*" else .litxr_format_arxiv_datetime(submitted_to, end = TRUE)
+  paste0("(", base_query, ") AND submittedDate:[", from_text, " TO ", to_text, "]")
+}
+
+.litxr_format_arxiv_datetime <- function(x, end = FALSE) {
+  text <- as.character(x)
+  if (grepl("^[0-9]{4}$", text)) {
+    return(if (end) paste0(text, "12312359") else paste0(text, "01010000"))
+  }
+  if (grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", text)) {
+    compact <- gsub("-", "", text)
+    return(if (end) paste0(compact, "2359") else paste0(compact, "0000"))
+  }
+  if (grepl("^[0-9]{8}$", text)) {
+    return(if (end) paste0(text, "2359") else paste0(text, "0000"))
+  }
+  if (grepl("^[0-9]{12}$", text)) {
+    return(text)
+  }
+
+  parsed <- as.POSIXct(text, tz = "UTC")
+  if (is.na(parsed)) {
+    stop("Unable to parse arXiv submittedDate value: ", text, call. = FALSE)
+  }
+  format(parsed, "%Y%m%d%H%M")
+}
+
+.litxr_arxiv_delay <- local({
+  last_request_time <- NULL
+
+  function(delay_seconds = 3) {
+    if (is.null(delay_seconds) || is.na(delay_seconds) || delay_seconds <= 0) {
+      return(invisible(NULL))
+    }
+
+    if (!is.null(last_request_time)) {
+      elapsed <- as.numeric(difftime(Sys.time(), last_request_time, units = "secs"))
+      remaining <- delay_seconds - elapsed
+      if (remaining > 0) {
+        Sys.sleep(remaining)
+      }
+    }
+
+    last_request_time <<- Sys.time()
+    invisible(NULL)
+  }
+})
 
 .litxr_ensure_journal_dirs <- function(local_path) {
   paths <- .litxr_journal_paths(local_path)
@@ -197,6 +362,7 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
 }
 
 .litxr_record_key <- function(records) {
+  records <- .litxr_normalize_record_identity(records)
   doi <- records[["doi"]]
   ref_id <- records[["ref_id"]]
 
@@ -218,22 +384,214 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
   out
 }
 
+.litxr_record_completeness_score <- function(records) {
+  if (!nrow(records)) return(integer())
+
+  score_fields <- setdiff(
+    names(records),
+    c("raw_entry", "authors_list", "journal_config")
+  )
+
+  vapply(seq_len(nrow(records)), function(i) {
+    row <- records[i, ]
+    sum(vapply(score_fields, function(field) {
+      value <- row[[field]]
+      !.litxr_nullish(value)
+    }, logical(1)))
+  }, integer(1))
+}
+
+.litxr_prefer_complete_records <- function(records, key_fun = .litxr_upsert_key) {
+  if (!nrow(records)) {
+    return(records)
+  }
+
+  out <- data.table::copy(records)
+  out[["litxr_record_key__"]] <- key_fun(out)
+  out[["litxr_completeness__"]] <- .litxr_record_completeness_score(out)
+
+  ord <- order(out[["litxr_record_key__"]], -out[["litxr_completeness__"]])
+  out <- out[ord, ]
+  out <- out[!duplicated(out[["litxr_record_key__"]]), ]
+  out[["litxr_record_key__"]] <- NULL
+  out[["litxr_completeness__"]] <- NULL
+  out
+}
+
+.litxr_upsert_key <- function(records) {
+  records <- .litxr_normalize_record_identity(records)
+  doi <- records[["doi"]]
+  source <- records[["source"]]
+  source_id <- records[["source_id"]]
+  ref_id <- records[["ref_id"]]
+
+  keys <- ref_id
+  has_source_key <- !is.na(source) & nzchar(source) & !is.na(source_id) & nzchar(source_id)
+  keys[has_source_key] <- paste0(source[has_source_key], ":", source_id[has_source_key])
+
+  has_doi <- !is.na(doi) & nzchar(doi)
+  keys[has_doi] <- paste0("doi:", doi[has_doi])
+  keys
+}
+
+.litxr_normalize_record_identity <- function(records) {
+  if (!nrow(records)) {
+    return(records)
+  }
+
+  out <- data.table::copy(records)
+  if (!("doi" %in% names(out))) {
+    return(out)
+  }
+
+  source <- if ("source" %in% names(out)) out[["source"]] else rep(NA_character_, nrow(out))
+  source_id <- if ("source_id" %in% names(out)) out[["source_id"]] else rep(NA_character_, nrow(out))
+  ref_id <- if ("ref_id" %in% names(out)) out[["ref_id"]] else rep(NA_character_, nrow(out))
+  doi <- out[["doi"]]
+
+  missing_doi <- is.na(doi) | !nzchar(doi)
+  crossref_source_id <- missing_doi & !is.na(source) & source == "crossref" & !is.na(source_id) & nzchar(source_id)
+  doi[crossref_source_id] <- source_id[crossref_source_id]
+
+  crossref_ref_id <- missing_doi & !is.na(source) & source == "crossref" & !is.na(ref_id) & grepl("^doi:", ref_id)
+  doi[crossref_ref_id] <- sub("^doi:", "", ref_id[crossref_ref_id])
+
+  out[["doi"]] <- doi
+  out
+}
+
+.litxr_nullish <- function(x) {
+  length(x) == 0L || is.null(x) || (length(x) == 1L && is.na(x)) || identical(x, "")
+}
+
+.litxr_scalar_equal <- function(a, b) {
+  if (.litxr_nullish(a) && .litxr_nullish(b)) return(TRUE)
+  if (inherits(a, "POSIXct") || inherits(b, "POSIXct")) {
+    return(identical(as.character(a), as.character(b)))
+  }
+  identical(a, b)
+}
+
+.litxr_merge_field <- function(existing, incoming, field, key, conflict_env) {
+  local_priority_fields <- c("note")
+
+  existing_value <- existing[[field]]
+  incoming_value <- incoming[[field]]
+
+  if (field %in% local_priority_fields) {
+    if (!.litxr_nullish(existing_value)) return(existing_value)
+    return(incoming_value)
+  }
+
+  if (.litxr_nullish(incoming_value)) return(existing_value)
+
+  if (!.litxr_nullish(existing_value) && !.litxr_scalar_equal(existing_value, incoming_value)) {
+    conflict_env$rows[[length(conflict_env$rows) + 1L]] <- data.table::as.data.table(list(
+      key = key,
+      field = field,
+      old_value = paste(as.character(existing_value), collapse = "; "),
+      new_value = paste(as.character(incoming_value), collapse = "; "),
+      recorded_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+    ))
+  }
+
+  incoming_value
+}
+
+.litxr_merge_record_row <- function(existing_row, incoming_row, key, conflict_env) {
+  existing_row <- stats::setNames(lapply(names(existing_row), function(name) existing_row[[name]]), names(existing_row))
+  incoming_row <- stats::setNames(lapply(names(incoming_row), function(name) incoming_row[[name]]), names(incoming_row))
+  fields <- union(names(existing_row), names(incoming_row))
+  values <- stats::setNames(vector("list", length(fields)), fields)
+
+  for (field in fields) {
+    existing_value <- existing_row[[field]]
+    incoming_value <- incoming_row[[field]]
+
+    if (field %in% c("authors_list", "raw_entry")) {
+      values[[field]] <- if (!.litxr_nullish(incoming_value)) incoming_value else existing_value
+    } else {
+      values[[field]] <- .litxr_merge_field(existing_row, incoming_row, field, key, conflict_env)
+    }
+  }
+
+  data.table::as.data.table(values)
+}
+
+.litxr_write_upsert_conflicts <- function(conflicts, local_path) {
+  if (!length(conflicts$rows)) return(invisible(NULL))
+
+  conflict_path <- file.path(local_path, "json", "_upsert_conflicts.jsonl")
+  lines <- vapply(conflicts$rows, function(row) {
+    jsonlite::toJSON(as.list(row), auto_unbox = TRUE, null = "null")
+  }, character(1))
+
+  write(lines, file = conflict_path, append = TRUE)
+  invisible(conflict_path)
+}
+
+.litxr_upsert_journal_records <- function(existing, incoming, local_path) {
+  if (!nrow(existing)) {
+    return(.litxr_prefer_complete_records(incoming))
+  }
+  if (!nrow(incoming)) {
+    return(.litxr_prefer_complete_records(existing))
+  }
+
+  existing <- .litxr_prefer_complete_records(existing)
+  incoming <- .litxr_prefer_complete_records(incoming)
+
+  existing_keys <- .litxr_upsert_key(existing)
+  incoming_keys <- .litxr_upsert_key(incoming)
+  all_keys <- union(existing_keys, incoming_keys)
+  conflicts <- new.env(parent = emptyenv())
+  conflicts$rows <- list()
+
+  merged <- lapply(all_keys, function(key) {
+    existing_idx <- match(key, existing_keys)
+    incoming_idx <- match(key, incoming_keys)
+
+    if (is.na(existing_idx)) return(incoming[incoming_idx, ])
+    if (is.na(incoming_idx)) return(existing[existing_idx, ])
+
+    .litxr_merge_record_row(existing[existing_idx, ], incoming[incoming_idx, ], key, conflicts)
+  })
+
+  .litxr_write_upsert_conflicts(conflicts, local_path)
+  data.table::rbindlist(merged, fill = TRUE)
+}
+
 .litxr_write_journal_records <- function(records, local_path, journal) {
   paths <- .litxr_ensure_journal_dirs(local_path)
   if (!nrow(records)) {
+    .litxr_write_journal_index(records, local_path)
     return(invisible(character()))
   }
 
-  invisible(lapply(seq_len(nrow(records)), function(i) {
+  written <- unlist(lapply(seq_len(nrow(records)), function(i) {
     row <- records[i, ]
     payload <- .litxr_row_to_storage_payload(row, journal)
     json_path <- file.path(paths$json, paste0(.litxr_record_slug(row), ".json"))
     jsonlite::write_json(payload, json_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
     json_path
-  }))
+  }), use.names = FALSE)
+
+  .litxr_write_journal_index(records, local_path)
+  invisible(written)
 }
 
 .litxr_read_journal_records <- function(local_path) {
+  indexed <- .litxr_read_journal_index(local_path)
+  if (!is.null(indexed)) {
+    return(indexed)
+  }
+
+  records <- .litxr_read_journal_records_from_json(local_path)
+  .litxr_write_journal_index(records, local_path)
+  records
+}
+
+.litxr_read_journal_records_from_json <- function(local_path) {
   paths <- .litxr_journal_paths(local_path)
   if (!dir.exists(paths$json)) {
     return(data.table::data.table())
@@ -244,7 +602,87 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
     return(data.table::data.table())
   }
 
-  data.table::rbindlist(lapply(files, .litxr_storage_payload_to_row), fill = TRUE)
+  .litxr_prefer_complete_records(
+    data.table::rbindlist(lapply(files, .litxr_storage_payload_to_row), fill = TRUE)
+  )
+}
+
+.litxr_index_path <- function(local_path) {
+  file.path(.litxr_journal_paths(local_path)$index, "references.fst")
+}
+
+.litxr_index_encode <- function(records) {
+  out <- data.table::copy(records)
+
+  if ("authors_list" %in% names(out)) {
+    out[["authors_list_json"]] <- vapply(out[["authors_list"]], function(x) {
+      jsonlite::toJSON(unname(x), auto_unbox = TRUE, null = "null")
+    }, character(1))
+    out[["authors_list"]] <- NULL
+  }
+
+  if ("raw_entry" %in% names(out)) {
+    out[["raw_entry_json"]] <- rep(NA_character_, nrow(out))
+    out[["raw_entry"]] <- NULL
+  }
+
+  if ("pub_date" %in% names(out)) {
+    out[["pub_date"]] <- ifelse(
+      is.na(out[["pub_date"]]),
+      NA_character_,
+      format(out[["pub_date"]], tz = "UTC", usetz = TRUE)
+    )
+  }
+
+  out
+}
+
+.litxr_index_decode <- function(records) {
+  if (!nrow(records)) {
+    return(data.table::as.data.table(records))
+  }
+
+  out <- data.table::as.data.table(records)
+
+  if ("authors_list_json" %in% names(out)) {
+    out[["authors_list"]] <- lapply(out[["authors_list_json"]], function(x) {
+      if (is.na(x) || !nzchar(x)) return(character())
+      unlist(jsonlite::fromJSON(x, simplifyVector = TRUE), use.names = FALSE)
+    })
+    out[["authors_list_json"]] <- NULL
+  } else if (!("authors_list" %in% names(out))) {
+    out[["authors_list"]] <- rep(list(character()), nrow(out))
+  }
+
+  if ("raw_entry_json" %in% names(out)) {
+    out[["raw_entry"]] <- rep(list(NULL), nrow(out))
+    out[["raw_entry_json"]] <- NULL
+  } else if (!("raw_entry" %in% names(out))) {
+    out[["raw_entry"]] <- rep(list(NULL), nrow(out))
+  }
+
+  if ("pub_date" %in% names(out)) {
+    out[["pub_date"]] <- as.POSIXct(out[["pub_date"]], tz = "UTC")
+  }
+
+  out
+}
+
+.litxr_write_journal_index <- function(records, local_path) {
+  paths <- .litxr_ensure_journal_dirs(local_path)
+  index_path <- .litxr_index_path(local_path)
+  encoded <- .litxr_index_encode(records)
+  fst::write_fst(as.data.frame(encoded), index_path)
+  invisible(index_path)
+}
+
+.litxr_read_journal_index <- function(local_path) {
+  index_path <- .litxr_index_path(local_path)
+  if (!file.exists(index_path)) {
+    return(NULL)
+  }
+
+  .litxr_index_decode(fst::read_fst(index_path, as.data.table = TRUE))
 }
 
 .litxr_row_to_storage_payload <- function(row, journal) {
@@ -255,12 +693,29 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = ".") {
   } else {
     format(values$pub_date, tz = "UTC", usetz = TRUE)
   }
+  values$raw_entry <- .litxr_serialize_raw_entry(values$raw_entry)
   values$journal_config <- list(
     journal_id = journal$journal_id,
     title = journal$title,
     remote_channel = journal$remote_channel
   )
   values
+}
+
+.litxr_serialize_raw_entry <- function(raw_entry) {
+  if (is.null(raw_entry)) {
+    return(NULL)
+  }
+
+  if (is.list(raw_entry) && length(raw_entry) == 1L) {
+    raw_entry <- raw_entry[[1]]
+  }
+
+  if (inherits(raw_entry, c("xml_node", "xml_document"))) {
+    return(as.character(raw_entry))
+  }
+
+  raw_entry
 }
 
 .litxr_storage_payload_to_row <- function(path) {
