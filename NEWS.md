@@ -1,3 +1,18 @@
+# litxr 0.0.4
+
+- Generalized the package from journal-first config toward collection-first
+  architecture, while keeping backward-compatible journal wrappers.
+- Added canonical project-level indexes for references, collection memberships,
+  enrichment status, and sync state.
+- Added manual reference ingest, richer identifier support, and `entry_type`
+  storage for broader BibTeX coverage beyond DOI-centric journal articles.
+- Added project-level markdown and structured LLM digest storage, search, batch
+  digest-building helpers, and shell scripts for enrichment workflows.
+- Added sync history recording and arXiv day-range repair skipping through a
+  project-level sync ledger.
+- Split longer package guidance into focused docs under `docs/` and trimmed the
+  README into a shorter landing page.
+
 # litxr 0.0.3
 
 - Added `litxr_add_dois()` for DOI-batch ingestion across journals, with

@@ -7,7 +7,8 @@
 litxr_sync_journal(journal_id, config = NULL)
 }
 \arguments{
-\item{journal_id}{Journal identifier from \code{config.yaml}.}
+\item{journal_id}{Collection identifier from \code{config.yaml}. The argument name
+is kept for backward compatibility.}
 
 \item{config}{Optional parsed config list or a direct config path. When
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
@@ -16,7 +17,5 @@ omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 \code{data.table} of synced records.
 }
 \description{
-Fetches records from the configured remote channel, parses them into the
-unified reference schema, and stores one JSON metadata file per record under
-the journal's local path.
+Backward-compatible wrapper around \code{litxr_sync_collection()}.
 }

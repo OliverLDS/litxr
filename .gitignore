@@ -1,4 +1,6 @@
 .DS_Store
 .litxr/config.yaml
+config.yaml
+index/
 *.tar.gz
 *.Rcheck/

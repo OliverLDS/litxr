@@ -26,6 +26,26 @@
   paste(authors_list, collapse = " and ")
 }
 
+.litxr_entry_type_from_source <- function(source) {
+  switch(source,
+    blog = "misc",
+    web = "misc",
+    report = "techreport",
+    thesis = "phdthesis",
+    magazine = "article",
+    newspaper = "article",
+    book = "book",
+    booksection = "incollection",
+    dataset = "misc",
+    manuscript = "unpublished",
+    conference = "inproceedings",
+    encyclopedia = "incollection",
+    arxiv = "unpublished",
+    crossref = "article",
+    "article"
+  )
+}
+
 .make_manual_ref_row <- function(
   title,
   authors,
@@ -39,6 +59,9 @@
   issue                 = NA_character_,
   pages                 = NA_character_,
   doi                   = NA_character_,
+  isbn                  = NA_character_,
+  issn                  = NA_character_,
+  url                   = NA_character_,
   url_landing           = NA_character_,
   url_pdf               = NA_character_,
   note                  = NA_character_,
@@ -83,6 +106,21 @@
     "encyclopedia article"="encyclopedia",
     "misc"
   )
+  entry_type <- switch(kind,
+    "blog post" = "misc",
+    "web page" = "misc",
+    "report" = "techreport",
+    "thesis" = "phdthesis",
+    "magazine article" = "article",
+    "newspaper article" = "article",
+    "book" = "book",
+    "book section" = "incollection",
+    "dataset" = "misc",
+    "manuscript" = "unpublished",
+    "conference paper" = "inproceedings",
+    "encyclopedia article" = "incollection",
+    "misc"
+  )
 
   first_author <- sub(" .*","",authors_vec[1])
   slug_title   <- gsub("[^A-Za-z0-9]+","",substr(title,1,20))
@@ -97,6 +135,7 @@
     ref_id           = ref_id,
     source           = source,
     source_id        = source_id,
+    entry_type       = entry_type,
     title            = title,
     abstract         = abstract,
     authors          = authors_chr,
@@ -112,6 +151,9 @@
     issue            = issue,
     pages            = pages,
     doi              = doi,
+    isbn             = isbn,
+    issn             = issn,
+    url              = url,
     subject_primary  = subject_primary,
     subject_all      = subject_all,
     url_landing      = url_landing,
@@ -132,13 +174,10 @@ row_to_bibtex <- function(row) {
     row <- stats::setNames(lapply(names(row), function(name) row[[name]]), names(row))
   }
 
-  entry_type <- switch(row[["source"]],
-    blog="misc", web="misc", report="techreport", thesis="phdthesis",
-    magazine="article", newspaper="article", book="book",
-    booksection="incollection", dataset="misc", manuscript="unpublished",
-    conference="inproceedings", encyclopedia="incollection",
-    "article"
-  )
+  entry_type <- row[["entry_type"]]
+  if (is.null(entry_type) || is.na(entry_type) || !nzchar(entry_type)) {
+    entry_type <- .litxr_entry_type_from_source(row[["source"]])
+  }
 
   key   <- .make_citekey(row[["doi"]], row[["source_id"]], row[["ref_id"]])
   title <- .bibtex_escape(row[["title"]])
@@ -154,15 +193,18 @@ row_to_bibtex <- function(row) {
   number <- row[["issue"]]
   pages  <- row[["pages"]]
   doi    <- row[["doi"]]
+  isbn   <- row[["isbn"]]
+  issn   <- row[["issn"]]
   note   <- row[["note"]]
 
-  url <- row[["url_landing"]]
+  url <- row[["url"]]
+  if (is.null(url) || is.na(url) || !nzchar(url)) url <- row[["url_landing"]]
   if (is.na(url) || !nzchar(url)) url <- row[["url_pdf"]]
 
   fields <- c(
     title=title, author=auth, year=year,
     volume=volume, number=number, pages=pages,
-    doi=doi, url=url, note=note
+    doi=doi, isbn=isbn, issn=issn, url=url, note=note
   )
 
   if (entry_type=="article") fields["journal"] <- journal

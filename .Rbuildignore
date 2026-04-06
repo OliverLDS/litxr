@@ -3,4 +3,6 @@
 ^\\.gitignore$
 ^\\.Rhistory$
 ^\\.litxr$
+^config\\.yaml$
+^[Ii][Nn][Dd][Ee][Xx]$
 ^\\.\\.?Rcheck$

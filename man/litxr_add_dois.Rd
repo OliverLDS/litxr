@@ -2,7 +2,7 @@
 % Please edit documentation in R/sync.R
 \name{litxr_add_dois}
 \alias{litxr_add_dois}
-\title{Add references by DOI and auto-register missing journals}
+\title{Add references by DOI and auto-register missing collections}
 \usage{
 litxr_add_dois(dois, config = NULL, auto_register = TRUE)
 }
@@ -12,7 +12,7 @@ litxr_add_dois(dois, config = NULL, auto_register = TRUE)
 \item{config}{Optional parsed config list or a direct config path. When
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 
-\item{auto_register}{Whether to auto-register missing journals into
+\item{auto_register}{Whether to auto-register missing collections into
 \code{config.yaml}.}
 }
 \value{
@@ -20,5 +20,6 @@ omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 }
 \description{
 Fetches Crossref metadata for a DOI vector, writes the records into the local
-journal stores, and auto-registers journals in \code{config.yaml} when needed.
+collection stores, and auto-registers Crossref collections in \code{config.yaml}
+when needed.
 }

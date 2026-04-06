@@ -7,7 +7,8 @@
 litxr_rebuild_journal_index(journal_id, config = NULL)
 }
 \arguments{
-\item{journal_id}{Journal identifier from \code{config.yaml}.}
+\item{journal_id}{Collection identifier from \code{config.yaml}. The argument name
+is kept for backward compatibility.}
 
 \item{config}{Optional parsed config list or a direct config path. When
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
@@ -16,5 +17,5 @@ omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 Invisibly returns the rebuilt fst index path.
 }
 \description{
-Rebuild the local journal fst index from JSON files
+Backward-compatible wrapper around \code{litxr_rebuild_collection_index()}.
 }

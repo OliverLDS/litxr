@@ -24,7 +24,7 @@ litxr_config_path <- function() {
 #' `litxr_init()` writes a starter `config.yaml` there. If the file already
 #' exists, it refuses to overwrite it and instructs the user to edit that file
 #' manually. After creating the file, it reminds the user to update
-#' `project.data_root` and each journal `local_path`.
+#' `project.data_root` and each collection `local_path`.
 #'
 #' @return Invisibly returns the config path.
 #' @export
@@ -48,9 +48,9 @@ litxr_init <- function() {
   yaml::write_yaml(.litxr_default_config(.litxr_project_root_from_config(config_path)), config_path)
   message(
     "Wrote default config to ", config_path, ". ",
-    "Edit `project.data_root` and each journal `local_path` before syncing. ",
+    "Edit `project.data_root` and each collection `local_path` before syncing. ",
     "`project.data_root` is the root folder for your literature data store. ",
-    "Each journal `local_path` is the folder where that journal's json/pdf/md/llm files will be stored."
+    "Each collection `local_path` is the folder where that collection's json/pdf/md/llm files will be stored."
   )
   invisible(config_path)
 }
@@ -83,26 +83,50 @@ litxr_read_config <- function(path = NULL) {
   .litxr_validate_config(cfg, config_path)
 }
 
-#' List journals registered in the config
+#' List collections registered in the config
 #'
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
-#' @return `data.table` of journal registrations.
+#' @return `data.table` of collection registrations.
 #' @export
-litxr_list_journals <- function(config = NULL) {
+litxr_list_collections <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  journals <- cfg$journals
+  collections <- .litxr_config_collections(cfg)
 
-  data.table::rbindlist(lapply(journals, function(x) {
+  data.table::rbindlist(lapply(collections, function(x) {
     data.table::data.table(
-      journal_id = x$journal_id,
+      collection_id = x$collection_id,
+      collection_type = x$collection_type,
       title = x$title,
       remote_channel = x$remote_channel,
       local_path = x$local_path
     )
   }), fill = TRUE)
+}
+
+#' List journals registered in the config
+#'
+#' Backward-compatible wrapper around `litxr_list_collections()`. This function
+#' keeps the old journal-oriented column names while exposing the normalized
+#' collection config.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of collection registrations with legacy journal column
+#'   names.
+#' @export
+litxr_list_journals <- function(config = NULL) {
+  collections <- litxr_list_collections(config)
+  if (!nrow(collections)) {
+    return(data.table::data.table())
+  }
+
+  journals <- data.table::copy(collections)
+  data.table::setnames(journals, "collection_id", "journal_id")
+  journals
 }
 
 #' @noRd
@@ -124,9 +148,10 @@ litxr_list_journals <- function(config = NULL) {
       name = basename(normalizePath(root, winslash = "/", mustWork = FALSE)),
       data_root = "data/literature"
     ),
-    journals = list(
+    collections = list(
       list(
-        journal_id = "journal_of_finance",
+        collection_id = "journal_of_finance",
+        collection_type = "journal",
         title = "Journal of Finance",
         remote_channel = "crossref",
         local_path = "data/literature/journal_of_finance",
@@ -142,7 +167,8 @@ litxr_list_journals <- function(config = NULL) {
         )
       ),
       list(
-        journal_id = "journal_of_financial_economics",
+        collection_id = "journal_of_financial_economics",
+        collection_type = "journal",
         title = "Journal of Financial Economics",
         remote_channel = "crossref",
         local_path = "data/literature/journal_of_financial_economics",
@@ -157,7 +183,8 @@ litxr_list_journals <- function(config = NULL) {
         )
       ),
       list(
-        journal_id = "arxiv_cs_ai",
+        collection_id = "arxiv_cs_ai",
+        collection_type = "arxiv_category",
         title = "arXiv cs.AI",
         remote_channel = "arxiv",
         local_path = "data/literature/arxiv_cs_ai",
@@ -186,19 +213,21 @@ litxr_list_journals <- function(config = NULL) {
     stop("Invalid config in ", config_path, ": expected a YAML object.", call. = FALSE)
   }
 
-  if (is.null(cfg$journals) || !length(cfg$journals)) {
-    stop("Invalid config in ", config_path, ": `journals` must contain at least one journal.", call. = FALSE)
+  cfg <- .litxr_normalize_config_schema(cfg)
+
+  if (is.null(cfg$collections) || !length(cfg$collections)) {
+    stop("Invalid config in ", config_path, ": `collections` must contain at least one collection.", call. = FALSE)
   }
 
-  required_fields <- c("journal_id", "title", "remote_channel", "local_path")
-  for (journal in cfg$journals) {
+  required_fields <- c("collection_id", "title", "remote_channel", "local_path")
+  for (collection in cfg$collections) {
     missing <- required_fields[vapply(required_fields, function(field) {
-      is.null(journal[[field]]) || !nzchar(as.character(journal[[field]]))
+      is.null(collection[[field]]) || !nzchar(as.character(collection[[field]]))
     }, logical(1))]
 
     if (length(missing)) {
       stop(
-        "Invalid config in ", config_path, ": journal entry is missing ",
+        "Invalid config in ", config_path, ": collection entry is missing ",
         paste(missing, collapse = ", "), ".",
         call. = FALSE
       )
@@ -225,11 +254,64 @@ litxr_list_journals <- function(config = NULL) {
     stop("Unable to write config: config path is missing.", call. = FALSE)
   }
 
-  out <- cfg
+  out <- .litxr_normalize_config_schema(cfg)
   attr(out, "config_root") <- NULL
   attr(out, "config_path") <- NULL
+  out$journals <- NULL
   yaml::write_yaml(out, path)
   attr(cfg, "config_root") <- dirname(path)
   attr(cfg, "config_path") <- normalizePath(path, winslash = "/", mustWork = FALSE)
   invisible(path)
+}
+
+.litxr_config_collections <- function(cfg) {
+  if (!is.null(cfg$collections)) {
+    return(cfg$collections)
+  }
+  cfg$journals
+}
+
+.litxr_normalize_config_schema <- function(cfg) {
+  if (!is.null(cfg$collections) && length(cfg$collections)) {
+    collections <- lapply(cfg$collections, .litxr_normalize_collection_entry)
+  } else if (!is.null(cfg$journals) && length(cfg$journals)) {
+    collections <- lapply(cfg$journals, .litxr_collection_from_legacy_journal)
+  } else {
+    collections <- list()
+  }
+
+  cfg$collections <- collections
+  cfg$journals <- lapply(collections, .litxr_collection_to_legacy_journal)
+  cfg
+}
+
+.litxr_collection_from_legacy_journal <- function(journal) {
+  collection <- journal
+  collection$collection_id <- if (!is.null(journal$journal_id)) journal$journal_id else journal$collection_id
+  collection$collection_type <- if (!is.null(journal$collection_type)) {
+    journal$collection_type
+  } else if (identical(journal$remote_channel, "arxiv")) {
+    "arxiv_category"
+  } else {
+    "journal"
+  }
+  collection$journal_id <- NULL
+  collection
+}
+
+.litxr_collection_to_legacy_journal <- function(collection) {
+  journal <- collection
+  journal$journal_id <- collection$collection_id
+  journal
+}
+
+.litxr_normalize_collection_entry <- function(collection) {
+  out <- collection
+  if (is.null(out$collection_id) && !is.null(out$journal_id)) {
+    out$collection_id <- out$journal_id
+  }
+  if (is.null(out$collection_type) || !nzchar(as.character(out$collection_type))) {
+    out$collection_type <- if (identical(out$remote_channel, "arxiv")) "arxiv_category" else "journal"
+  }
+  out
 }

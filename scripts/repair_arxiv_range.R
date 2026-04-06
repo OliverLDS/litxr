@@ -18,6 +18,11 @@ parse_args <- function(args) {
       i <- i + 1L
       next
     }
+    if (identical(name, "force")) {
+      out$force <- TRUE
+      i <- i + 1L
+      next
+    }
 
     if (i == length(args)) {
       stop("Missing value for argument: ", key, call. = FALSE)
@@ -34,12 +39,14 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/repair_arxiv_range.R --journal-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 [--page-size 200] [--sleep-seconds 10] [--search-query 'cat:cs.AI']",
+      "  Rscript scripts/repair_arxiv_range.R --collection-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 [--page-size 200] [--sleep-seconds 10] [--search-query 'cat:cs.AI'] [--force]",
       "",
       "Notes:",
       "  - LITXR_CONFIG must be set in the environment.",
       "  - The script iterates day by day, paginates within each day with `start`,",
-      "    and rebuilds the journal index at the end.",
+      "    records successful days in the project sync ledger, and rebuilds the",
+      "    collection index at the end.",
+      "  - `--journal-id` still works as a compatibility alias.",
       sep = "\n"
     )
   )
@@ -60,9 +67,14 @@ if (isTRUE(parsed$help)) {
   quit(save = "no", status = 0L)
 }
 
-if (is.null(parsed[["journal-id"]]) || !nzchar(parsed[["journal-id"]])) {
+collection_id <- parsed[["collection-id"]]
+if (is.null(collection_id) || !nzchar(collection_id)) {
+  collection_id <- parsed[["journal-id"]]
+}
+
+if (is.null(collection_id) || !nzchar(collection_id)) {
   usage()
-  stop("`--journal-id` is required.", call. = FALSE)
+  stop("`--collection-id` is required.", call. = FALSE)
 }
 if (is.null(parsed[["date-from"]]) || is.null(parsed[["date-to"]])) {
   usage()
@@ -95,16 +107,18 @@ if (requireNamespace("pkgload", quietly = TRUE)) {
 }
 
 cfg <- litxr_read_config()
-journal <- litxr:::.litxr_get_journal(cfg, parsed[["journal-id"]])
+journal <- litxr:::.litxr_get_journal(cfg, collection_id)
 if (!identical(journal$remote_channel, "arxiv")) {
-  stop("This script only supports arXiv journals.", call. = FALSE)
+  stop("This script only supports arXiv collections.", call. = FALSE)
 }
+range_started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
 
 base_query <- if (is.null(parsed[["search-query"]])) {
   journal$sync$search_query
 } else {
   parsed[["search-query"]]
 }
+sync_state <- litxr_read_sync_state(cfg, collection_id)
 
 local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
 day_seq <- seq(date_from, date_to, by = "day")
@@ -113,7 +127,26 @@ total_incoming <- 0L
 for (i in seq_along(day_seq)) {
   day <- day_seq[[i]]
   day_text <- format(as.Date(day, origin = "1970-01-01"), "%Y-%m-%d")
+  day_done <- !isTRUE(parsed$force) &&
+    nrow(sync_state) &&
+    any(
+      sync_state$collection_id == collection_id &
+        sync_state$remote_channel == "arxiv" &
+        sync_state$sync_type == "repair_range_day" &
+        sync_state$status == "success" &
+        sync_state$range_from == day_text &
+        sync_state$range_to == day_text &
+        sync_state$query == base_query
+    )
+
+  if (day_done) {
+    cat(sprintf("date=%s skipped=already_completed\n", day_text))
+    next
+  }
+
+  day_started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
   start <- 0L
+  day_total <- 0L
 
   repeat {
     day_journal <- journal
@@ -140,9 +173,10 @@ for (i in seq_along(day_seq)) {
 
     existing <- litxr:::.litxr_read_journal_records(local_path)
     records <- litxr:::.litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-    litxr:::.litxr_write_journal_records(records, local_path, day_journal)
+    litxr:::.litxr_write_journal_records(records, local_path, day_journal, cfg = cfg)
 
     total_incoming <- total_incoming + page_n
+    day_total <- day_total + page_n
 
     if (page_n < page_size) {
       break
@@ -157,13 +191,47 @@ for (i in seq_along(day_seq)) {
   if (sleep_seconds > 0) {
     Sys.sleep(sleep_seconds)
   }
+
+  litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
+    collection_id = collection_id,
+    remote_channel = "arxiv",
+    sync_type = "repair_range_day",
+    status = "success",
+    started_at = day_started_at,
+    completed_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+    query = base_query,
+    range_from = day_text,
+    range_to = day_text,
+    page_start = 0L,
+    page_size = page_size,
+    records_fetched = day_total,
+    records_after = NA_integer_,
+    notes = ""
+  ))
 }
 
-litxr_rebuild_journal_index(parsed[["journal-id"]], cfg)
+litxr_rebuild_collection_index(collection_id, cfg)
+
+litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
+  collection_id = collection_id,
+  remote_channel = "arxiv",
+  sync_type = "repair_range",
+  status = "success",
+  started_at = range_started_at,
+  completed_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+  query = base_query,
+  range_from = format(date_from, "%Y-%m-%d"),
+  range_to = format(date_to, "%Y-%m-%d"),
+  page_start = 0L,
+  page_size = page_size,
+  records_fetched = total_incoming,
+  records_after = NA_integer_,
+  notes = if (isTRUE(parsed$force)) "force=TRUE" else ""
+))
 
 cat(sprintf(
-  "range repair complete: journal_id=%s date_from=%s date_to=%s total_incoming=%s\n",
-  parsed[["journal-id"]],
+  "range repair complete: collection_id=%s date_from=%s date_to=%s total_incoming=%s\n",
+  collection_id,
   format(date_from, "%Y-%m-%d"),
   format(date_to, "%Y-%m-%d"),
   total_incoming

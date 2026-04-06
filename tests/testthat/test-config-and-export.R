@@ -25,9 +25,14 @@ stopifnot(identical(
 Sys.setenv(LITXR_CONFIG = config_path)
 cfg <- litxr::litxr_read_config()
 stopifnot(identical(cfg$project$name, basename(td)))
+stopifnot(length(cfg$collections) == 3L)
 journals <- litxr::litxr_list_journals(cfg)
 stopifnot(inherits(journals, "data.table"))
 stopifnot(nrow(journals) == 3L)
+collections <- litxr::litxr_list_collections(cfg)
+stopifnot(inherits(collections, "data.table"))
+stopifnot(nrow(collections) == 3L)
+stopifnot(identical(collections$collection_type[[1]], "journal"))
 stopifnot(inherits(try(litxr::litxr_init(), silent = TRUE), "try-error"))
 
 tab_cfg_path <- file.path(td, ".litxr", "tab-config.yaml")
@@ -45,6 +50,7 @@ writeLines(c(
 tab_cfg <- litxr::litxr_read_config(tab_cfg_path)
 stopifnot(identical(tab_cfg$project$name, "bad_tabs"))
 stopifnot(identical(tab_cfg$journals[[1]]$journal_id, "journal_of_finance"))
+stopifnot(identical(tab_cfg$collections[[1]]$collection_id, "journal_of_finance"))
 
 td_export <- tempfile("litxr-test-")
 dir.create(td_export)
@@ -90,14 +96,27 @@ record <- data.table::data.table(
   collection_title = journal$title
 )
 
-litxr:::.litxr_write_journal_records(record, local_path, journal)
+litxr:::.litxr_write_journal_records(record, local_path, journal, cfg = cfg_export)
 stopifnot(file.exists(file.path(local_path, "index", "references.fst")))
 stopifnot(dir.exists(file.path(local_path, "llm")))
+stopifnot(file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "references.fst")))
+stopifnot(file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "reference_collections.fst")))
 
 read_back <- litxr::litxr_read_journal(journal$journal_id, cfg_export)
 stopifnot(nrow(read_back) == 1L)
 stopifnot(identical(read_back$doi[[1]], "10.1000/example"))
 stopifnot(identical(read_back$authors_list[[1]], c("Jane Doe", "John Smith")))
+
+project_refs <- litxr::litxr_read_references(cfg_export)
+stopifnot(nrow(project_refs) >= 1L)
+stopifnot(any(project_refs$ref_id == "doi:10.1000/example"))
+project_links <- litxr::litxr_read_reference_collections(cfg_export)
+stopifnot(any(project_links$ref_id == "doi:10.1000/example" & project_links$collection_id == journal$journal_id))
+
+found_jof <- litxr::litxr_find_refs(query = "example paper", config = cfg_export)
+stopifnot(any(found_jof$ref_id == "doi:10.1000/example"))
+found_jof_collection <- litxr::litxr_find_refs(collection_id = journal$journal_id, config = cfg_export)
+stopifnot(any(found_jof_collection$ref_id == "doi:10.1000/example"))
 
 index_path <- file.path(local_path, "index", "references.fst")
 file.remove(index_path)
@@ -205,4 +224,162 @@ stopifnot(identical(new_journal$metadata$issn_print, "1234-5678"))
 stopifnot(file.exists(attr(cfg_registered, "config_path", exact = TRUE)))
 
 cfg_reloaded <- litxr::litxr_read_config(attr(cfg_registered, "config_path", exact = TRUE))
-stopifnot(any(vapply(cfg_reloaded$journals, `[[`, character(1), "journal_id") == new_journal$journal_id))
+stopifnot(any(vapply(cfg_reloaded$collections, `[[`, character(1), "collection_id") == new_journal$collection_id))
+
+manual_refs <- data.table::data.table(
+  source = "book",
+  entry_type = "book",
+  title = "Manual Book",
+  authors = "Jane Doe",
+  year = 2024L,
+  publisher = "Example Press",
+  isbn = "9780262046305",
+  url = "https://example.org/manual-book"
+)
+
+manual_added <- litxr::litxr_add_refs(
+  manual_refs,
+  collection_id = "manual_books",
+  config = cfg_export,
+  auto_register = TRUE,
+  collection_title = "Manual Books"
+)
+stopifnot(nrow(manual_added) == 1L)
+stopifnot(identical(manual_added$ref_id[[1]], "isbn:9780262046305"))
+
+cfg_manual <- litxr::litxr_read_config(attr(cfg_export, "config_path", exact = TRUE))
+stopifnot(any(vapply(cfg_manual$collections, `[[`, character(1), "collection_id") == "manual_books"))
+
+manual_read <- litxr::litxr_read_collection("manual_books", cfg_manual)
+stopifnot(nrow(manual_read) == 1L)
+stopifnot(identical(manual_read$entry_type[[1]], "book"))
+stopifnot(identical(manual_read$isbn[[1]], "9780262046305"))
+
+project_refs_manual <- litxr::litxr_read_references(cfg_manual)
+stopifnot(any(project_refs_manual$ref_id == "isbn:9780262046305"))
+project_links_manual <- litxr::litxr_read_reference_collections(cfg_manual)
+stopifnot(any(project_links_manual$ref_id == "isbn:9780262046305" & project_links_manual$collection_id == "manual_books"))
+
+found_manual_book <- litxr::litxr_find_refs(entry_type = "book", collection_id = "manual_books", config = cfg_manual)
+stopifnot(any(found_manual_book$ref_id == "isbn:9780262046305"))
+
+manual_bib_path <- file.path(td_export, "manual_books.bib")
+litxr::litxr_export_bib(manual_bib_path, journal_ids = "manual_books", config = cfg_manual)
+manual_bib <- paste(readLines(manual_bib_path, warn = FALSE), collapse = "\n")
+stopifnot(grepl("@book\\{9780262046305,", manual_bib))
+
+llm_path <- litxr::litxr_write_llm_digest(
+  "isbn:9780262046305",
+  list(
+    summary = "A concise summary of the manual book.",
+    motivation = "Understand manual reference ingestion.",
+    key_findings = c("Manual books can be stored.", "Digests are searchable."),
+    keywords = c("manual", "book", "ingestion")
+  ),
+  config = cfg_manual
+)
+stopifnot(file.exists(llm_path))
+
+llm_one <- litxr::litxr_read_llm_digest("isbn:9780262046305", cfg_manual)
+stopifnot(identical(llm_one$ref_id, "isbn:9780262046305"))
+stopifnot(identical(llm_one$motivation, "Understand manual reference ingestion."))
+
+llm_all <- litxr::litxr_read_llm_digests(cfg_manual)
+stopifnot(any(llm_all$ref_id == "isbn:9780262046305"))
+
+llm_found <- litxr::litxr_find_llm(query = "searchable", collection_id = "manual_books", config = cfg_manual)
+stopifnot(any(llm_found$ref_id == "isbn:9780262046305"))
+
+md_path <- litxr::litxr_write_md(
+  "isbn:9780262046305",
+  "# Manual Book\n\nThis markdown captures the full-text derivative.",
+  config = cfg_manual
+)
+stopifnot(file.exists(md_path))
+md_text <- litxr::litxr_read_md("isbn:9780262046305", cfg_manual)
+stopifnot(grepl("full-text derivative", md_text, fixed = TRUE))
+
+stopifnot(isTRUE(litxr::litxr_validate_llm_digest(llm_one)))
+
+status <- litxr::litxr_read_enrichment_status(cfg_manual)
+status_one <- status[status$ref_id == "isbn:9780262046305", ]
+stopifnot(nrow(status_one) == 1L)
+stopifnot(isTRUE(status_one$has_md[[1]]))
+stopifnot(isTRUE(status_one$has_llm_digest[[1]]))
+
+candidates_manual <- litxr::litxr_list_enrichment_candidates(config = cfg_manual, collection_id = "manual_books")
+candidate_one <- candidates_manual[candidates_manual$ref_id == "isbn:9780262046305", ]
+stopifnot(nrow(candidate_one) == 1L)
+stopifnot(isTRUE(candidate_one$eligible[[1]]) == FALSE)
+stopifnot(identical(candidate_one$reason[[1]], "digest_exists"))
+
+manual_refs2 <- data.table::data.table(
+  source = "report",
+  entry_type = "techreport",
+  title = "Manual Report",
+  authors = "Jane Analyst",
+  year = 2025L,
+  url = "https://example.org/manual-report"
+)
+litxr::litxr_add_refs(
+  manual_refs2,
+  collection_id = "manual_books",
+  config = cfg_manual,
+  auto_register = FALSE
+)
+candidates_after_report <- litxr::litxr_list_enrichment_candidates(config = cfg_manual, collection_id = "manual_books")
+report_row <- candidates_after_report[candidates_after_report$title == "Manual Report", ]
+stopifnot(nrow(report_row) == 1L)
+stopifnot(isFALSE(report_row$has_md[[1]]))
+stopifnot(isFALSE(report_row$eligible[[1]]))
+stopifnot(identical(report_row$reason[[1]], "missing_md"))
+
+builder_fun <- function(ref, markdown, template) {
+  list(
+    summary = paste("Built from", ref$title[[1]]),
+    motivation = "Test builder path.",
+    research_questions = c("What is the manual workflow?"),
+    methods = c("Structured parsing"),
+    key_findings = c("Builder writes a digest."),
+    limitations = c("Mock builder only."),
+    keywords = c("builder", "test"),
+    notes = markdown
+  )
+}
+
+built_one <- litxr::litxr_build_llm_digest(
+  "isbn:9780262046305",
+  builder = builder_fun,
+  config = cfg_manual,
+  overwrite = TRUE
+)
+stopifnot(identical(built_one$motivation, "Test builder path."))
+
+built_batch <- litxr::litxr_build_llm_digests(
+  builder = builder_fun,
+  config = cfg_manual,
+  ref_ids = "isbn:9780262046305",
+  overwrite = TRUE
+)
+stopifnot(identical(names(built_batch), "isbn:9780262046305"))
+
+sync_row <- litxr:::.litxr_make_sync_state_row(
+  collection_id = "manual_books",
+  remote_channel = "manual",
+  sync_type = "manual_add",
+  status = "success",
+  started_at = "2026-01-01 00:00:00 UTC",
+  completed_at = "2026-01-01 00:00:10 UTC",
+  query = NA_character_,
+  range_from = NA_character_,
+  range_to = NA_character_,
+  page_start = NA_integer_,
+  page_size = NA_integer_,
+  records_fetched = 1L,
+  records_after = 2L,
+  notes = "test"
+)
+litxr:::.litxr_append_sync_state(cfg_manual, sync_row)
+sync_state <- litxr::litxr_read_sync_state(cfg_manual, collection_id = "manual_books")
+stopifnot(nrow(sync_state) >= 1L)
+stopifnot(any(sync_state$sync_type == "manual_add"))

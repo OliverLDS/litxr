@@ -56,11 +56,15 @@ parse_arxiv_entry_unified <- function(entry) {
   
   url_landing <- href[rels == "alternate"]
   url_landing <- if (!length(url_landing)) NA_character_ else url_landing[1]
+  url <- url_landing
   
   # arXiv-specific
   doi           <- xml_text_or_na(entry, ".//*[local-name()='doi']")
+  isbn          <- NA_character_
+  issn          <- NA_character_
   arxiv_comment <- xml_text_or_na(entry, ".//*[local-name()='comment']")
   journal_ref   <- xml_text_or_na(entry, ".//*[local-name()='journal_ref']")
+  entry_type <- if (!is.na(journal_ref) && nzchar(journal_ref)) "article" else "unpublished"
   
   subject_primary <- arxiv_primary_category
   subject_all     <- arxiv_categories_raw
@@ -69,6 +73,7 @@ parse_arxiv_entry_unified <- function(entry) {
     ref_id        = paste0("arxiv:", source_id),
     source        = "arxiv",
     source_id     = source_id,
+    entry_type    = entry_type,
     
     title         = title,
     abstract      = abstract,
@@ -87,6 +92,9 @@ parse_arxiv_entry_unified <- function(entry) {
     issue         = NA_character_,
     pages         = NA_character_,
     doi           = doi,
+    isbn          = isbn,
+    issn          = issn,
+    url           = url,
     note          = NA_character_,
     
     subject_primary = subject_primary,

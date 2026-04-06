@@ -1,20 +1,21 @@
-#' Sync one configured journal
+#' Sync one configured collection
 #'
 #' Fetches records from the configured remote channel, parses them into the
 #' unified reference schema, and stores one JSON metadata file per record under
-#' the journal's local path.
+#' the collection's local path.
 #'
-#' @param journal_id Journal identifier from `config.yaml`.
+#' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return `data.table` of synced records.
 #' @export
-litxr_sync_journal <- function(journal_id, config = NULL) {
+litxr_sync_collection <- function(collection_id, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, journal_id)
+  journal <- .litxr_get_journal(cfg, collection_id)
   local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+  started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
   incoming <- switch(
     journal$remote_channel,
     crossref = .litxr_sync_crossref_journal(journal),
@@ -25,11 +26,42 @@ litxr_sync_journal <- function(journal_id, config = NULL) {
   existing <- .litxr_read_journal_records(local_path)
   records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
 
-  .litxr_write_journal_records(records, local_path, journal)
+  .litxr_write_journal_records(records, local_path, journal, cfg = cfg)
+  .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
+    collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
+    remote_channel = journal$remote_channel,
+    sync_type = "full",
+    status = "success",
+    started_at = started_at,
+    completed_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+    query = .litxr_sync_query_text(journal),
+    range_from = NA_character_,
+    range_to = NA_character_,
+    page_start = if (identical(journal$remote_channel, "arxiv")) journal$sync$start %||% 0L else NA_integer_,
+    page_size = journal$sync$rows %||% if (identical(journal$remote_channel, "crossref")) 1000L else 100L,
+    records_fetched = nrow(incoming),
+    records_after = nrow(records),
+    notes = ""
+  ))
   records
 }
 
-#' Sync all configured journals
+#' Sync one configured journal
+#'
+#' Backward-compatible wrapper around `litxr_sync_collection()`.
+#'
+#' @param journal_id Collection identifier from `config.yaml`. The argument name
+#'   is kept for backward compatibility.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of synced records.
+#' @export
+litxr_sync_journal <- function(journal_id, config = NULL) {
+  litxr_sync_collection(journal_id, config = config)
+}
+
+#' Sync all configured collections
 #'
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
@@ -39,34 +71,50 @@ litxr_sync_journal <- function(journal_id, config = NULL) {
 litxr_sync_all <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
+  collections <- .litxr_config_collections(cfg)
   stats::setNames(
-    lapply(cfg$journals, function(journal) litxr_sync_journal(journal$journal_id, cfg)),
-    vapply(cfg$journals, `[[`, character(1), "journal_id")
+    lapply(collections, function(journal) litxr_sync_collection(journal$collection_id, cfg)),
+    vapply(collections, `[[`, character(1), "collection_id")
   )
+}
+
+#' Read locally stored records for one configured collection
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of local records.
+#' @export
+litxr_read_collection <- function(collection_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, collection_id)
+  .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
 }
 
 #' Read locally stored records for one journal
 #'
-#' @param journal_id Journal identifier from `config.yaml`.
+#' Backward-compatible wrapper around `litxr_read_collection()`.
+#'
+#' @param journal_id Collection identifier from `config.yaml`. The argument name
+#'   is kept for backward compatibility.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return `data.table` of local records.
 #' @export
 litxr_read_journal <- function(journal_id, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, journal_id)
-  .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
+  litxr_read_collection(journal_id, config = config)
 }
 
-#' Repair or incrementally fill a journal's local store
+#' Repair or incrementally fill a collection's local store
 #'
 #' Intended for bounded repair runs that should respect remote rate limits. For
 #' arXiv journals, this can narrow the sync to a submitted-date window and/or a
 #' smaller batch.
 #'
-#' @param journal_id Journal identifier from `config.yaml`.
+#' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #' @param search_query Optional replacement query for this repair run.
@@ -77,8 +125,8 @@ litxr_read_journal <- function(journal_id, config = NULL) {
 #'
 #' @return `data.table` of repaired or newly synced records.
 #' @export
-litxr_repair_journal <- function(
-  journal_id,
+litxr_repair_collection <- function(
+  collection_id,
   config = NULL,
   search_query = NULL,
   submitted_from = NULL,
@@ -88,7 +136,8 @@ litxr_repair_journal <- function(
 ) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, journal_id)
+  journal <- .litxr_get_journal(cfg, collection_id)
+  started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
 
   if (identical(journal$remote_channel, "arxiv")) {
     base_query <- if (is.null(search_query)) journal$sync$search_query else search_query
@@ -109,31 +158,99 @@ litxr_repair_journal <- function(
 
   existing <- .litxr_read_journal_records(local_path)
   records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-  .litxr_write_journal_records(records, local_path, journal)
+  .litxr_write_journal_records(records, local_path, journal, cfg = cfg)
+  .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
+    collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
+    remote_channel = journal$remote_channel,
+    sync_type = "repair",
+    status = "success",
+    started_at = started_at,
+    completed_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+    query = .litxr_sync_query_text(journal),
+    range_from = submitted_from %||% NA_character_,
+    range_to = submitted_to %||% NA_character_,
+    page_start = if (identical(journal$remote_channel, "arxiv")) journal$sync$start %||% 0L else NA_integer_,
+    page_size = journal$sync$rows %||% if (identical(journal$remote_channel, "crossref")) 1000L else 100L,
+    records_fetched = nrow(incoming),
+    records_after = nrow(records),
+    notes = ""
+  ))
   records
+}
+
+#' Repair or incrementally fill a journal's local store
+#'
+#' Backward-compatible wrapper around `litxr_repair_collection()`.
+#'
+#' @param journal_id Collection identifier from `config.yaml`. The argument name
+#'   is kept for backward compatibility.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param search_query Optional replacement query for this repair run.
+#' @param submitted_from Optional lower bound date/time for arXiv submittedDate.
+#' @param submitted_to Optional upper bound date/time for arXiv submittedDate.
+#' @param start Optional arXiv result offset for this repair run.
+#' @param limit Optional maximum number of records for this repair run.
+#'
+#' @return `data.table` of repaired or newly synced records.
+#' @export
+litxr_repair_journal <- function(
+  journal_id,
+  config = NULL,
+  search_query = NULL,
+  submitted_from = NULL,
+  submitted_to = NULL,
+  start = NULL,
+  limit = NULL
+) {
+  litxr_repair_collection(
+    journal_id,
+    config = config,
+    search_query = search_query,
+    submitted_from = submitted_from,
+    submitted_to = submitted_to,
+    start = start,
+    limit = limit
+  )
+}
+
+#' Rebuild the local collection fst index from JSON files
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the rebuilt fst index path.
+#' @export
+litxr_rebuild_collection_index <- function(collection_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, collection_id)
+  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+  records <- .litxr_read_journal_records_from_json(local_path)
+  .litxr_write_journal_index(records, local_path)
 }
 
 #' Rebuild the local journal fst index from JSON files
 #'
-#' @param journal_id Journal identifier from `config.yaml`.
+#' Backward-compatible wrapper around `litxr_rebuild_collection_index()`.
+#'
+#' @param journal_id Collection identifier from `config.yaml`. The argument name
+#'   is kept for backward compatibility.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return Invisibly returns the rebuilt fst index path.
 #' @export
 litxr_rebuild_journal_index <- function(journal_id, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, journal_id)
-  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  records <- .litxr_read_journal_records_from_json(local_path)
-  .litxr_write_journal_index(records, local_path)
+  litxr_rebuild_collection_index(journal_id, config = config)
 }
 
 #' Export local references to a BibTeX file
 #'
 #' @param output Output `.bib` file path.
-#' @param journal_ids Optional character vector of journal ids to export.
+#' @param journal_ids Optional character vector of collection ids to export. The
+#'   argument name is kept for backward compatibility.
 #' @param keys Optional character vector of record identifiers to export. Keys
 #'   are matched against `doi`, `ref_id`, or `source_id`.
 #' @param config Optional parsed config list or a direct config path. When
@@ -144,10 +261,10 @@ litxr_rebuild_journal_index <- function(journal_id, config = NULL) {
 litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  selected <- cfg$journals
+  selected <- .litxr_config_collections(cfg)
 
   if (!is.null(journal_ids)) {
-    keep <- vapply(selected, function(x) x$journal_id %in% journal_ids, logical(1))
+    keep <- vapply(selected, function(x) x$collection_id %in% journal_ids, logical(1))
     selected <- selected[keep]
   }
 
@@ -188,15 +305,620 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   invisible(output)
 }
 
-#' Add references by DOI and auto-register missing journals
+#' Read the canonical project-level reference index
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of canonical references across collections.
+#' @export
+litxr_read_references <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_project_references_index(cfg)
+}
+
+#' Read the project-level reference-collection membership index
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of `ref_id` to `collection_id` links.
+#' @export
+litxr_read_reference_collections <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_project_reference_collections_index(cfg)
+}
+
+#' Find references in the canonical project-level store
+#'
+#' Provides simple deterministic filtering over the project-level reference
+#' index, with optional collection membership filtering and substring matching.
+#'
+#' @param query Optional substring query matched against `title`, `authors`,
+#'   `journal`, `container_title`, and `url`.
+#' @param entry_type Optional BibTeX entry type filter.
+#' @param year Optional year filter.
+#' @param collection_id Optional collection membership filter.
+#' @param doi Optional DOI filter.
+#' @param ref_id Optional internal reference id filter.
+#' @param isbn Optional ISBN filter.
+#' @param issn Optional ISSN substring filter.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Filtered `data.table` of references.
+#' @export
+litxr_find_refs <- function(
+  query = NULL,
+  entry_type = NULL,
+  year = NULL,
+  collection_id = NULL,
+  doi = NULL,
+  ref_id = NULL,
+  isbn = NULL,
+  issn = NULL,
+  config = NULL
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  refs <- litxr_read_references(cfg)
+  if (!nrow(refs)) {
+    return(refs)
+  }
+
+  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+    links <- litxr_read_reference_collections(cfg)
+    keep_ref_ids <- unique(links$ref_id[links$collection_id == collection_id])
+    refs <- refs[refs$ref_id %in% keep_ref_ids, ]
+  }
+
+  if (!is.null(entry_type) && nzchar(as.character(entry_type))) {
+    refs <- refs[refs$entry_type %in% entry_type, ]
+  }
+  if (!is.null(year)) {
+    refs <- refs[refs$year %in% as.integer(year), ]
+  }
+  if (!is.null(doi) && nzchar(as.character(doi))) {
+    refs <- refs[refs$doi %in% doi, ]
+  }
+  if (!is.null(ref_id) && nzchar(as.character(ref_id))) {
+    refs <- refs[refs$ref_id %in% ref_id, ]
+  }
+  if (!is.null(isbn) && nzchar(as.character(isbn))) {
+    refs <- refs[refs$isbn %in% isbn, ]
+  }
+  if (!is.null(issn) && nzchar(as.character(issn))) {
+    refs <- refs[!is.na(refs$issn) & grepl(as.character(issn), refs$issn, fixed = TRUE), ]
+  }
+
+  if (!is.null(query) && nzchar(as.character(query))) {
+    q <- tolower(as.character(query[[1]]))
+    title <- if ("title" %in% names(refs)) refs$title else rep(NA_character_, nrow(refs))
+    authors <- if ("authors" %in% names(refs)) refs$authors else rep(NA_character_, nrow(refs))
+    journal <- if ("journal" %in% names(refs)) refs$journal else rep(NA_character_, nrow(refs))
+    container_title <- if ("container_title" %in% names(refs)) refs$container_title else rep(NA_character_, nrow(refs))
+    url <- if ("url" %in% names(refs)) refs$url else rep(NA_character_, nrow(refs))
+
+    haystack_match <- function(x) !is.na(x) & grepl(q, tolower(x), fixed = TRUE)
+    keep <- haystack_match(title) |
+      haystack_match(authors) |
+      haystack_match(journal) |
+      haystack_match(container_title) |
+      haystack_match(url)
+    refs <- refs[keep, ]
+  }
+
+  refs
+}
+
+#' Create a default structured LLM digest template
+#'
+#' @param ref_id Reference identifier.
+#'
+#' @return Named list representing the default digest schema.
+#' @export
+litxr_llm_digest_template <- function(ref_id) {
+  list(
+    ref_id = as.character(ref_id),
+    summary = NA_character_,
+    motivation = NA_character_,
+    research_questions = character(),
+    methods = character(),
+    sample = list(
+      description = NA_character_,
+      size = NA_character_,
+      period = NA_character_
+    ),
+    key_findings = character(),
+    limitations = character(),
+    keywords = character(),
+    notes = NA_character_,
+    generated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+}
+
+#' Write one LLM digest for a reference
+#'
+#' Stores a structured JSON file under the project-level `llm/` directory using
+#' `ref_id` as the canonical key.
+#'
+#' @param ref_id Reference identifier.
+#' @param digest Named list containing digest fields.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the written JSON path.
+#' @export
+litxr_write_llm_digest <- function(ref_id, digest, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  refs <- litxr_read_references(cfg)
+  if (nrow(refs) && !(ref_id %in% refs$ref_id)) {
+    warning("Reference id not found in canonical store: ", ref_id, call. = FALSE)
+  }
+
+  payload <- litxr_llm_digest_template(ref_id)
+  for (name in intersect(names(payload), names(digest))) {
+    payload[[name]] <- digest[[name]]
+  }
+  payload$ref_id <- as.character(ref_id)
+  payload$generated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  litxr_validate_llm_digest(payload)
+
+  path <- .litxr_llm_digest_path(cfg, ref_id)
+  .litxr_ensure_project_llm_dir(cfg)
+  jsonlite::write_json(payload, path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  .litxr_write_enrichment_status_index(cfg)
+  invisible(path)
+}
+
+#' Build one LLM digest from markdown
+#'
+#' Reads the canonical reference metadata and project-level markdown for one
+#' `ref_id`, then calls a user-supplied builder function that returns digest
+#' fields. The resulting digest is validated and optionally written to disk.
+#'
+#' @param ref_id Reference identifier.
+#' @param builder Function taking arguments `ref`, `markdown`, and `template`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param overwrite Whether to overwrite an existing digest.
+#' @param write Whether to write the digest to disk. If `FALSE`, returns the
+#'   validated digest without writing.
+#'
+#' @return Named list digest.
+#' @export
+litxr_build_llm_digest <- function(ref_id, builder, config = NULL, overwrite = FALSE, write = TRUE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  if (!is.function(builder)) {
+    stop("`builder` must be a function.", call. = FALSE)
+  }
+
+  existing <- litxr_read_llm_digest(ref_id, cfg)
+  if (!is.null(existing) && !isTRUE(overwrite)) {
+    stop("LLM digest already exists for ref_id: ", ref_id, ". Set `overwrite = TRUE` to replace it.", call. = FALSE)
+  }
+
+  refs <- litxr_read_references(cfg)
+  ref_match <- refs[refs$ref_id == ref_id, ]
+  if (!nrow(ref_match)) {
+    stop("Reference id not found in canonical store: ", ref_id, call. = FALSE)
+  }
+
+  markdown <- litxr_read_md(ref_id, cfg)
+  if (is.null(markdown)) {
+    stop("Markdown not found for ref_id: ", ref_id, call. = FALSE)
+  }
+
+  template <- litxr_llm_digest_template(ref_id)
+  built <- builder(ref = ref_match[1, ], markdown = markdown, template = template)
+  if (is.null(built) || !is.list(built)) {
+    stop("`builder` must return a named list of digest fields.", call. = FALSE)
+  }
+
+  payload <- template
+  for (name in intersect(names(payload), names(built))) {
+    payload[[name]] <- built[[name]]
+  }
+  payload$ref_id <- as.character(ref_id)
+  payload$generated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  litxr_validate_llm_digest(payload)
+
+  if (isTRUE(write)) {
+    litxr_write_llm_digest(ref_id, payload, cfg)
+  }
+  payload
+}
+
+#' Build LLM digests in batch for references with markdown
+#'
+#' Selects references from the enrichment status index and builds digests for
+#' those with markdown content and no digest yet, unless explicit `ref_ids` are
+#' supplied.
+#'
+#' @param builder Function taking arguments `ref`, `markdown`, and `template`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param ref_ids Optional explicit character vector of reference ids to build.
+#' @param overwrite Whether to overwrite existing digests.
+#' @param limit Optional maximum number of digests to build in this run.
+#'
+#' @return Named list of built digests.
+#' @export
+litxr_build_llm_digests <- function(builder, config = NULL, ref_ids = NULL, overwrite = FALSE, limit = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  targets <- if (!is.null(ref_ids) && length(ref_ids)) {
+    unique(as.character(ref_ids))
+  } else {
+    status <- litxr_read_enrichment_status(cfg)
+    status <- status[status$has_md & (overwrite | !status$has_llm_digest), ]
+    status$ref_id
+  }
+
+  if (!length(targets)) {
+    return(list())
+  }
+
+  if (!is.null(limit)) {
+    targets <- targets[seq_len(min(length(targets), as.integer(limit)))]
+  }
+
+  out <- stats::setNames(vector("list", length(targets)), targets)
+  for (i in seq_along(targets)) {
+    out[[i]] <- litxr_build_llm_digest(
+      ref_id = targets[[i]],
+      builder = builder,
+      config = cfg,
+      overwrite = overwrite,
+      write = TRUE
+    )
+  }
+  out
+}
+
+#' Read one LLM digest by reference id
+#'
+#' @param ref_id Reference identifier.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Named list digest, or `NULL` if not found.
+#' @export
+litxr_read_llm_digest <- function(ref_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  path <- .litxr_llm_digest_path(cfg, ref_id)
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  jsonlite::fromJSON(path, simplifyVector = FALSE)
+}
+
+#' Read all project-level LLM digests
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return `data.table` of digest summaries with selected structured fields.
+#' @export
+litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  llm_dir <- .litxr_project_llm_dir(cfg)
+  if (!dir.exists(llm_dir)) {
+    return(data.table::data.table())
+  }
+
+  files <- list.files(llm_dir, pattern = "\\.json$", full.names = TRUE)
+  if (!length(files)) {
+    return(data.table::data.table())
+  }
+
+  rows <- lapply(files, function(path) {
+    x <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+    data.table::data.table(
+      ref_id = x$ref_id %||% NA_character_,
+      summary = x$summary %||% NA_character_,
+      motivation = x$motivation %||% NA_character_,
+      research_questions = list(unlist(x$research_questions %||% character(), use.names = FALSE)),
+      methods = list(unlist(x$methods %||% character(), use.names = FALSE)),
+      key_findings = list(unlist(x$key_findings %||% character(), use.names = FALSE)),
+      limitations = list(unlist(x$limitations %||% character(), use.names = FALSE)),
+      keywords = list(unlist(x$keywords %||% character(), use.names = FALSE)),
+      notes = x$notes %||% NA_character_,
+      generated_at = x$generated_at %||% NA_character_
+    )
+  })
+
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  if (!is.null(ref_ids) && length(ref_ids)) {
+    out <- out[out$ref_id %in% ref_ids, ]
+  }
+  out
+}
+
+#' Find LLM digests by text and optional collection membership
+#'
+#' @param query Optional substring query matched across digest text fields.
+#' @param collection_id Optional collection membership filter via `ref_id`.
+#' @param ref_id Optional direct reference id filter.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Filtered `data.table` of digests.
+#' @export
+litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  digests <- litxr_read_llm_digests(cfg, ref_ids = ref_id)
+  if (!nrow(digests)) {
+    return(digests)
+  }
+
+  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+    links <- litxr_read_reference_collections(cfg)
+    keep_ref_ids <- unique(links$ref_id[links$collection_id == collection_id])
+    digests <- digests[digests$ref_id %in% keep_ref_ids, ]
+  }
+
+  if (!is.null(query) && nzchar(as.character(query))) {
+    q <- tolower(as.character(query[[1]]))
+    flat_text <- vapply(seq_len(nrow(digests)), function(i) {
+      row <- digests[i, ]
+      flatten_cell <- function(x) {
+        if (is.null(x) || length(x) == 0L) return(character())
+        if (is.list(x) && length(x) == 1L) x <- x[[1]]
+        if (is.null(x) || length(x) == 0L) return(character())
+        as.character(unlist(x, use.names = FALSE))
+      }
+      paste(
+        c(
+          flatten_cell(row$summary[[1]]),
+          flatten_cell(row$motivation[[1]]),
+          flatten_cell(row$notes[[1]]),
+          flatten_cell(row$research_questions[[1]]),
+          flatten_cell(row$methods[[1]]),
+          flatten_cell(row$key_findings[[1]]),
+          flatten_cell(row$limitations[[1]]),
+          flatten_cell(row$keywords[[1]])
+        ),
+        collapse = " "
+      )
+    }, character(1))
+    keep <- !is.na(flat_text) & grepl(q, tolower(flat_text), fixed = TRUE)
+    digests <- digests[keep, ]
+  }
+
+  digests
+}
+
+#' Write markdown content for one reference
+#'
+#' Stores markdown under the project-level `md/` directory using `ref_id` as the
+#' canonical key.
+#'
+#' @param ref_id Reference identifier.
+#' @param text Markdown text.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the written markdown path.
+#' @export
+litxr_write_md <- function(ref_id, text, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_ensure_project_md_dir(cfg)
+  path <- .litxr_md_path(cfg, ref_id)
+  writeLines(as.character(text), path, useBytes = TRUE)
+  .litxr_write_enrichment_status_index(cfg)
+  invisible(path)
+}
+
+#' Read markdown content for one reference
+#'
+#' @param ref_id Reference identifier.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Character scalar markdown text, or `NULL` if not found.
+#' @export
+litxr_read_md <- function(ref_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  path <- .litxr_md_path(cfg, ref_id)
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  paste(readLines(path, warn = FALSE), collapse = "\n")
+}
+
+#' Validate one LLM digest against the litxr schema
+#'
+#' @param digest Named list digest.
+#'
+#' @return Invisibly returns `TRUE` on success, otherwise errors.
+#' @export
+litxr_validate_llm_digest <- function(digest) {
+  required <- c(
+    "ref_id", "summary", "motivation", "research_questions", "methods",
+    "sample", "key_findings", "limitations", "keywords", "notes", "generated_at"
+  )
+  missing <- setdiff(required, names(digest))
+  if (length(missing)) {
+    stop("LLM digest is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+
+  if (!is.list(digest$sample)) {
+    stop("LLM digest field `sample` must be a named list.", call. = FALSE)
+  }
+  for (field in c("research_questions", "methods", "key_findings", "limitations", "keywords")) {
+    value <- digest[[field]]
+    if (is.list(value)) {
+      value <- unlist(value, use.names = FALSE)
+    }
+    if (!(is.character(value) || is.null(value))) {
+      stop("LLM digest field `", field, "` must be a character vector.", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+#' Read project-level enrichment status
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` with one row per reference and enrichment flags.
+#' @export
+litxr_read_enrichment_status <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_enrichment_status_index(cfg)
+}
+
+#' Read project-level sync state
+#'
+#' Returns the project sync ledger used to track completed sync and repair runs.
+#' This state lives under `project.data_root/index/` and is separate from
+#' `config.yaml`.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection filter.
+#'
+#' @return `data.table` of sync ledger rows.
+#' @export
+litxr_read_sync_state <- function(config = NULL, collection_id = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  out <- .litxr_read_sync_state_index(cfg)
+  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+    out <- out[out$collection_id == as.character(collection_id[[1]]), ]
+  }
+  out
+}
+
+#' List enrichment candidates and exclusion reasons
+#'
+#' Combines the canonical reference store, collection memberships, and
+#' enrichment status into a simple table that shows which references are ready
+#' for digest building and why others are excluded.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#' @param include_ready Whether to keep rows that are currently ready for digest
+#'   building.
+#'
+#' @return `data.table` with eligibility flags and reasons.
+#' @export
+litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL, ref_ids = NULL, include_ready = TRUE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  refs <- litxr_read_references(cfg)
+  status <- litxr_read_enrichment_status(cfg)
+  links <- litxr_read_reference_collections(cfg)
+
+  if (!nrow(refs)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      title = character(),
+      entry_type = character(),
+      collection_ids = character(),
+      has_md = logical(),
+      has_llm_digest = logical(),
+      eligible = logical(),
+      reason = character()
+    ))
+  }
+
+  collection_map <- if (nrow(links)) {
+    split_ids <- split(as.character(links$collection_id), as.character(links$ref_id))
+    data.table::data.table(
+      ref_id = names(split_ids),
+      collection_ids = vapply(
+        split_ids,
+        function(x) paste(sort(unique(x)), collapse = ","),
+        character(1)
+      )
+    )
+  } else {
+    data.table::data.table(ref_id = character(), collection_ids = character())
+  }
+
+  ref_view <- data.table::data.table(
+    ref_id = as.character(refs$ref_id),
+    title = as.character(refs$title),
+    entry_type = as.character(refs$entry_type)
+  )
+  status_view <- data.table::data.table(
+    ref_id = as.character(status$ref_id),
+    has_md = as.logical(status$has_md),
+    has_llm_digest = as.logical(status$has_llm_digest)
+  )
+
+  out <- merge(ref_view, status_view, by = "ref_id", all.x = TRUE, sort = FALSE)
+  out <- merge(out, collection_map, by = "ref_id", all.x = TRUE, sort = FALSE)
+  out$has_md[is.na(out$has_md)] <- FALSE
+  out$has_llm_digest[is.na(out$has_llm_digest)] <- FALSE
+  out$collection_ids[is.na(out$collection_ids)] <- ""
+
+  if (!is.null(ref_ids) && length(ref_ids)) {
+    keep_ids <- unique(as.character(ref_ids))
+    out <- out[out$ref_id %in% keep_ids, ]
+  }
+
+  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+    needle <- as.character(collection_id[[1]])
+    out <- out[
+      vapply(
+        strsplit(out$collection_ids, ",", fixed = TRUE),
+        function(x) needle %in% x,
+        logical(1)
+      ),
+    ]
+  }
+
+  out$eligible <- out$has_md & !out$has_llm_digest
+  out$reason <- ifelse(
+    !out$has_md,
+    "missing_md",
+    ifelse(out$has_llm_digest, "digest_exists", "ready")
+  )
+
+  if (!isTRUE(include_ready)) {
+    out <- out[!out$eligible, ]
+  }
+
+  data.table::setcolorder(
+    out,
+    c("ref_id", "title", "entry_type", "collection_ids", "has_md", "has_llm_digest", "eligible", "reason")
+  )
+  out[]
+}
+
+#' Add references by DOI and auto-register missing collections
 #'
 #' Fetches Crossref metadata for a DOI vector, writes the records into the local
-#' journal stores, and auto-registers journals in `config.yaml` when needed.
+#' collection stores, and auto-registers Crossref collections in `config.yaml`
+#' when needed.
 #'
 #' @param dois Character vector of DOIs.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
-#' @param auto_register Whether to auto-register missing journals into
+#' @param auto_register Whether to auto-register missing collections into
 #'   `config.yaml`.
 #'
 #' @return `data.table` of fetched records.
@@ -244,11 +966,66 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     incoming <- data.table::as.data.table(by_journal[[journal_id]])
     existing <- .litxr_read_journal_records(local_path)
     merged <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-    .litxr_write_journal_records(merged, local_path, journal)
+    .litxr_write_journal_records(merged, local_path, journal, cfg = cfg)
     incoming
   })
 
   data.table::rbindlist(out, fill = TRUE)
+}
+
+#' Add manually supplied references to a collection
+#'
+#' Accepts a normalized reference table and writes the rows into the target
+#' local collection store. This is the main manual-ingest path for books,
+#' reports, news, conference papers, web references, and other non-DOI sources.
+#'
+#' @param refs A `data.frame` or `data.table` of normalized reference fields.
+#' @param collection_id Target collection identifier.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param auto_register Whether to create the target collection automatically
+#'   when it does not already exist.
+#' @param collection_title Optional collection title used when auto-registering.
+#'
+#' @return `data.table` of ingested records.
+#' @export
+litxr_add_refs <- function(
+  refs,
+  collection_id,
+  config = NULL,
+  auto_register = TRUE,
+  collection_title = NULL
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  records <- .litxr_normalize_manual_refs(refs)
+  if (!nrow(records)) {
+    return(records)
+  }
+
+  collection <- tryCatch(
+    .litxr_get_journal(cfg, collection_id),
+    error = function(e) NULL
+  )
+
+  if (is.null(collection)) {
+    if (!isTRUE(auto_register)) {
+      stop("Collection not found in config: ", collection_id, call. = FALSE)
+    }
+    registered <- .litxr_register_manual_collection(cfg, collection_id, collection_title = collection_title)
+    cfg <- registered$cfg
+    collection <- registered$collection
+  }
+
+  records[["collection_id"]] <- collection$collection_id
+  records[["collection_title"]] <- collection$title
+
+  local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+  existing <- .litxr_read_journal_records(local_path)
+  merged <- .litxr_upsert_journal_records(existing, records, local_path = local_path)
+  .litxr_write_journal_records(merged, local_path, collection, cfg = cfg)
+  records
 }
 
 .litxr_filter_records_by_keys <- function(records, keys) {
@@ -277,6 +1054,144 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   out[keep, ]
 }
 
+.litxr_normalize_manual_refs <- function(refs) {
+  if (is.null(refs)) {
+    return(data.table::data.table())
+  }
+
+  out <- data.table::as.data.table(refs)
+  if (!nrow(out)) {
+    return(out)
+  }
+
+  if (!("authors_list" %in% names(out))) {
+    if ("authors" %in% names(out)) {
+      out[["authors_list"]] <- lapply(out[["authors"]], function(x) {
+        if (is.null(x) || is.na(x) || !nzchar(x)) return(character())
+        trimws(strsplit(as.character(x), ";", fixed = TRUE)[[1]])
+      })
+    } else {
+      out[["authors_list"]] <- rep(list(character()), nrow(out))
+    }
+  }
+
+  if (!("authors" %in% names(out))) {
+    out[["authors"]] <- vapply(out[["authors_list"]], function(x) {
+      paste(x, collapse = "; ")
+    }, character(1))
+  }
+
+  if (!("entry_type" %in% names(out))) {
+    out[["entry_type"]] <- if ("source" %in% names(out)) {
+      vapply(out[["source"]], .litxr_entry_type_from_source, character(1))
+    } else {
+      rep("misc", nrow(out))
+    }
+  }
+
+  if (!("source" %in% names(out))) out[["source"]] <- rep("manual", nrow(out))
+  if (!("source_id" %in% names(out))) out[["source_id"]] <- rep(NA_character_, nrow(out))
+  if (!("doi" %in% names(out))) out[["doi"]] <- rep(NA_character_, nrow(out))
+  if (!("isbn" %in% names(out))) out[["isbn"]] <- rep(NA_character_, nrow(out))
+  if (!("issn" %in% names(out))) out[["issn"]] <- rep(NA_character_, nrow(out))
+  if (!("url" %in% names(out))) out[["url"]] <- rep(NA_character_, nrow(out))
+  if (!("url_landing" %in% names(out))) out[["url_landing"]] <- out[["url"]]
+  if (!("url_pdf" %in% names(out))) out[["url_pdf"]] <- rep(NA_character_, nrow(out))
+  if (!("note" %in% names(out))) out[["note"]] <- rep(NA_character_, nrow(out))
+  if (!("abstract" %in% names(out))) out[["abstract"]] <- rep(NA_character_, nrow(out))
+  if (!("subject_primary" %in% names(out))) out[["subject_primary"]] <- rep(NA_character_, nrow(out))
+  if (!("subject_all" %in% names(out))) out[["subject_all"]] <- rep(NA_character_, nrow(out))
+  if (!("journal" %in% names(out))) out[["journal"]] <- rep(NA_character_, nrow(out))
+  if (!("container_title" %in% names(out))) out[["container_title"]] <- rep(NA_character_, nrow(out))
+  if (!("publisher" %in% names(out))) out[["publisher"]] <- rep(NA_character_, nrow(out))
+  if (!("volume" %in% names(out))) out[["volume"]] <- rep(NA_character_, nrow(out))
+  if (!("issue" %in% names(out))) out[["issue"]] <- rep(NA_character_, nrow(out))
+  if (!("pages" %in% names(out))) out[["pages"]] <- rep(NA_character_, nrow(out))
+  if (!("arxiv_version" %in% names(out))) out[["arxiv_version"]] <- rep(NA_integer_, nrow(out))
+  if (!("arxiv_primary_category" %in% names(out))) out[["arxiv_primary_category"]] <- rep(NA_character_, nrow(out))
+  if (!("arxiv_categories_raw" %in% names(out))) out[["arxiv_categories_raw"]] <- rep("", nrow(out))
+  if (!("arxiv_comment" %in% names(out))) out[["arxiv_comment"]] <- rep(NA_character_, nrow(out))
+  if (!("arxiv_journal_ref" %in% names(out))) out[["arxiv_journal_ref"]] <- rep(NA_character_, nrow(out))
+  if (!("raw_entry" %in% names(out))) out[["raw_entry"]] <- rep(list(NULL), nrow(out))
+
+  if (!("pub_date" %in% names(out))) {
+    out[["pub_date"]] <- as.POSIXct(rep(NA_character_, nrow(out)), tz = "UTC")
+  }
+  if (!inherits(out[["pub_date"]], "POSIXct")) {
+    out[["pub_date"]] <- as.POSIXct(out[["pub_date"]], tz = "UTC")
+  }
+
+  if (!("year" %in% names(out))) out[["year"]] <- rep(NA_integer_, nrow(out))
+  if (!("month" %in% names(out))) out[["month"]] <- rep(NA_integer_, nrow(out))
+  if (!("day" %in% names(out))) out[["day"]] <- rep(NA_integer_, nrow(out))
+
+  need_date_parts <- !is.na(out[["pub_date"]])
+  out[["year"]][need_date_parts & is.na(out[["year"]])] <- as.integer(format(out[["pub_date"]][need_date_parts & is.na(out[["year"]])], "%Y"))
+  out[["month"]][need_date_parts & is.na(out[["month"]])] <- as.integer(format(out[["pub_date"]][need_date_parts & is.na(out[["month"]])], "%m"))
+  out[["day"]][need_date_parts & is.na(out[["day"]])] <- as.integer(format(out[["pub_date"]][need_date_parts & is.na(out[["day"]])], "%d"))
+
+  if (!("ref_id" %in% names(out))) out[["ref_id"]] <- rep(NA_character_, nrow(out))
+
+  for (i in seq_len(nrow(out))) {
+    if (is.na(out$source_id[[i]]) || !nzchar(out$source_id[[i]])) {
+      out$source_id[[i]] <- .litxr_manual_source_id(out[i, ])
+    }
+    if (is.na(out$ref_id[[i]]) || !nzchar(out$ref_id[[i]])) {
+      out$ref_id[[i]] <- .litxr_manual_ref_id(out[i, ])
+    }
+  }
+
+  out
+}
+
+.litxr_manual_source_id <- function(row) {
+  doi <- row[["doi"]]
+  isbn <- row[["isbn"]]
+  url <- row[["url"]]
+  title <- row[["title"]]
+  year <- row[["year"]]
+
+  if (!is.na(doi) && nzchar(doi)) return(doi)
+  if (!is.na(isbn) && nzchar(isbn)) return(isbn)
+  if (!is.na(url) && nzchar(url)) return(url)
+
+  slug <- gsub("[^A-Za-z0-9]+", "", substr(ifelse(is.na(title), "ref", title), 1, 24))
+  paste0("manual_", ifelse(is.na(year), "na", year), "_", slug)
+}
+
+.litxr_manual_ref_id <- function(row) {
+  doi <- row[["doi"]]
+  isbn <- row[["isbn"]]
+  url <- row[["url"]]
+  source <- row[["source"]]
+  source_id <- row[["source_id"]]
+
+  if (!is.na(doi) && nzchar(doi)) return(paste0("doi:", doi))
+  if (!is.na(isbn) && nzchar(isbn)) return(paste0("isbn:", isbn))
+  if (!is.na(url) && nzchar(url)) return(paste0("url:", url))
+  paste0(source, ":", source_id)
+}
+
+.litxr_register_manual_collection <- function(cfg, collection_id, collection_title = NULL) {
+  title <- if (is.null(collection_title) || !nzchar(collection_title)) collection_id else collection_title
+  collection <- list(
+    collection_id = collection_id,
+    collection_type = "manual_batch",
+    title = title,
+    remote_channel = "manual",
+    local_path = file.path(cfg$project$data_root, collection_id),
+    metadata = list(),
+    sync = list()
+  )
+
+  collections <- .litxr_config_collections(cfg)
+  collections[[length(collections) + 1L]] <- collection
+  cfg$collections <- collections
+  cfg <- .litxr_normalize_config_schema(cfg)
+  .litxr_write_config(cfg)
+  list(cfg = cfg, collection = collection)
+}
+
 .litxr_assign_crossref_journals <- function(cfg, records, messages, auto_register = TRUE) {
   out_cfg <- cfg
   out_records <- data.table::copy(records)
@@ -299,7 +1214,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
       journal <- registered$journal
     }
 
-    out_records$collection_id[[i]] <- journal$journal_id
+    out_records$collection_id[[i]] <- journal$collection_id
     out_records$collection_title[[i]] <- journal$title
   }
 
@@ -310,7 +1225,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   journal_title <- .litxr_crossref_journal_title(cr_message)
   issns <- .litxr_crossref_issns(cr_message)
 
-  for (journal in cfg$journals) {
+  for (journal in .litxr_config_collections(cfg)) {
     if (!identical(journal$remote_channel, "crossref")) next
     title_match <- !is.na(journal_title) && identical(journal$title, journal_title)
     issn_match <- length(intersect(.litxr_journal_issns(journal), issns)) > 0
@@ -338,7 +1253,8 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   }
 
   journal <- list(
-    journal_id = journal_id,
+    collection_id = journal_id,
+    collection_type = "journal",
     title = journal_title,
     remote_channel = "crossref",
     local_path = local_path,
@@ -350,7 +1266,10 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     )
   )
 
-  cfg$journals[[length(cfg$journals) + 1L]] <- journal
+  collections <- .litxr_config_collections(cfg)
+  collections[[length(collections) + 1L]] <- journal
+  cfg$collections <- collections
+  cfg <- .litxr_normalize_config_schema(cfg)
   .litxr_write_config(cfg)
   list(cfg = cfg, journal = journal)
 }
@@ -404,7 +1323,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
 }
 
 .litxr_unique_journal_id <- function(cfg, base_id) {
-  existing_ids <- vapply(cfg$journals, `[[`, character(1), "journal_id")
+  existing_ids <- vapply(.litxr_config_collections(cfg), `[[`, character(1), "collection_id")
   if (!(base_id %in% existing_ids)) {
     return(base_id)
   }
@@ -420,9 +1339,10 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
 }
 
 .litxr_get_journal <- function(cfg, journal_id) {
-  matches <- Filter(function(x) identical(x$journal_id, journal_id), cfg$journals)
+  collections <- .litxr_config_collections(cfg)
+  matches <- Filter(function(x) identical(x$collection_id, journal_id) || identical(x$journal_id, journal_id), collections)
   if (!length(matches)) {
-    stop("Journal not found in config: ", journal_id, call. = FALSE)
+    stop("Collection not found in config: ", journal_id, call. = FALSE)
   }
   matches[[1]]
 }
@@ -446,7 +1366,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
 
   rows <- lapply(items, function(item) {
     row <- parse_crossref_entry_unified(item)
-    row[["collection_id"]] <- journal$journal_id
+    row[["collection_id"]] <- if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id
     row[["collection_title"]] <- journal$title
     row
   })
@@ -498,7 +1418,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
 
   rows <- lapply(entries, function(entry) {
     row <- parse_arxiv_entry_unified(entry)
-    row[["collection_id"]] <- journal$journal_id
+    row[["collection_id"]] <- if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id
     row[["collection_title"]] <- journal$title
     row
   })
@@ -766,10 +1686,15 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   data.table::as.data.table(values)
 }
 
-.litxr_write_upsert_conflicts <- function(conflicts, local_path) {
+.litxr_write_upsert_conflicts <- function(conflicts, local_path = NULL, conflict_path = NULL) {
   if (!length(conflicts$rows)) return(invisible(NULL))
 
-  conflict_path <- file.path(local_path, "json", "_upsert_conflicts.jsonl")
+  if (is.null(conflict_path)) {
+    if (is.null(local_path)) {
+      stop("Either `local_path` or `conflict_path` must be supplied.", call. = FALSE)
+    }
+    conflict_path <- file.path(local_path, "json", "_upsert_conflicts.jsonl")
+  }
   lines <- vapply(conflicts$rows, function(row) {
     jsonlite::toJSON(as.list(row), auto_unbox = TRUE, null = "null")
   }, character(1))
@@ -778,7 +1703,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   invisible(conflict_path)
 }
 
-.litxr_upsert_journal_records <- function(existing, incoming, local_path) {
+.litxr_upsert_records <- function(existing, incoming, conflict_path = NULL) {
   if (!nrow(existing)) {
     return(.litxr_prefer_complete_records(incoming))
   }
@@ -805,14 +1730,23 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     .litxr_merge_record_row(existing[existing_idx, ], incoming[incoming_idx, ], key, conflicts)
   })
 
-  .litxr_write_upsert_conflicts(conflicts, local_path)
+  .litxr_write_upsert_conflicts(conflicts, conflict_path = conflict_path)
   data.table::rbindlist(merged, fill = TRUE)
 }
 
-.litxr_write_journal_records <- function(records, local_path, journal) {
+.litxr_upsert_journal_records <- function(existing, incoming, local_path) {
+  .litxr_upsert_records(
+    existing,
+    incoming,
+    conflict_path = file.path(local_path, "json", "_upsert_conflicts.jsonl")
+  )
+}
+
+.litxr_write_journal_records <- function(records, local_path, journal, cfg = NULL) {
   paths <- .litxr_ensure_journal_dirs(local_path)
   if (!nrow(records)) {
     .litxr_write_journal_index(records, local_path)
+    if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
     return(invisible(character()))
   }
 
@@ -825,6 +1759,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   }), use.names = FALSE)
 
   .litxr_write_journal_index(records, local_path)
+  if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
   invisible(written)
 }
 
@@ -933,6 +1868,291 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   .litxr_index_decode(fst::read_fst(index_path, as.data.table = TRUE))
 }
 
+.litxr_project_root <- function(cfg) {
+  .litxr_resolve_local_path(cfg, cfg$project$data_root)
+}
+
+`%||%` <- function(x, y) {
+  if (is.null(x)) y else x
+}
+
+.litxr_project_index_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "index")
+}
+
+.litxr_project_llm_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "llm")
+}
+
+.litxr_project_md_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "md")
+}
+
+.litxr_project_references_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "references.fst")
+}
+
+.litxr_project_reference_collections_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "reference_collections.fst")
+}
+
+.litxr_sync_state_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "sync_state.fst")
+}
+
+.litxr_ensure_project_index_dir <- function(cfg) {
+  dir_path <- .litxr_project_index_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
+.litxr_ensure_project_llm_dir <- function(cfg) {
+  dir_path <- .litxr_project_llm_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
+.litxr_ensure_project_md_dir <- function(cfg) {
+  dir_path <- .litxr_project_md_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
+.litxr_llm_digest_path <- function(cfg, ref_id) {
+  file.path(.litxr_project_llm_dir(cfg), paste0(.litxr_record_slug(data.table::data.table(ref_id = ref_id, doi = NA_character_)), ".json"))
+}
+
+.litxr_md_path <- function(cfg, ref_id) {
+  file.path(.litxr_project_md_dir(cfg), paste0(.litxr_record_slug(data.table::data.table(ref_id = ref_id, doi = NA_character_)), ".md"))
+}
+
+.litxr_enrichment_status_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "enrichment_status.fst")
+}
+
+.litxr_empty_sync_state <- function() {
+  data.table::data.table(
+    collection_id = character(),
+    remote_channel = character(),
+    sync_type = character(),
+    status = character(),
+    started_at = character(),
+    completed_at = character(),
+    query = character(),
+    range_from = character(),
+    range_to = character(),
+    page_start = integer(),
+    page_size = integer(),
+    records_fetched = integer(),
+    records_after = integer(),
+    notes = character()
+  )
+}
+
+.litxr_make_sync_state_row <- function(
+  collection_id,
+  remote_channel,
+  sync_type,
+  status,
+  started_at,
+  completed_at,
+  query = NA_character_,
+  range_from = NA_character_,
+  range_to = NA_character_,
+  page_start = NA_integer_,
+  page_size = NA_integer_,
+  records_fetched = NA_integer_,
+  records_after = NA_integer_,
+  notes = NA_character_
+) {
+  data.table::data.table(
+    collection_id = as.character(collection_id %||% NA_character_),
+    remote_channel = as.character(remote_channel %||% NA_character_),
+    sync_type = as.character(sync_type %||% NA_character_),
+    status = as.character(status %||% NA_character_),
+    started_at = as.character(started_at %||% NA_character_),
+    completed_at = as.character(completed_at %||% NA_character_),
+    query = as.character(query %||% NA_character_),
+    range_from = as.character(range_from %||% NA_character_),
+    range_to = as.character(range_to %||% NA_character_),
+    page_start = as.integer(page_start %||% NA_integer_),
+    page_size = as.integer(page_size %||% NA_integer_),
+    records_fetched = as.integer(records_fetched %||% NA_integer_),
+    records_after = as.integer(records_after %||% NA_integer_),
+    notes = as.character(notes %||% NA_character_)
+  )
+}
+
+.litxr_read_sync_state_index <- function(cfg) {
+  path <- .litxr_sync_state_index_path(cfg)
+  if (!file.exists(path)) {
+    return(.litxr_empty_sync_state())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_write_sync_state_index <- function(cfg, rows) {
+  .litxr_ensure_project_index_dir(cfg)
+  if (is.null(rows) || !nrow(rows)) {
+    rows <- .litxr_empty_sync_state()
+  }
+  fst::write_fst(as.data.frame(rows), .litxr_sync_state_index_path(cfg))
+  invisible(.litxr_sync_state_index_path(cfg))
+}
+
+.litxr_append_sync_state <- function(cfg, row) {
+  existing <- .litxr_read_sync_state_index(cfg)
+  incoming <- if (is.null(row) || !nrow(row)) .litxr_empty_sync_state() else row
+  merged <- data.table::rbindlist(list(existing, incoming), fill = TRUE)
+  .litxr_write_sync_state_index(cfg, merged)
+}
+
+.litxr_sync_query_text <- function(journal) {
+  if (identical(journal$remote_channel, "arxiv")) {
+    return(as.character(journal$sync$search_query %||% NA_character_))
+  }
+  if (identical(journal$remote_channel, "crossref")) {
+    issns <- .litxr_journal_issns(journal)
+    if (!length(issns)) return(NA_character_)
+    return(paste(issns, collapse = ","))
+  }
+  NA_character_
+}
+
+.litxr_build_enrichment_status_index <- function(cfg) {
+  refs <- .litxr_read_project_references_index(cfg)
+  if (!nrow(refs)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      has_md = logical(),
+      has_llm_digest = logical(),
+      updated_at = character()
+    ))
+  }
+
+  md_dir <- .litxr_project_md_dir(cfg)
+  llm_dir <- .litxr_project_llm_dir(cfg)
+
+  status <- data.table::data.table(
+    ref_id = refs$ref_id,
+    has_md = vapply(refs$ref_id, function(x) file.exists(.litxr_md_path(cfg, x)), logical(1)),
+    has_llm_digest = vapply(refs$ref_id, function(x) file.exists(.litxr_llm_digest_path(cfg, x)), logical(1)),
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+
+  status
+}
+
+.litxr_write_enrichment_status_index <- function(cfg) {
+  .litxr_ensure_project_index_dir(cfg)
+  status <- .litxr_build_enrichment_status_index(cfg)
+  fst::write_fst(as.data.frame(status), .litxr_enrichment_status_index_path(cfg))
+  invisible(.litxr_enrichment_status_index_path(cfg))
+}
+
+.litxr_read_enrichment_status_index <- function(cfg) {
+  path <- .litxr_enrichment_status_index_path(cfg)
+  if (!file.exists(path)) {
+    .litxr_write_enrichment_status_index(cfg)
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_project_reference_columns <- function(records) {
+  setdiff(names(records), c("collection_id", "collection_title"))
+}
+
+.litxr_project_references_from_collection_records <- function(records) {
+  if (!nrow(records)) {
+    return(data.table::data.table())
+  }
+  cols <- .litxr_project_reference_columns(records)
+  data.table::copy(records)[, cols, with = FALSE]
+}
+
+.litxr_project_reference_links_from_collection_records <- function(records, journal) {
+  if (!nrow(records)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      collection_id = character(),
+      collection_title = character(),
+      recorded_at = character()
+    ))
+  }
+
+  collection_id <- if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id
+  links <- data.table::data.table(
+    ref_id = records$ref_id,
+    collection_id = collection_id,
+    collection_title = journal$title,
+    recorded_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+  links[!duplicated(links$ref_id), ]
+}
+
+.litxr_read_project_references_index <- function(cfg) {
+  path <- .litxr_project_references_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
+}
+
+.litxr_write_project_references_index <- function(cfg, records) {
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(.litxr_index_encode(records)), .litxr_project_references_index_path(cfg))
+  invisible(.litxr_project_references_index_path(cfg))
+}
+
+.litxr_read_project_reference_collections_index <- function(cfg) {
+  path <- .litxr_project_reference_collections_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_write_project_reference_collections_index <- function(cfg, links) {
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(links), .litxr_project_reference_collections_index_path(cfg))
+  invisible(.litxr_project_reference_collections_index_path(cfg))
+}
+
+.litxr_update_project_indexes <- function(cfg, journal, records) {
+  .litxr_ensure_project_index_dir(cfg)
+
+  incoming_refs <- .litxr_project_references_from_collection_records(records)
+  existing_refs <- .litxr_read_project_references_index(cfg)
+  merged_refs <- .litxr_upsert_records(
+    existing_refs,
+    incoming_refs,
+    conflict_path = file.path(.litxr_project_index_dir(cfg), "_reference_conflicts.jsonl")
+  )
+  .litxr_write_project_references_index(cfg, merged_refs)
+
+  existing_links <- .litxr_read_project_reference_collections_index(cfg)
+  incoming_links <- .litxr_project_reference_links_from_collection_records(records, journal)
+  if (!nrow(incoming_links)) {
+    merged_links <- existing_links
+  } else if (nrow(existing_links)) {
+    keep_old <- !(existing_links$collection_id == incoming_links$collection_id[[1]] &
+      existing_links$ref_id %in% incoming_links$ref_id)
+    merged_links <- data.table::rbindlist(list(existing_links[keep_old, ], incoming_links), fill = TRUE)
+  } else {
+    merged_links <- incoming_links
+  }
+  link_key <- paste(merged_links$ref_id, merged_links$collection_id, sep = "\r")
+  merged_links <- merged_links[!duplicated(link_key), ]
+  .litxr_write_project_reference_collections_index(cfg, merged_links)
+  invisible(NULL)
+}
+
 .litxr_row_to_storage_payload <- function(row, journal) {
   values <- stats::setNames(lapply(names(row), function(name) row[[name]]), names(row))
   values$authors_list <- unname(values$authors_list[[1]])
@@ -943,7 +2163,8 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   }
   values$raw_entry <- .litxr_serialize_raw_entry(values$raw_entry)
   values$journal_config <- list(
-    journal_id = journal$journal_id,
+    collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
+    collection_type = journal$collection_type,
     title = journal$title,
     remote_channel = journal$remote_channel
   )

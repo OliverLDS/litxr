@@ -2,7 +2,7 @@
 % Please edit documentation in R/sync.R
 \name{litxr_sync_all}
 \alias{litxr_sync_all}
-\title{Sync all configured journals}
+\title{Sync all configured collections}
 \usage{
 litxr_sync_all(config = NULL)
 }
@@ -14,5 +14,5 @@ omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 Named list of synced \code{data.table}s.
 }
 \description{
-Sync all configured journals
+Sync all configured collections
 }

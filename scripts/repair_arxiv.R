@@ -34,11 +34,12 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/repair_arxiv.R --journal-id arxiv_cs_ai [--submitted-from YYYY-MM-DD] [--submitted-to YYYY-MM-DD] [--start 0] [--limit 500] [--search-query 'cat:cs.AI']",
+      "  Rscript scripts/repair_arxiv.R --collection-id arxiv_cs_ai [--submitted-from YYYY-MM-DD] [--submitted-to YYYY-MM-DD] [--start 0] [--limit 500] [--search-query 'cat:cs.AI']",
       "",
       "Notes:",
       "  - LITXR_CONFIG must be set in the environment.",
-      "  - This script calls litxr_repair_journal() and then litxr_rebuild_journal_index().",
+      "  - This script calls litxr_repair_collection() and then litxr_rebuild_collection_index().",
+      "  - `--journal-id` still works as a compatibility alias.",
       sep = "\n"
     )
   )
@@ -51,9 +52,14 @@ if (isTRUE(parsed$help)) {
   quit(save = "no", status = 0L)
 }
 
-if (is.null(parsed[["journal-id"]]) || !nzchar(parsed[["journal-id"]])) {
+collection_id <- parsed[["collection-id"]]
+if (is.null(collection_id) || !nzchar(collection_id)) {
+  collection_id <- parsed[["journal-id"]]
+}
+
+if (is.null(collection_id) || !nzchar(collection_id)) {
   usage()
-  stop("`--journal-id` is required.", call. = FALSE)
+  stop("`--collection-id` is required.", call. = FALSE)
 }
 
 script_arg <- commandArgs(trailingOnly = FALSE)
@@ -68,8 +74,8 @@ if (requireNamespace("pkgload", quietly = TRUE)) {
 
 cfg <- litxr_read_config()
 
-records <- litxr_repair_journal(
-  journal_id = parsed[["journal-id"]],
+records <- litxr_repair_collection(
+  collection_id = collection_id,
   config = cfg,
   search_query = parsed[["search-query"]],
   submitted_from = parsed[["submitted-from"]],
@@ -78,12 +84,12 @@ records <- litxr_repair_journal(
   limit = if (is.null(parsed$limit)) NULL else as.integer(parsed$limit)
 )
 
-litxr_rebuild_journal_index(parsed[["journal-id"]], cfg)
+litxr_rebuild_collection_index(collection_id, cfg)
 
 cat(
   sprintf(
-    "repair complete: journal_id=%s rows=%s\n",
-    parsed[["journal-id"]],
+    "repair complete: collection_id=%s rows=%s\n",
+    collection_id,
     nrow(records)
   )
 )

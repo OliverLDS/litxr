@@ -11,8 +11,11 @@ litxr_list_journals(config = NULL)
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 }
 \value{
-\code{data.table} of journal registrations.
+\code{data.table} of collection registrations with legacy journal column
+names.
 }
 \description{
-List journals registered in the config
+Backward-compatible wrapper around \code{litxr_list_collections()}. This function
+keeps the old journal-oriented column names while exposing the normalized
+collection config.
 }

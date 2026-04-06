@@ -13,6 +13,8 @@ cr_message <- list(
   page = "101-120",
   DOI = "10.1000/testdoi",
   URL = "https://doi.org/10.1000/testdoi",
+  ISBN = "9780262046305",
+  ISSN = c("0022-1082", "1540-6261"),
   subject = c("Finance", "Asset Pricing")
 )
 
@@ -23,6 +25,10 @@ stopifnot(identical(row$authors[[1]], "Jane Doe; John Smith"))
 stopifnot(identical(row$journal[[1]], "Journal of Finance"))
 stopifnot(identical(row$publisher[[1]], "Wiley"))
 stopifnot(identical(row$year[[1]], 2024L))
+stopifnot(identical(row$entry_type[[1]], "article"))
+stopifnot(identical(row$isbn[[1]], "9780262046305"))
+stopifnot(identical(row$issn[[1]], "0022-1082; 1540-6261"))
+stopifnot(identical(row$url[[1]], "https://doi.org/10.1000/testdoi"))
 
 records <- data.table::data.table(
   ref_id = c("doi:10.1000/a", "doi:10.1000/a", "arxiv:1234.5678v1"),
@@ -108,6 +114,8 @@ stopifnot(identical(arxiv_row$title[[1]], "Example arXiv Paper"))
 stopifnot(identical(arxiv_row$authors[[1]], "Jane Doe; John Smith"))
 stopifnot(identical(arxiv_row$arxiv_primary_category[[1]], "cs.AI"))
 stopifnot(identical(arxiv_row$doi[[1]], "10.1000/arxiv-example"))
+stopifnot(identical(arxiv_row$entry_type[[1]], "unpublished"))
+stopifnot(identical(arxiv_row$url[[1]], "http://arxiv.org/abs/2501.12345v2"))
 
 td_arxiv <- tempfile("litxr-arxiv-")
 dir.create(td_arxiv)
@@ -131,3 +139,31 @@ stopifnot(identical(
   arxiv_query,
   "(cat:cs.AI) AND submittedDate:[202601010000 TO 202601312359]"
 ))
+
+bib_book <- litxr::row_to_bibtex(data.table::data.table(
+  ref_id = "book:test",
+  source = "book",
+  source_id = "booktest",
+  entry_type = "book",
+  title = "Example Book",
+  authors = "Jane Doe",
+  authors_list = list("Jane Doe"),
+  year = 2024L,
+  month = 1L,
+  day = 1L,
+  journal = NA_character_,
+  container_title = NA_character_,
+  publisher = "Example Press",
+  volume = NA_character_,
+  issue = NA_character_,
+  pages = NA_character_,
+  doi = NA_character_,
+  isbn = "9780262046305",
+  issn = NA_character_,
+  url = "https://example.org/book",
+  note = NA_character_,
+  url_landing = NA_character_,
+  url_pdf = NA_character_
+))
+stopifnot(identical(bib_book[[1]], "@book{booktest,"))
+stopifnot(any(grepl("isbn = \\{9780262046305\\}", bib_book)))

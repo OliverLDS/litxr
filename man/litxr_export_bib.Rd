@@ -9,7 +9,8 @@ litxr_export_bib(output, journal_ids = NULL, keys = NULL, config = NULL)
 \arguments{
 \item{output}{Output \code{.bib} file path.}
 
-\item{journal_ids}{Optional character vector of journal ids to export.}
+\item{journal_ids}{Optional character vector of collection ids to export. The
+argument name is kept for backward compatibility.}
 
 \item{keys}{Optional character vector of record identifiers to export. Keys
 are matched against \code{doi}, \code{ref_id}, or \code{source_id}.}

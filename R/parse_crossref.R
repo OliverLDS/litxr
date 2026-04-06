@@ -90,12 +90,23 @@ parse_crossref_entry_unified <- function(cr_message) {
 
   # --- DOI + URLs ---
   doi <- getf_chr(cr_message$DOI)
+  isbn <- if (!is.null(cr_message$ISBN) && length(cr_message$ISBN) > 0) {
+    paste(unique(as.character(unlist(cr_message$ISBN, use.names = FALSE))), collapse = "; ")
+  } else {
+    NA_character_
+  }
+  issn <- if (!is.null(cr_message$ISSN) && length(cr_message$ISSN) > 0) {
+    paste(unique(as.character(unlist(cr_message$ISSN, use.names = FALSE))), collapse = "; ")
+  } else {
+    NA_character_
+  }
 
   # landing: prefer CrossRef's URL, then DOI resolver
   url_landing <- getf_chr(cr_message$URL)
   if (is.na(url_landing) && !is.na(doi)) {
     url_landing <- paste0("https://doi.org/", doi)
   }
+  url <- url_landing
 
   # pdf: look at link$URL if present
   url_pdf <- NA_character_
@@ -141,6 +152,7 @@ parse_crossref_entry_unified <- function(cr_message) {
     ref_id      = paste0("doi:", doi),
     source      = "crossref",
     source_id   = doi,
+    entry_type  = "article",
     title       = title,
     abstract    = abstract,
     authors     = authors_str,
@@ -156,6 +168,9 @@ parse_crossref_entry_unified <- function(cr_message) {
     issue       = issue,
     pages       = pages,
     doi         = doi,
+    isbn        = isbn,
+    issn        = issn,
+    url         = url,
     note        = NA_character_,
     subject_primary = subject_primary,
     subject_all     = subject_all,

@@ -2,8 +2,9 @@ version: 1
 project:
   name: litxr-project
   data_root: data/literature
-journals:
-  - journal_id: journal_of_finance
+collections:
+  - collection_id: journal_of_finance
+    collection_type: journal
     title: Journal of Finance
     remote_channel: crossref
     local_path: data/literature/journal_of_finance
@@ -14,7 +15,8 @@ journals:
     sync:
       filters:
         issn: 0022-1082
-  - journal_id: journal_of_financial_economics
+  - collection_id: journal_of_financial_economics
+    collection_type: journal
     title: Journal of Financial Economics
     remote_channel: crossref
     local_path: data/literature/journal_of_financial_economics
@@ -24,7 +26,8 @@ journals:
     sync:
       filters:
         issn: 0304-405X
-  - journal_id: arxiv_cs_ai
+  - collection_id: arxiv_cs_ai
+    collection_type: arxiv_category
     title: arXiv cs.AI
     remote_channel: arxiv
     local_path: data/literature/arxiv_cs_ai
