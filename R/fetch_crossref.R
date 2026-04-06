@@ -5,11 +5,19 @@
 #' @return List of Crossref `message` objects.
 #' @export
 fetch_crossref_messages <- function(dois) {
-  lapply(dois, function(doi) {
-    res <- httr::GET(paste0("https://api.crossref.org/works/", doi))
-    j <- jsonlite::fromJSON(httr::content(res, "text", encoding = "UTF-8"))
-    j$message
-  })
+  dois <- unique(as.character(dois))
+  stats::setNames(lapply(dois, function(doi) {
+    req <- httr2::request(paste0("https://api.crossref.org/works/", utils::URLencode(doi, reserved = TRUE))) |>
+      httr2::req_error(is_error = function(resp) FALSE)
+
+    resp <- httr2::req_perform(req)
+    if (httr2::resp_status(resp) >= 400) {
+      return(NULL)
+    }
+
+    payload <- httr2::resp_body_json(resp, simplifyVector = FALSE)
+    payload$message
+  }), dois)
 }
 
 #' Fetch Crossref works

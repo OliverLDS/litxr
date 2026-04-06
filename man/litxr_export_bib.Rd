@@ -4,12 +4,15 @@
 \alias{litxr_export_bib}
 \title{Export local references to a BibTeX file}
 \usage{
-litxr_export_bib(output, journal_ids = NULL, config = NULL)
+litxr_export_bib(output, journal_ids = NULL, keys = NULL, config = NULL)
 }
 \arguments{
 \item{output}{Output \code{.bib} file path.}
 
 \item{journal_ids}{Optional character vector of journal ids to export.}
+
+\item{keys}{Optional character vector of record identifiers to export. Keys
+are matched against \code{doi}, \code{ref_id}, or \code{source_id}.}
 
 \item{config}{Optional parsed config list or a direct config path. When
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}

@@ -70,20 +70,16 @@ litxr_read_config <- function(path = NULL) {
   }
 
   raw_lines <- readLines(config_path, warn = FALSE)
-  has_tab_indent <- any(grepl("^\t+", raw_lines))
+  normalized_text <- .litxr_normalize_yaml_indentation(raw_lines)
 
   cfg <- tryCatch(
-    yaml::read_yaml(config_path),
+    yaml::yaml.load(normalized_text),
     error = function(e) {
-      hint <- if (has_tab_indent) {
-        " YAML indentation must use spaces, not tabs."
-      } else {
-        ""
-      }
-      stop("Failed to parse config in ", config_path, ". ", conditionMessage(e), hint, call. = FALSE)
+      stop("Failed to parse config in ", config_path, ". ", conditionMessage(e), call. = FALSE)
     }
   )
   attr(cfg, "config_root") <- dirname(config_path)
+  attr(cfg, "config_path") <- normalizePath(config_path, winslash = "/", mustWork = FALSE)
   .litxr_validate_config(cfg, config_path)
 }
 
@@ -210,4 +206,30 @@ litxr_list_journals <- function(config = NULL) {
   }
 
   cfg
+}
+
+.litxr_normalize_yaml_indentation <- function(lines) {
+  normalized <- vapply(lines, function(line) {
+    prefix_match <- regmatches(line, regexpr("^[ \t]*", line))
+    prefix <- if (length(prefix_match)) prefix_match else ""
+    rest <- substring(line, nchar(prefix) + 1L)
+    prefix <- gsub("\t", "  ", prefix, fixed = TRUE)
+    paste0(prefix, rest)
+  }, character(1))
+
+  paste(normalized, collapse = "\n")
+}
+
+.litxr_write_config <- function(cfg, path = attr(cfg, "config_path", exact = TRUE)) {
+  if (is.null(path) || !nzchar(path)) {
+    stop("Unable to write config: config path is missing.", call. = FALSE)
+  }
+
+  out <- cfg
+  attr(out, "config_root") <- NULL
+  attr(out, "config_path") <- NULL
+  yaml::write_yaml(out, path)
+  attr(cfg, "config_root") <- dirname(path)
+  attr(cfg, "config_path") <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  invisible(path)
 }

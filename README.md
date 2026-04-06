@@ -36,6 +36,7 @@ The package already exposes:
 - `litxr_sync_all()`
 - `litxr_repair_journal()`
 - `litxr_read_journal()`
+- `litxr_add_dois()`
 - `litxr_export_bib()`
 
 ## End-To-End Example
@@ -63,7 +64,11 @@ litxr_list_journals(cfg)
 # 5. Sync one configured journal into the local JSON store.
 records <- litxr_sync_journal("journal_of_finance", cfg)
 
-# 6. Export the locally stored records to BibTeX for Quarto.
+# 6. You can also add an ad hoc DOI batch, even if those papers belong to
+#    journals not yet registered in config.yaml.
+batch_records <- litxr_add_dois(c("10.1111/jofi.12921"), cfg)
+
+# 7. Export the locally stored records to BibTeX for Quarto.
 litxr_export_bib("references.bib", journal_ids = "journal_of_finance", config = cfg)
 ```
 
@@ -175,6 +180,17 @@ There is also a small CLI wrapper:
 ```sh
 Rscript scripts/repair_arxiv.R --journal-id arxiv_cs_ai --submitted-from 2026-01-01 --submitted-to 2026-01-31 --limit 500
 ```
+
+For larger categories such as `cs.AI`, a day can still require multiple pages.
+There is a higher-level range wrapper that iterates day by day and paginates
+within each day automatically:
+
+```sh
+Rscript scripts/repair_arxiv_range.R --journal-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 --page-size 200 --sleep-seconds 10
+```
+
+That is the recommended operational pattern for gradually building a full local
+arXiv store from an external shell or cron job.
 
 For old local stores, you can rebuild the fast local index after repair:
 

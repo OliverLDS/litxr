@@ -42,9 +42,9 @@ writeLines(c(
   "\t  remote_channel: crossref",
   "\t  local_path: journal_of_finance"
 ), tab_cfg_path)
-tab_err <- try(litxr::litxr_read_config(tab_cfg_path), silent = TRUE)
-stopifnot(inherits(tab_err, "try-error"))
-stopifnot(grepl("spaces, not tabs", as.character(tab_err), fixed = TRUE))
+tab_cfg <- litxr::litxr_read_config(tab_cfg_path)
+stopifnot(identical(tab_cfg$project$name, "bad_tabs"))
+stopifnot(identical(tab_cfg$journals[[1]]$journal_id, "journal_of_finance"))
 
 td_export <- tempfile("litxr-test-")
 dir.create(td_export)
@@ -114,6 +114,25 @@ stopifnot(grepl("@article\\{example,", bib))
 stopifnot(grepl("journal = \\{Journal of Finance\\}", bib))
 stopifnot(grepl("doi = \\{10.1000/example\\}", bib))
 
+out_keys <- file.path(td_export, "references_by_keys.bib")
+warn_msg <- NULL
+withCallingHandlers(
+  litxr::litxr_export_bib(
+    out_keys,
+    keys = c("10.1000/example", "doi:10.1000/example", "arxiv:missing-id"),
+    config = cfg_export
+  ),
+  warning = function(w) {
+    warn_msg <<- conditionMessage(w)
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(file.exists(out_keys))
+bib_keys <- paste(readLines(out_keys, warn = FALSE), collapse = "\n")
+stopifnot(grepl("@article\\{example,", bib_keys))
+stopifnot(grepl("doi = \\{10.1000/example\\}", bib_keys))
+stopifnot(grepl("arxiv:missing-id", warn_msg, fixed = TRUE))
+
 existing <- data.table::copy(record)
 existing[["title"]] <- "Old Title"
 existing[["note"]] <- "keep me"
@@ -158,3 +177,32 @@ rebuilt_one <- rebuilt[rebuilt$ref_id == "doi:10.1000/example", ]
 stopifnot(nrow(rebuilt_one) == 1L)
 stopifnot(identical(rebuilt_one$doi[[1]], "10.1000/example"))
 stopifnot(identical(rebuilt_one$journal[[1]], "Journal of Finance"))
+
+new_cr_message <- list(
+  title = "New DOI Paper",
+  author = list(list(given = "Jane", family = "Doe")),
+  issued = list(`date-parts` = list(c(2025, 1, 15))),
+  `container-title` = "Review of New Finance",
+  publisher = "Test Publisher",
+  volume = "1",
+  issue = "1",
+  page = "1-10",
+  DOI = "10.2000/newdoi",
+  URL = "https://doi.org/10.2000/newdoi",
+  ISSN = c("1234-5678", "8765-4321"),
+  `issn-type` = list(
+    list(type = "print", value = "1234-5678"),
+    list(type = "electronic", value = "8765-4321")
+  )
+)
+
+registered <- litxr:::.litxr_register_crossref_journal(cfg_export, new_cr_message)
+cfg_registered <- registered$cfg
+new_journal <- registered$journal
+stopifnot(identical(new_journal$title, "Review of New Finance"))
+stopifnot(identical(new_journal$remote_channel, "crossref"))
+stopifnot(identical(new_journal$metadata$issn_print, "1234-5678"))
+stopifnot(file.exists(attr(cfg_registered, "config_path", exact = TRUE)))
+
+cfg_reloaded <- litxr::litxr_read_config(attr(cfg_registered, "config_path", exact = TRUE))
+stopifnot(any(vapply(cfg_reloaded$journals, `[[`, character(1), "journal_id") == new_journal$journal_id))

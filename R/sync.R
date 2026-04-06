@@ -134,12 +134,14 @@ litxr_rebuild_journal_index <- function(journal_id, config = NULL) {
 #'
 #' @param output Output `.bib` file path.
 #' @param journal_ids Optional character vector of journal ids to export.
+#' @param keys Optional character vector of record identifiers to export. Keys
+#'   are matched against `doi`, `ref_id`, or `source_id`.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #'
 #' @return Invisibly returns the output path.
 #' @export
-litxr_export_bib <- function(output, journal_ids = NULL, config = NULL) {
+litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
   selected <- cfg$journals
@@ -158,6 +160,21 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = NULL) {
     .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
   }), fill = TRUE)
 
+  if (!is.null(keys) && length(keys)) {
+    key_values <- unique(as.character(keys))
+    filtered <- .litxr_filter_records_by_keys(rows, key_values)
+    missing_keys <- setdiff(key_values, filtered$litxr_matched_key__)
+    if (length(missing_keys)) {
+      warning(
+        "The following record keys were not found and were ignored: ",
+        paste(missing_keys, collapse = ", "),
+        call. = FALSE
+      )
+    }
+    filtered[["litxr_matched_key__"]] <- NULL
+    rows <- filtered
+  }
+
   if (!nrow(rows)) {
     writeLines(character(), output)
     return(invisible(output))
@@ -169,6 +186,237 @@ litxr_export_bib <- function(output, journal_ids = NULL, config = NULL) {
 
   writeLines(bib_lines, output)
   invisible(output)
+}
+
+#' Add references by DOI and auto-register missing journals
+#'
+#' Fetches Crossref metadata for a DOI vector, writes the records into the local
+#' journal stores, and auto-registers journals in `config.yaml` when needed.
+#'
+#' @param dois Character vector of DOIs.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param auto_register Whether to auto-register missing journals into
+#'   `config.yaml`.
+#'
+#' @return `data.table` of fetched records.
+#' @export
+litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  doi_values <- unique(trimws(as.character(dois)))
+  doi_values <- doi_values[nzchar(doi_values)]
+  if (!length(doi_values)) {
+    return(data.table::data.table())
+  }
+
+  messages <- fetch_crossref_messages(doi_values)
+  found <- !vapply(messages, is.null, logical(1))
+  missing_dois <- names(messages)[!found]
+  if (length(missing_dois)) {
+    warning(
+      "The following DOIs were not found and were ignored: ",
+      paste(missing_dois, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  messages <- messages[found]
+  if (!length(messages)) {
+    return(data.table::data.table())
+  }
+
+  parsed <- lapply(messages, parse_crossref_entry_unified)
+  records <- data.table::rbindlist(parsed, fill = TRUE)
+  if (!nrow(records)) {
+    return(records)
+  }
+
+  assignment <- .litxr_assign_crossref_journals(cfg, records, messages, auto_register = auto_register)
+  cfg <- assignment$cfg
+  records <- assignment$records
+
+  by_journal <- split(records, records$collection_id)
+  out <- lapply(names(by_journal), function(journal_id) {
+    journal <- .litxr_get_journal(cfg, journal_id)
+    local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+    incoming <- data.table::as.data.table(by_journal[[journal_id]])
+    existing <- .litxr_read_journal_records(local_path)
+    merged <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
+    .litxr_write_journal_records(merged, local_path, journal)
+    incoming
+  })
+
+  data.table::rbindlist(out, fill = TRUE)
+}
+
+.litxr_filter_records_by_keys <- function(records, keys) {
+  if (!nrow(records) || !length(keys)) {
+    return(records[0, ])
+  }
+
+  out <- data.table::copy(records)
+  doi <- if ("doi" %in% names(out)) out[["doi"]] else rep(NA_character_, nrow(out))
+  ref_id <- if ("ref_id" %in% names(out)) out[["ref_id"]] else rep(NA_character_, nrow(out))
+  source_id <- if ("source_id" %in% names(out)) out[["source_id"]] else rep(NA_character_, nrow(out))
+
+  matched_key <- rep(NA_character_, nrow(out))
+  doi_match <- !is.na(doi) & doi %in% keys
+  matched_key[doi_match] <- doi[doi_match]
+
+  ref_id_match <- !is.na(ref_id) & ref_id %in% keys & is.na(matched_key)
+  matched_key[ref_id_match] <- ref_id[ref_id_match]
+
+  source_id_match <- !is.na(source_id) & source_id %in% keys & is.na(matched_key)
+  matched_key[source_id_match] <- source_id[source_id_match]
+
+  keep <- !is.na(matched_key)
+  out[["litxr_matched_key__"]] <- matched_key
+
+  out[keep, ]
+}
+
+.litxr_assign_crossref_journals <- function(cfg, records, messages, auto_register = TRUE) {
+  out_cfg <- cfg
+  out_records <- data.table::copy(records)
+
+  for (i in seq_len(nrow(out_records))) {
+    message <- messages[[i]]
+    journal <- .litxr_match_crossref_journal(out_cfg, message)
+
+    if (is.null(journal)) {
+      if (!isTRUE(auto_register)) {
+        stop(
+          "Crossref journal is not registered in config.yaml for DOI ",
+          out_records$doi[[i]],
+          ". Set `auto_register = TRUE` to add it automatically.",
+          call. = FALSE
+        )
+      }
+      registered <- .litxr_register_crossref_journal(out_cfg, message)
+      out_cfg <- registered$cfg
+      journal <- registered$journal
+    }
+
+    out_records$collection_id[[i]] <- journal$journal_id
+    out_records$collection_title[[i]] <- journal$title
+  }
+
+  list(cfg = out_cfg, records = out_records)
+}
+
+.litxr_match_crossref_journal <- function(cfg, cr_message) {
+  journal_title <- .litxr_crossref_journal_title(cr_message)
+  issns <- .litxr_crossref_issns(cr_message)
+
+  for (journal in cfg$journals) {
+    if (!identical(journal$remote_channel, "crossref")) next
+    title_match <- !is.na(journal_title) && identical(journal$title, journal_title)
+    issn_match <- length(intersect(.litxr_journal_issns(journal), issns)) > 0
+    if (title_match || issn_match) {
+      return(journal)
+    }
+  }
+
+  NULL
+}
+
+.litxr_register_crossref_journal <- function(cfg, cr_message) {
+  journal_title <- .litxr_crossref_journal_title(cr_message)
+  if (is.na(journal_title) || !nzchar(journal_title)) {
+    journal_title <- "Crossref Unclassified"
+  }
+
+  base_id <- .litxr_make_journal_id(journal_title)
+  journal_id <- .litxr_unique_journal_id(cfg, base_id)
+  metadata <- .litxr_crossref_journal_metadata(cr_message)
+  local_path <- file.path(cfg$project$data_root, journal_id)
+  sync_issn <- metadata$issn_print
+  if (is.null(sync_issn) || is.na(sync_issn) || !nzchar(sync_issn)) {
+    sync_issn <- metadata$issn_electronic
+  }
+
+  journal <- list(
+    journal_id = journal_id,
+    title = journal_title,
+    remote_channel = "crossref",
+    local_path = local_path,
+    metadata = metadata,
+    sync = list(
+      filters = list(
+        issn = if (!is.null(sync_issn) && nzchar(sync_issn)) sync_issn else NA_character_
+      )
+    )
+  )
+
+  cfg$journals[[length(cfg$journals) + 1L]] <- journal
+  .litxr_write_config(cfg)
+  list(cfg = cfg, journal = journal)
+}
+
+.litxr_crossref_journal_title <- function(cr_message) {
+  title <- cr_message$`container-title`
+  if (is.null(title) || length(title) == 0) return(NA_character_)
+  title <- as.character(title[[1]])
+  if (!nzchar(title)) NA_character_ else title
+}
+
+.litxr_crossref_issns <- function(cr_message) {
+  issn <- cr_message$ISSN
+  if (is.null(issn) || !length(issn)) return(character())
+  unique(stats::na.omit(as.character(unlist(issn, use.names = FALSE))))
+}
+
+.litxr_crossref_journal_metadata <- function(cr_message) {
+  issn_print <- NA_character_
+  issn_electronic <- NA_character_
+
+  if (!is.null(cr_message$`issn-type`) && length(cr_message$`issn-type`)) {
+    for (entry in cr_message$`issn-type`) {
+      if (is.null(entry$type) || is.null(entry$value)) next
+      if (identical(entry$type, "print")) issn_print <- as.character(entry$value)
+      if (identical(entry$type, "electronic")) issn_electronic <- as.character(entry$value)
+    }
+  }
+
+  issn_all <- .litxr_crossref_issns(cr_message)
+  if ((is.na(issn_print) || !nzchar(issn_print)) && length(issn_all)) {
+    issn_print <- issn_all[[1]]
+  }
+  if ((is.na(issn_electronic) || !nzchar(issn_electronic)) && length(issn_all) >= 2L) {
+    issn_electronic <- issn_all[[2]]
+  }
+
+  list(
+    publisher = if (is.null(cr_message$publisher)) NA_character_ else as.character(cr_message$publisher[[1]]),
+    issn_print = issn_print,
+    issn_electronic = issn_electronic
+  )
+}
+
+.litxr_make_journal_id <- function(x) {
+  id <- tolower(as.character(x[[1]]))
+  id <- gsub("[^a-z0-9]+", "_", id)
+  id <- gsub("^_+|_+$", "", id)
+  if (!nzchar(id)) id <- "crossref_journal"
+  id
+}
+
+.litxr_unique_journal_id <- function(cfg, base_id) {
+  existing_ids <- vapply(cfg$journals, `[[`, character(1), "journal_id")
+  if (!(base_id %in% existing_ids)) {
+    return(base_id)
+  }
+
+  i <- 2L
+  repeat {
+    candidate <- paste0(base_id, "_", i)
+    if (!(candidate %in% existing_ids)) {
+      return(candidate)
+    }
+    i <- i + 1L
+  }
 }
 
 .litxr_get_journal <- function(cfg, journal_id) {

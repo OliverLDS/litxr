@@ -56,7 +56,15 @@ if (is.null(parsed[["journal-id"]]) || !nzchar(parsed[["journal-id"]])) {
   stop("`--journal-id` is required.", call. = FALSE)
 }
 
-suppressPackageStartupMessages(library(litxr))
+script_arg <- commandArgs(trailingOnly = FALSE)
+script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1])
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), winslash = "/", mustWork = TRUE)
+
+if (requireNamespace("pkgload", quietly = TRUE)) {
+  pkgload::load_all(repo_root, quiet = TRUE, export_all = FALSE, helpers = FALSE)
+} else {
+  suppressPackageStartupMessages(library(litxr))
+}
 
 cfg <- litxr_read_config()
 
