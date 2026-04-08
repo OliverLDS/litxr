@@ -123,6 +123,8 @@ sync_state <- litxr_read_sync_state(cfg, collection_id)
 local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
 day_seq <- seq(date_from, date_to, by = "day")
 total_incoming <- 0L
+overall_fetched_from <- NA_character_
+overall_fetched_to <- NA_character_
 
 for (i in seq_along(day_seq)) {
   day <- day_seq[[i]]
@@ -147,6 +149,8 @@ for (i in seq_along(day_seq)) {
   day_started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
   start <- 0L
   day_total <- 0L
+  day_fetched_from <- NA_character_
+  day_fetched_to <- NA_character_
 
   repeat {
     day_journal <- journal
@@ -177,6 +181,13 @@ for (i in seq_along(day_seq)) {
 
     total_incoming <- total_incoming + page_n
     day_total <- day_total + page_n
+    day_range <- litxr:::.litxr_records_date_range(incoming)
+    if (is.na(day_fetched_from) || (!is.na(day_range$from) && nzchar(day_range$from) && day_range$from < day_fetched_from)) {
+      day_fetched_from <- day_range$from
+    }
+    if (is.na(day_fetched_to) || (!is.na(day_range$to) && nzchar(day_range$to) && day_range$to > day_fetched_to)) {
+      day_fetched_to <- day_range$to
+    }
 
     if (page_n < page_size) {
       break
@@ -202,12 +213,21 @@ for (i in seq_along(day_seq)) {
     query = base_query,
     range_from = day_text,
     range_to = day_text,
+    fetched_from = day_fetched_from,
+    fetched_to = day_fetched_to,
     page_start = 0L,
     page_size = page_size,
     records_fetched = day_total,
     records_after = NA_integer_,
     notes = ""
   ))
+
+  if (is.na(overall_fetched_from) || (!is.na(day_fetched_from) && nzchar(day_fetched_from) && day_fetched_from < overall_fetched_from)) {
+    overall_fetched_from <- day_fetched_from
+  }
+  if (is.na(overall_fetched_to) || (!is.na(day_fetched_to) && nzchar(day_fetched_to) && day_fetched_to > overall_fetched_to)) {
+    overall_fetched_to <- day_fetched_to
+  }
 }
 
 litxr_rebuild_collection_index(collection_id, cfg)
@@ -222,6 +242,8 @@ litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
   query = base_query,
   range_from = format(date_from, "%Y-%m-%d"),
   range_to = format(date_to, "%Y-%m-%d"),
+  fetched_from = overall_fetched_from,
+  fetched_to = overall_fetched_to,
   page_start = 0L,
   page_size = page_size,
   records_fetched = total_incoming,

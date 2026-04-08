@@ -34,6 +34,7 @@ Main collection-level functions:
 - `litxr_sync_all()`
 - `litxr_repair_collection()`
 - `litxr_read_collection()`
+- `litxr_collection_date_stats()`
 - `litxr_rebuild_collection_index()`
 
 Backward-compatible journal wrappers still exist:
@@ -84,6 +85,15 @@ Helpers:
 
 `scripts/repair_arxiv_range.R` now records successful day-level repair windows
 in `sync_state.fst` and skips already completed days unless `--force` is used.
+
+For local coverage diagnostics, use:
+
+```r
+stats_day <- litxr_collection_date_stats("arxiv_cs_ai", cfg, by = "day")
+attr(stats_day, "date_min")
+attr(stats_day, "date_max")
+attr(stats_day, "missing_dates")
+```
 
 ## DOI And Manual Ingest
 

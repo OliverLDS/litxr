@@ -37,6 +37,8 @@ litxr_sync_collection <- function(collection_id, config = NULL) {
     query = .litxr_sync_query_text(journal),
     range_from = NA_character_,
     range_to = NA_character_,
+    fetched_from = .litxr_records_date_range(incoming)$from,
+    fetched_to = .litxr_records_date_range(incoming)$to,
     page_start = if (identical(journal$remote_channel, "arxiv")) journal$sync$start %||% 0L else NA_integer_,
     page_size = journal$sync$rows %||% if (identical(journal$remote_channel, "crossref")) 1000L else 100L,
     records_fetched = nrow(incoming),
@@ -91,6 +93,64 @@ litxr_read_collection <- function(collection_id, config = NULL) {
   if (is.null(cfg)) cfg <- litxr_read_config()
   journal <- .litxr_get_journal(cfg, collection_id)
   .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
+}
+
+#' Summarize publication-date coverage for one collection
+#'
+#' Returns counts by day, month, or year based on `pub_date`, with summary
+#' attributes describing the observed date range and any missing calendar days
+#' within that observed range.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param by One of `"day"`, `"month"`, or `"year"`.
+#'
+#' @return `data.table` with `date` and `n`, plus attributes
+#'   `date_min`, `date_max`, and `missing_dates`.
+#' @export
+litxr_collection_date_stats <- function(collection_id, config = NULL, by = c("day", "month", "year")) {
+  by <- match.arg(by)
+  records <- litxr_read_collection(collection_id, config = config)
+
+  empty_out <- data.table::data.table(date = character(), n = integer())
+  attr(empty_out, "date_min") <- NA_character_
+  attr(empty_out, "date_max") <- NA_character_
+  attr(empty_out, "missing_dates") <- as.Date(character())
+
+  if (!nrow(records) || !("pub_date" %in% names(records))) {
+    return(empty_out)
+  }
+
+  pub_dates <- as.Date(records$pub_date)
+  pub_dates <- pub_dates[!is.na(pub_dates)]
+  if (!length(pub_dates)) {
+    return(empty_out)
+  }
+
+  bucket_dates <- switch(
+    by,
+    day = pub_dates,
+    month = as.Date(format(pub_dates, "%Y-%m-01")),
+    year = as.Date(paste0(format(pub_dates, "%Y"), "-01-01"))
+  )
+
+  counts <- sort(table(bucket_dates))
+  out <- data.table::data.table(
+    date = as.Date(names(counts)),
+    n = as.integer(counts)
+  )
+  data.table::setorder(out, date)
+
+  attr(out, "date_min") <- as.character(min(pub_dates))
+  attr(out, "date_max") <- as.character(max(pub_dates))
+  attr(out, "missing_dates") <- if (identical(by, "day")) {
+    setdiff(seq(min(pub_dates), max(pub_dates), by = "day"), sort(unique(pub_dates)))
+  } else {
+    as.Date(character())
+  }
+
+  out
 }
 
 #' Read locally stored records for one journal
@@ -169,6 +229,8 @@ litxr_repair_collection <- function(
     query = .litxr_sync_query_text(journal),
     range_from = submitted_from %||% NA_character_,
     range_to = submitted_to %||% NA_character_,
+    fetched_from = .litxr_records_date_range(incoming)$from,
+    fetched_to = .litxr_records_date_range(incoming)$to,
     page_start = if (identical(journal$remote_channel, "arxiv")) journal$sync$start %||% 0L else NA_integer_,
     page_size = journal$sync$rows %||% if (identical(journal$remote_channel, "crossref")) 1000L else 100L,
     records_fetched = nrow(incoming),
@@ -808,6 +870,57 @@ litxr_read_sync_state <- function(config = NULL, collection_id = NULL) {
   out
 }
 
+#' Rebuild a first-pass sync ledger from existing local data
+#'
+#' Infers one sync ledger row per collection from existing local storage and
+#' index file timestamps. This is intended for backfilling `sync_state.fst` when
+#' local data already exists from older package versions that did not record
+#' sync history.
+#'
+#' The inferred rows are approximate. They record that local data exists and
+#' when the local collection index was last modified, but they do not recover
+#' exact remote cursors, arXiv day windows, or original sync arguments.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param overwrite Whether to replace the existing sync ledger instead of only
+#'   adding inferred rows for collections not already present.
+#'
+#' @return `data.table` of the rebuilt sync ledger.
+#' @export
+litxr_rebuild_sync_state <- function(config = NULL, overwrite = FALSE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  collections <- .litxr_config_collections(cfg)
+  existing <- .litxr_read_sync_state_index(cfg)
+  inferred <- lapply(collections, function(collection) {
+    .litxr_infer_collection_sync_state(cfg, collection)
+  })
+  inferred <- data.table::rbindlist(inferred, fill = TRUE)
+
+  if (!nrow(inferred)) {
+    if (isTRUE(overwrite)) {
+      .litxr_write_sync_state_index(cfg, .litxr_empty_sync_state())
+      return(.litxr_empty_sync_state())
+    }
+    return(existing)
+  }
+
+  if (isTRUE(overwrite) || !nrow(existing)) {
+    out <- inferred
+  } else {
+    covered <- unique(existing$collection_id)
+    out <- data.table::rbindlist(
+      list(existing, inferred[!(inferred$collection_id %in% covered), ]),
+      fill = TRUE
+    )
+  }
+
+  .litxr_write_sync_state_index(cfg, out)
+  out
+}
+
 #' List enrichment candidates and exclusion reasons
 #'
 #' Combines the canonical reference store, collection memberships, and
@@ -1441,9 +1554,13 @@ litxr_add_refs <- function(
   )
 }
 
-.litxr_resolve_local_path <- function(cfg, local_path) {
-  if (grepl("^(/|[A-Za-z]:[/\\\\])", local_path)) {
-    return(local_path)
+.litxr_is_absolute_path <- function(path) {
+  grepl("^(/|~(?:/|$)|[A-Za-z]:[/\\\\])", path)
+}
+
+.litxr_resolve_from_config_root <- function(cfg, path) {
+  if (.litxr_is_absolute_path(path)) {
+    return(path.expand(path))
   }
 
   root <- attr(cfg, "config_root", exact = TRUE)
@@ -1451,7 +1568,15 @@ litxr_add_refs <- function(
     root <- "."
   }
 
-  file.path(root, local_path)
+  file.path(root, path)
+}
+
+.litxr_resolve_local_path <- function(cfg, local_path) {
+  if (.litxr_is_absolute_path(local_path)) {
+    return(path.expand(local_path))
+  }
+
+  file.path(.litxr_project_root(cfg), local_path)
 }
 
 .litxr_build_arxiv_search_query <- function(base_query, submitted_from = NULL, submitted_to = NULL) {
@@ -1869,7 +1994,7 @@ litxr_add_refs <- function(
 }
 
 .litxr_project_root <- function(cfg) {
-  .litxr_resolve_local_path(cfg, cfg$project$data_root)
+  .litxr_resolve_from_config_root(cfg, cfg$project$data_root)
 }
 
 `%||%` <- function(x, y) {
@@ -1947,6 +2072,8 @@ litxr_add_refs <- function(
     query = character(),
     range_from = character(),
     range_to = character(),
+    fetched_from = character(),
+    fetched_to = character(),
     page_start = integer(),
     page_size = integer(),
     records_fetched = integer(),
@@ -1965,6 +2092,8 @@ litxr_add_refs <- function(
   query = NA_character_,
   range_from = NA_character_,
   range_to = NA_character_,
+  fetched_from = NA_character_,
+  fetched_to = NA_character_,
   page_start = NA_integer_,
   page_size = NA_integer_,
   records_fetched = NA_integer_,
@@ -1981,12 +2110,94 @@ litxr_add_refs <- function(
     query = as.character(query %||% NA_character_),
     range_from = as.character(range_from %||% NA_character_),
     range_to = as.character(range_to %||% NA_character_),
+    fetched_from = as.character(fetched_from %||% NA_character_),
+    fetched_to = as.character(fetched_to %||% NA_character_),
     page_start = as.integer(page_start %||% NA_integer_),
     page_size = as.integer(page_size %||% NA_integer_),
     records_fetched = as.integer(records_fetched %||% NA_integer_),
     records_after = as.integer(records_after %||% NA_integer_),
     notes = as.character(notes %||% NA_character_)
   )
+}
+
+.litxr_infer_collection_sync_state <- function(cfg, collection) {
+  local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+  paths <- .litxr_journal_paths(local_path)
+  index_path <- .litxr_index_path(local_path)
+
+  record_count <- 0L
+  timestamp <- NA_character_
+  notes <- character()
+
+  if (file.exists(index_path)) {
+    info <- file.info(index_path)
+    timestamp <- format(as.POSIXct(info$mtime, tz = "UTC"), tz = "UTC", usetz = TRUE)
+    index_dt <- tryCatch(.litxr_read_journal_index(local_path), error = function(e) NULL)
+    record_count <- if (is.null(index_dt)) 0L else nrow(index_dt)
+    notes <- c(notes, "inferred_from=collection_index")
+  } else if (dir.exists(paths$json)) {
+    json_files <- sort(list.files(paths$json, pattern = "\\.json$", full.names = TRUE))
+    json_files <- json_files[basename(json_files) != "_upsert_conflicts.jsonl"]
+    if (length(json_files)) {
+      info <- file.info(json_files)
+      timestamp <- format(as.POSIXct(max(info$mtime, na.rm = TRUE), tz = "UTC"), tz = "UTC", usetz = TRUE)
+      record_count <- length(json_files)
+      notes <- c(notes, "inferred_from=json_files")
+    }
+  }
+
+  if (!isTRUE(record_count > 0L) || is.na(timestamp) || !nzchar(timestamp)) {
+    return(.litxr_empty_sync_state())
+  }
+
+  .litxr_make_sync_state_row(
+    collection_id = collection$collection_id,
+    remote_channel = collection$remote_channel,
+    sync_type = "inferred_rebuild",
+    status = "inferred",
+    started_at = timestamp,
+    completed_at = timestamp,
+    query = .litxr_sync_query_text(collection),
+    range_from = NA_character_,
+    range_to = NA_character_,
+    fetched_from = NA_character_,
+    fetched_to = NA_character_,
+    page_start = NA_integer_,
+    page_size = collection$sync$rows %||% if (identical(collection$remote_channel, "crossref")) 1000L else 100L,
+    records_fetched = as.integer(record_count),
+    records_after = as.integer(record_count),
+    notes = paste(notes, collapse = ";")
+  )
+}
+
+.litxr_records_date_range <- function(records) {
+  if (is.null(records) || !nrow(records)) {
+    return(list(from = NA_character_, to = NA_character_))
+  }
+
+  if ("pub_date" %in% names(records)) {
+    dates <- records$pub_date
+    dates <- dates[!is.na(dates)]
+    if (length(dates)) {
+      return(list(
+        from = format(min(dates), "%Y-%m-%d"),
+        to = format(max(dates), "%Y-%m-%d")
+      ))
+    }
+  }
+
+  if ("year" %in% names(records)) {
+    years <- records$year
+    years <- years[!is.na(years)]
+    if (length(years)) {
+      return(list(
+        from = as.character(min(years)),
+        to = as.character(max(years))
+      ))
+    }
+  }
+
+  list(from = NA_character_, to = NA_character_)
 }
 
 .litxr_read_sync_state_index <- function(cfg) {

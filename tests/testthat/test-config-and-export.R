@@ -107,6 +107,14 @@ stopifnot(nrow(read_back) == 1L)
 stopifnot(identical(read_back$doi[[1]], "10.1000/example"))
 stopifnot(identical(read_back$authors_list[[1]], c("Jane Doe", "John Smith")))
 
+date_stats <- litxr::litxr_collection_date_stats(journal$journal_id, cfg_export, by = "day")
+stopifnot(nrow(date_stats) == 1L)
+stopifnot(as.character(date_stats$date[[1]]) == "2024-01-15")
+stopifnot(date_stats$n[[1]] == 1L)
+stopifnot(identical(attr(date_stats, "date_min"), "2024-01-15"))
+stopifnot(identical(attr(date_stats, "date_max"), "2024-01-15"))
+stopifnot(length(attr(date_stats, "missing_dates")) == 0L)
+
 project_refs <- litxr::litxr_read_references(cfg_export)
 stopifnot(nrow(project_refs) >= 1L)
 stopifnot(any(project_refs$ref_id == "doi:10.1000/example"))
@@ -373,6 +381,8 @@ sync_row <- litxr:::.litxr_make_sync_state_row(
   query = NA_character_,
   range_from = NA_character_,
   range_to = NA_character_,
+  fetched_from = "2026-01-01",
+  fetched_to = "2026-01-01",
   page_start = NA_integer_,
   page_size = NA_integer_,
   records_fetched = 1L,
@@ -383,3 +393,17 @@ litxr:::.litxr_append_sync_state(cfg_manual, sync_row)
 sync_state <- litxr::litxr_read_sync_state(cfg_manual, collection_id = "manual_books")
 stopifnot(nrow(sync_state) >= 1L)
 stopifnot(any(sync_state$sync_type == "manual_add"))
+stopifnot(any(sync_state$fetched_from == "2026-01-01"))
+stopifnot(any(sync_state$fetched_to == "2026-01-01"))
+
+cfg_sync_rebuild <- litxr::litxr_read_config(attr(cfg_export, "config_path", exact = TRUE))
+empty_sync_path <- file.path(litxr:::.litxr_project_root(cfg_sync_rebuild), "index", "sync_state.fst")
+if (file.exists(empty_sync_path)) file.remove(empty_sync_path)
+sync_before_rebuild <- litxr::litxr_read_sync_state(cfg_sync_rebuild)
+stopifnot(nrow(sync_before_rebuild) == 0L)
+rebuilt_sync <- litxr::litxr_rebuild_sync_state(cfg_sync_rebuild, overwrite = TRUE)
+rebuilt_sync_one <- rebuilt_sync[rebuilt_sync$collection_id == journal$journal_id, ]
+stopifnot(nrow(rebuilt_sync_one) == 1L)
+stopifnot(identical(rebuilt_sync_one$sync_type[[1]], "inferred_rebuild"))
+stopifnot(identical(rebuilt_sync_one$status[[1]], "inferred"))
+stopifnot(rebuilt_sync_one$records_after[[1]] >= 1L)

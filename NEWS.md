@@ -1,3 +1,14 @@
+# litxr 0.0.5
+
+- Fixed collection `local_path` resolution so relative paths are resolved under
+  `project.data_root`, while absolute paths continue to work as absolute paths.
+- Added `litxr_rebuild_sync_state()` to infer a first-pass sync ledger from
+  existing local collection data created before sync-state recording existed.
+- Extended sync-state rows with `fetched_from` and `fetched_to` fields for more
+  informative sync and repair history, especially for arXiv workflows.
+- Added `litxr_collection_date_stats()` for collection-level publication-date
+  counts, ascending date coverage summaries, and missing-day diagnostics.
+
 # litxr 0.0.4
 
 - Generalized the package from journal-first config toward collection-first
