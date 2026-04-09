@@ -152,6 +152,26 @@ stopifnot(identical(merged_arxiv_legacy$ref_id[[1]], "arxiv:2501.12345"))
 stopifnot(identical(merged_arxiv_legacy$source_id[[1]], "2501.12345"))
 stopifnot(identical(merged_arxiv_legacy$arxiv_version[[1]], 2L))
 
+normalized_legacy_only <- litxr:::.litxr_prefer_complete_records(legacy_arxiv_row)
+stopifnot(identical(normalized_legacy_only$ref_id[[1]], "arxiv:2501.12345"))
+stopifnot(identical(normalized_legacy_only$source_id[[1]], "2501.12345"))
+stopifnot(identical(normalized_legacy_only$arxiv_id_base[[1]], "2501.12345"))
+
+arxiv_row_no_doi <- data.table::copy(arxiv_row_v1)
+arxiv_row_no_doi$doi[[1]] <- NA_character_
+arxiv_row_no_doi$ref_id[[1]] <- "arxiv:2501.12345v1"
+arxiv_row_no_doi$source_id[[1]] <- "2501.12345v1"
+arxiv_row_no_doi$arxiv_id_base[[1]] <- NA_character_
+
+merged_arxiv_doi_mismatch <- litxr:::.litxr_upsert_records(
+  existing = arxiv_row_no_doi,
+  incoming = arxiv_row,
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(merged_arxiv_doi_mismatch) == 1L)
+stopifnot(identical(merged_arxiv_doi_mismatch$ref_id[[1]], "arxiv:2501.12345"))
+stopifnot(identical(merged_arxiv_doi_mismatch$arxiv_version[[1]], 2L))
+
 td_arxiv <- tempfile("litxr-arxiv-")
 dir.create(td_arxiv)
 journal_arxiv <- list(

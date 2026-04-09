@@ -1657,11 +1657,12 @@ litxr_add_refs <- function(
 .litxr_record_key <- function(records) {
   records <- .litxr_normalize_record_identity(records)
   doi <- records[["doi"]]
+  source <- if ("source" %in% names(records)) records[["source"]] else rep(NA_character_, nrow(records))
   ref_id <- records[["ref_id"]]
 
   has_doi <- !is.na(doi) & nzchar(doi)
   keys <- ref_id
-  keys[has_doi] <- paste0("doi:", doi[has_doi])
+  keys[has_doi & (is.na(source) | source != "arxiv")] <- paste0("doi:", doi[has_doi & (is.na(source) | source != "arxiv")])
   keys
 }
 
@@ -1699,7 +1700,7 @@ litxr_add_refs <- function(
     return(records)
   }
 
-  out <- data.table::copy(records)
+  out <- .litxr_normalize_record_identity(records)
   out[["litxr_record_key__"]] <- key_fun(out)
   out[["litxr_completeness__"]] <- .litxr_record_completeness_score(out)
   out[["litxr_arxiv_version__"]] <- if ("arxiv_version" %in% names(out)) {
@@ -1735,7 +1736,7 @@ litxr_add_refs <- function(
   keys[has_source_key] <- paste0(source[has_source_key], ":", source_id[has_source_key])
 
   has_doi <- !is.na(doi) & nzchar(doi)
-  keys[has_doi] <- paste0("doi:", doi[has_doi])
+  keys[has_doi & (is.na(source) | source != "arxiv")] <- paste0("doi:", doi[has_doi & (is.na(source) | source != "arxiv")])
   keys
 }
 

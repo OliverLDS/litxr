@@ -1,3 +1,11 @@
+# litxr 0.0.5.2
+
+- Fixed arXiv deduplication so base arXiv ids remain the canonical key even
+  when DOI metadata is present for only some versions of the same paper.
+- Fixed collection-index rebuilds to rewrite stored `ref_id` and `source_id`
+  values to the normalized base arXiv id instead of only normalizing the
+  internal deduplication key.
+
 # litxr 0.0.5.1
 
 - Canonicalized arXiv reference identity to the base arXiv id so versioned
