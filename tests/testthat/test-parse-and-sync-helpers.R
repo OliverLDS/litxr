@@ -109,13 +109,48 @@ arxiv_xml <- xml2::read_xml(
 
 arxiv_entry <- xml2::xml_find_first(arxiv_xml, ".//*[local-name() = 'entry']")
 arxiv_row <- litxr::parse_arxiv_entry_unified(arxiv_entry)
-stopifnot(identical(arxiv_row$ref_id[[1]], "arxiv:2501.12345v2"))
+stopifnot(identical(arxiv_row$ref_id[[1]], "arxiv:2501.12345"))
+stopifnot(identical(arxiv_row$source_id[[1]], "2501.12345"))
+stopifnot(identical(arxiv_row$arxiv_id_versioned[[1]], "2501.12345v2"))
+stopifnot(identical(arxiv_row$arxiv_id_base[[1]], "2501.12345"))
 stopifnot(identical(arxiv_row$title[[1]], "Example arXiv Paper"))
 stopifnot(identical(arxiv_row$authors[[1]], "Jane Doe; John Smith"))
 stopifnot(identical(arxiv_row$arxiv_primary_category[[1]], "cs.AI"))
 stopifnot(identical(arxiv_row$doi[[1]], "10.1000/arxiv-example"))
 stopifnot(identical(arxiv_row$entry_type[[1]], "unpublished"))
 stopifnot(identical(arxiv_row$url[[1]], "http://arxiv.org/abs/2501.12345v2"))
+
+arxiv_row_v1 <- data.table::copy(arxiv_row)
+arxiv_row_v1$raw_entry <- list(NULL)
+arxiv_row_v1$title[[1]] <- "Example arXiv Paper v1"
+arxiv_row_v1$arxiv_version[[1]] <- 1L
+arxiv_row_v1$arxiv_id_versioned[[1]] <- "2501.12345v1"
+arxiv_row_v1$url[[1]] <- "http://arxiv.org/abs/2501.12345v1"
+arxiv_row_v1$url_landing[[1]] <- "http://arxiv.org/abs/2501.12345v1"
+
+merged_arxiv_versions <- litxr:::.litxr_upsert_records(
+  existing = arxiv_row,
+  incoming = arxiv_row_v1,
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(merged_arxiv_versions) == 1L)
+stopifnot(identical(merged_arxiv_versions$arxiv_version[[1]], 2L))
+stopifnot(identical(merged_arxiv_versions$arxiv_id_versioned[[1]], "2501.12345v2"))
+
+legacy_arxiv_row <- data.table::copy(arxiv_row_v1)
+legacy_arxiv_row$source_id[[1]] <- "2501.12345v1"
+legacy_arxiv_row$ref_id[[1]] <- "arxiv:2501.12345v1"
+legacy_arxiv_row$arxiv_id_base[[1]] <- NA_character_
+
+merged_arxiv_legacy <- litxr:::.litxr_upsert_records(
+  existing = legacy_arxiv_row,
+  incoming = arxiv_row,
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(merged_arxiv_legacy) == 1L)
+stopifnot(identical(merged_arxiv_legacy$ref_id[[1]], "arxiv:2501.12345"))
+stopifnot(identical(merged_arxiv_legacy$source_id[[1]], "2501.12345"))
+stopifnot(identical(merged_arxiv_legacy$arxiv_version[[1]], 2L))
 
 td_arxiv <- tempfile("litxr-arxiv-")
 dir.create(td_arxiv)
@@ -127,7 +162,7 @@ journal_arxiv <- list(
 litxr:::.litxr_write_journal_records(arxiv_row, td_arxiv, journal_arxiv)
 stopifnot(length(list.files(file.path(td_arxiv, "json"), pattern = "\\.json$")) == 1L)
 
-body_text <- paste(deparse(body(litxr::fetch_arxiv_xml)), collapse = "\n")
+body_text <- paste(deparse(body(get("fetch_arxiv_xml", envir = asNamespace("litxr")))), collapse = "\n")
 stopifnot(grepl("start = as.integer\\(start\\)", body_text))
 
 arxiv_query <- litxr:::.litxr_build_arxiv_search_query(

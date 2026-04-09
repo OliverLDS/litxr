@@ -151,8 +151,13 @@ for (i in seq_along(day_seq)) {
   day_total <- 0L
   day_fetched_from <- NA_character_
   day_fetched_to <- NA_character_
+  first_live_request <- TRUE
 
   repeat {
+    if (first_live_request && sleep_seconds > 0) {
+      Sys.sleep(sleep_seconds)
+    }
+
     day_journal <- journal
     day_journal$sync$search_query <- litxr:::.litxr_build_arxiv_search_query(
       base_query,
@@ -164,6 +169,7 @@ for (i in seq_along(day_seq)) {
     day_journal$sync$limit <- page_size
 
     incoming <- litxr:::.litxr_sync_arxiv_journal(day_journal)
+    first_live_request <- FALSE
     page_n <- nrow(incoming)
 
     cat(sprintf(
@@ -203,6 +209,8 @@ for (i in seq_along(day_seq)) {
     Sys.sleep(sleep_seconds)
   }
 
+  records_after_day <- nrow(litxr:::.litxr_read_journal_records(local_path))
+
   litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
     collection_id = collection_id,
     remote_channel = "arxiv",
@@ -218,7 +226,7 @@ for (i in seq_along(day_seq)) {
     page_start = 0L,
     page_size = page_size,
     records_fetched = day_total,
-    records_after = NA_integer_,
+    records_after = records_after_day,
     notes = ""
   ))
 
@@ -231,6 +239,7 @@ for (i in seq_along(day_seq)) {
 }
 
 litxr_rebuild_collection_index(collection_id, cfg)
+records_after_range <- nrow(litxr:::.litxr_read_journal_records(local_path))
 
 litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
   collection_id = collection_id,
@@ -247,7 +256,7 @@ litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
   page_start = 0L,
   page_size = page_size,
   records_fetched = total_incoming,
-  records_after = NA_integer_,
+  records_after = records_after_range,
   notes = if (isTRUE(parsed$force)) "force=TRUE" else ""
 ))
 

@@ -41,10 +41,11 @@ parse_arxiv_entry_unified <- function(entry) {
   
   # id + links (these work even without ns, but we can keep them consistent)
   id_str   <- xml_text_or_na(entry, ".//*[local-name()='id']")
-  source_id <- sub("^.*/", "", id_str)
+  source_id_versioned <- sub("^.*/", "", id_str)
   
-  m   <- regexec("^([^v]+)v(\\d+)$", source_id)
-  reg <- regmatches(source_id, m)[[1]]
+  m   <- regexec("^([^v]+)v(\\d+)$", source_id_versioned)
+  reg <- regmatches(source_id_versioned, m)[[1]]
+  source_id <- if (length(reg) == 3) reg[2] else source_id_versioned
   ver <- if (length(reg) == 3) as.integer(reg[3]) else NA_integer_
   
   link_nodes <- xml2::xml_find_all(entry, ".//*[local-name()='link']")
@@ -103,6 +104,8 @@ parse_arxiv_entry_unified <- function(entry) {
     url_landing   = url_landing,
     url_pdf       = url_pdf,
     
+    arxiv_id_versioned      = source_id_versioned,
+    arxiv_id_base           = source_id,
     arxiv_version          = ver,
     arxiv_primary_category = arxiv_primary_category,
     arxiv_categories_raw   = arxiv_categories_raw,

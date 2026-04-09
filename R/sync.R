@@ -1702,12 +1702,24 @@ litxr_add_refs <- function(
   out <- data.table::copy(records)
   out[["litxr_record_key__"]] <- key_fun(out)
   out[["litxr_completeness__"]] <- .litxr_record_completeness_score(out)
+  out[["litxr_arxiv_version__"]] <- if ("arxiv_version" %in% names(out)) {
+    version <- suppressWarnings(as.integer(out[["arxiv_version"]]))
+    version[is.na(version)] <- -1L
+    version
+  } else {
+    rep(-1L, nrow(out))
+  }
 
-  ord <- order(out[["litxr_record_key__"]], -out[["litxr_completeness__"]])
+  ord <- order(
+    out[["litxr_record_key__"]],
+    -out[["litxr_arxiv_version__"]],
+    -out[["litxr_completeness__"]]
+  )
   out <- out[ord, ]
   out <- out[!duplicated(out[["litxr_record_key__"]]), ]
   out[["litxr_record_key__"]] <- NULL
   out[["litxr_completeness__"]] <- NULL
+  out[["litxr_arxiv_version__"]] <- NULL
   out
 }
 
@@ -1733,9 +1745,7 @@ litxr_add_refs <- function(
   }
 
   out <- data.table::copy(records)
-  if (!("doi" %in% names(out))) {
-    return(out)
-  }
+  if (!("doi" %in% names(out))) out[["doi"]] <- rep(NA_character_, nrow(out))
 
   source <- if ("source" %in% names(out)) out[["source"]] else rep(NA_character_, nrow(out))
   source_id <- if ("source_id" %in% names(out)) out[["source_id"]] else rep(NA_character_, nrow(out))
@@ -1749,6 +1759,43 @@ litxr_add_refs <- function(
   crossref_ref_id <- missing_doi & !is.na(source) & source == "crossref" & !is.na(ref_id) & grepl("^doi:", ref_id)
   doi[crossref_ref_id] <- sub("^doi:", "", ref_id[crossref_ref_id])
 
+  arxiv_rows <- !is.na(source) & source == "arxiv"
+  if (any(arxiv_rows)) {
+    arxiv_base <- rep(NA_character_, nrow(out))
+
+    if ("arxiv_id_base" %in% names(out)) {
+      arxiv_base <- out[["arxiv_id_base"]]
+    }
+
+    missing_base <- is.na(arxiv_base) | !nzchar(arxiv_base)
+    if (any(missing_base)) {
+      from_source_id <- !is.na(source_id) & grepl("^.+v[0-9]+$", source_id)
+      arxiv_base[missing_base & from_source_id] <- sub("v[0-9]+$", "", source_id[missing_base & from_source_id])
+    }
+
+    missing_base <- is.na(arxiv_base) | !nzchar(arxiv_base)
+    if (any(missing_base)) {
+      from_ref_id <- !is.na(ref_id) & grepl("^arxiv:.+v[0-9]+$", ref_id)
+      arxiv_base[missing_base & from_ref_id] <- sub("^arxiv:", "", sub("v[0-9]+$", "", ref_id[missing_base & from_ref_id]))
+    }
+
+    missing_base <- is.na(arxiv_base) | !nzchar(arxiv_base)
+    if (any(missing_base)) {
+      keep_source_id <- !is.na(source_id) & nzchar(source_id)
+      arxiv_base[missing_base & keep_source_id] <- source_id[missing_base & keep_source_id]
+    }
+
+    source_id[arxiv_rows & !is.na(arxiv_base) & nzchar(arxiv_base)] <- arxiv_base[arxiv_rows & !is.na(arxiv_base) & nzchar(arxiv_base)]
+    ref_id[arxiv_rows & !is.na(arxiv_base) & nzchar(arxiv_base)] <- paste0("arxiv:", arxiv_base[arxiv_rows & !is.na(arxiv_base) & nzchar(arxiv_base)])
+
+    if (!("arxiv_id_base" %in% names(out))) {
+      out[["arxiv_id_base"]] <- rep(NA_character_, nrow(out))
+    }
+    out[["arxiv_id_base"]][arxiv_rows & !is.na(arxiv_base) & nzchar(arxiv_base)] <- arxiv_base[arxiv_rows & !is.na(arxiv_base) & nzchar(arxiv_base)]
+  }
+
+  out[["source_id"]] <- source_id
+  out[["ref_id"]] <- ref_id
   out[["doi"]] <- doi
   out
 }
@@ -1792,6 +1839,23 @@ litxr_add_refs <- function(
 }
 
 .litxr_merge_record_row <- function(existing_row, incoming_row, key, conflict_env) {
+  existing_source <- existing_row[["source"]]
+  incoming_source <- incoming_row[["source"]]
+  existing_version <- suppressWarnings(as.integer(existing_row[["arxiv_version"]]))
+  incoming_version <- suppressWarnings(as.integer(incoming_row[["arxiv_version"]]))
+  version_order <- 0L
+  if (
+    !.litxr_nullish(existing_source) &&
+    !.litxr_nullish(incoming_source) &&
+    identical(as.character(existing_source), "arxiv") &&
+    identical(as.character(incoming_source), "arxiv") &&
+    !is.na(existing_version) &&
+    !is.na(incoming_version)
+  ) {
+    if (incoming_version > existing_version) version_order <- 1L
+    if (incoming_version < existing_version) version_order <- -1L
+  }
+
   existing_row <- stats::setNames(lapply(names(existing_row), function(name) existing_row[[name]]), names(existing_row))
   incoming_row <- stats::setNames(lapply(names(incoming_row), function(name) incoming_row[[name]]), names(incoming_row))
   fields <- union(names(existing_row), names(incoming_row))
@@ -1802,7 +1866,13 @@ litxr_add_refs <- function(
     incoming_value <- incoming_row[[field]]
 
     if (field %in% c("authors_list", "raw_entry")) {
-      values[[field]] <- if (!.litxr_nullish(incoming_value)) incoming_value else existing_value
+      if (version_order < 0L && !.litxr_nullish(existing_value)) {
+        values[[field]] <- existing_value
+      } else {
+        values[[field]] <- if (!.litxr_nullish(incoming_value)) incoming_value else existing_value
+      }
+    } else if (version_order < 0L && !(field %in% c("note"))) {
+      values[[field]] <- if (!.litxr_nullish(existing_value)) existing_value else incoming_value
     } else {
       values[[field]] <- .litxr_merge_field(existing_row, incoming_row, field, key, conflict_env)
     }

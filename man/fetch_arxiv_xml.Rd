@@ -9,7 +9,8 @@ fetch_arxiv_xml(
   search_query = NULL,
   start = NULL,
   max_results = 100L,
-  retry_max = 3L
+  retry_max = 6L,
+  retry_backoff_seconds = 30
 )
 }
 \arguments{
@@ -23,6 +24,8 @@ fetch_arxiv_xml(
 
 \item{retry_max}{Maximum number of retries after rate limiting or transient
 request failure.}
+
+\item{retry_backoff_seconds}{Base backoff in seconds for arXiv rate limiting.}
 }
 \value{
 XML document.

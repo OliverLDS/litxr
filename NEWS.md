@@ -1,3 +1,15 @@
+# litxr 0.0.5.1
+
+- Canonicalized arXiv reference identity to the base arXiv id so versioned
+  records such as `v1` and `v2` now merge into one paper while preserving
+  version metadata fields.
+- Extended local identity normalization so legacy versioned arXiv rows are
+  collapsed to the base id during rebuild and upsert.
+- Strengthened arXiv rate-limit handling with larger retry backoff and support
+  for honoring `Retry-After` when returned by the API.
+- Updated `scripts/repair_arxiv_range.R` to sleep before the first live request
+  of each active day, reducing immediate rerun pressure after skipped days.
+
 # litxr 0.0.5
 
 - Fixed collection `local_path` resolution so relative paths are resolved under
