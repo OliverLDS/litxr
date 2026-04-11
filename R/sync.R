@@ -217,8 +217,7 @@ litxr_repair_collection <- function(
   )
 
   existing <- .litxr_read_journal_records(local_path)
-  records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-  .litxr_write_journal_records(records, local_path, journal, cfg = cfg)
+  records <- .litxr_write_journal_upserted_records(existing, incoming, local_path, journal, cfg = cfg)
   .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
     collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
     remote_channel = journal$remote_channel,
@@ -290,7 +289,9 @@ litxr_rebuild_collection_index <- function(collection_id, config = NULL) {
   journal <- .litxr_get_journal(cfg, collection_id)
   local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
   records <- .litxr_read_journal_records_from_json(local_path)
-  .litxr_write_journal_index(records, local_path)
+  index_path <- .litxr_write_journal_index(records, local_path)
+  .litxr_update_project_indexes(cfg, journal, records)
+  invisible(index_path)
 }
 
 #' Rebuild the local journal fst index from JSON files
@@ -1078,8 +1079,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
     incoming <- data.table::as.data.table(by_journal[[journal_id]])
     existing <- .litxr_read_journal_records(local_path)
-    merged <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-    .litxr_write_journal_records(merged, local_path, journal, cfg = cfg)
+    .litxr_write_journal_upserted_records(existing, incoming, local_path, journal, cfg = cfg)
     incoming
   })
 
@@ -1136,8 +1136,7 @@ litxr_add_refs <- function(
 
   local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
   existing <- .litxr_read_journal_records(local_path)
-  merged <- .litxr_upsert_journal_records(existing, records, local_path = local_path)
-  .litxr_write_journal_records(merged, local_path, collection, cfg = cfg)
+  .litxr_write_journal_upserted_records(existing, records, local_path, collection, cfg = cfg)
   records
 }
 
@@ -1938,11 +1937,37 @@ litxr_add_refs <- function(
   )
 }
 
+.litxr_write_journal_upserted_records <- function(existing, incoming, local_path, journal, cfg = NULL) {
+  records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
+  incoming_keys <- .litxr_upsert_key(incoming)
+  records_keys <- .litxr_upsert_key(records)
+  touched_records <- records[records_keys %in% incoming_keys, ]
+
+  .litxr_write_journal_record_files(touched_records, local_path, journal)
+  .litxr_write_journal_index(records, local_path)
+  if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
+
+  records
+}
+
 .litxr_write_journal_records <- function(records, local_path, journal, cfg = NULL) {
-  paths <- .litxr_ensure_journal_dirs(local_path)
   if (!nrow(records)) {
+    .litxr_ensure_journal_dirs(local_path)
     .litxr_write_journal_index(records, local_path)
     if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
+    return(invisible(character()))
+  }
+
+  written <- .litxr_write_journal_record_files(records, local_path, journal)
+
+  .litxr_write_journal_index(records, local_path)
+  if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
+  invisible(written)
+}
+
+.litxr_write_journal_record_files <- function(records, local_path, journal) {
+  paths <- .litxr_ensure_journal_dirs(local_path)
+  if (!nrow(records)) {
     return(invisible(character()))
   }
 
@@ -1954,8 +1979,6 @@ litxr_add_refs <- function(
     json_path
   }), use.names = FALSE)
 
-  .litxr_write_journal_index(records, local_path)
-  if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
   invisible(written)
 }
 

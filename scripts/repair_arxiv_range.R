@@ -121,6 +121,7 @@ base_query <- if (is.null(parsed[["search-query"]])) {
 sync_state <- litxr_read_sync_state(cfg, collection_id)
 
 local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
+records <- litxr:::.litxr_read_journal_records(local_path)
 day_seq <- seq(date_from, date_to, by = "day")
 total_incoming <- 0L
 overall_fetched_from <- NA_character_
@@ -181,9 +182,11 @@ for (i in seq_along(day_seq)) {
       break
     }
 
-    existing <- litxr:::.litxr_read_journal_records(local_path)
-    records <- litxr:::.litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-    litxr:::.litxr_write_journal_records(records, local_path, day_journal, cfg = cfg)
+    incoming_keys <- litxr:::.litxr_upsert_key(incoming)
+    records <- litxr:::.litxr_upsert_journal_records(records, incoming, local_path = local_path)
+    records_keys <- litxr:::.litxr_upsert_key(records)
+    touched_records <- records[records_keys %in% incoming_keys, ]
+    litxr:::.litxr_write_journal_record_files(touched_records, local_path, day_journal)
 
     total_incoming <- total_incoming + page_n
     day_total <- day_total + page_n
@@ -209,7 +212,7 @@ for (i in seq_along(day_seq)) {
     Sys.sleep(sleep_seconds)
   }
 
-  records_after_day <- nrow(litxr:::.litxr_read_journal_records(local_path))
+  records_after_day <- nrow(records)
 
   litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
     collection_id = collection_id,
@@ -238,8 +241,9 @@ for (i in seq_along(day_seq)) {
   }
 }
 
-litxr_rebuild_collection_index(collection_id, cfg)
-records_after_range <- nrow(litxr:::.litxr_read_journal_records(local_path))
+litxr:::.litxr_write_journal_index(records, local_path)
+litxr:::.litxr_update_project_indexes(cfg, journal, records)
+records_after_range <- nrow(records)
 
 litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
   collection_id = collection_id,

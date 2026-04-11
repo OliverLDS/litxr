@@ -1,3 +1,14 @@
+# litxr 0.0.5.3
+
+- Reduced repeated full-collection JSON rewrites in small-update paths such as
+  arXiv range repair, bounded collection repair, DOI ingest, and manual
+  reference ingest.
+- Updated arXiv range repair to keep the working collection in memory, write
+  only touched JSON record files during the loop, and refresh local/project
+  indexes once at the end.
+- Made collection-index rebuild refresh project-level indexes for consistency
+  with the canonical project store.
+
 # litxr 0.0.5.2
 
 - Fixed arXiv deduplication so base arXiv ids remain the canonical key even
