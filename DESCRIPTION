@@ -1,7 +1,7 @@
 Package: litxr
 Type: Package
 Title: Lightweight Framework for Organizing and Enriching Academic Papers at Scale
-Version: 0.0.5.6
+Version: 0.0.5.7
 Authors@R: 
     person(given = "Oliver",
            family = "Zhou",

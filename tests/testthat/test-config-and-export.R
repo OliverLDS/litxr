@@ -148,6 +148,27 @@ stopifnot(file.exists(refreshed_path))
 refreshed_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
 stopifnot(any(refreshed_records$doi == "10.1000/newer"))
 
+delta_record <- data.table::copy(record)
+delta_record$ref_id[[1]] <- "doi:10.1000/delta"
+delta_record$source_id[[1]] <- "10.1000/delta"
+delta_record$doi[[1]] <- "10.1000/delta"
+delta_record$title[[1]] <- "Delta Example Paper"
+delta_record$pub_date[[1]] <- as.POSIXct("2024-03-01", tz = "UTC")
+delta_record$year[[1]] <- 2024L
+delta_record$month[[1]] <- 3L
+delta_record$day[[1]] <- 1L
+litxr:::.litxr_append_collection_delta(delta_record, local_path)
+delta_path <- file.path(local_path, "index", "references_delta.fst")
+stopifnot(file.exists(delta_path))
+with_delta <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
+stopifnot(any(with_delta$doi == "10.1000/delta"))
+compacted_path <- litxr::litxr_compact_collection_index(journal$journal_id, cfg_export)
+stopifnot(file.exists(compacted_path))
+stopifnot(!file.exists(delta_path))
+compacted_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
+stopifnot(any(compacted_records$doi == "10.1000/delta"))
+stopifnot(file.exists(file.path(local_path, "json", paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
+
 out <- file.path(td_export, "references.bib")
 litxr::litxr_export_bib(out, journal_ids = journal$journal_id, config = cfg_export)
 

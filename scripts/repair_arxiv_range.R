@@ -54,9 +54,10 @@ usage <- function() {
       "Notes:",
       "  - LITXR_CONFIG must be set in the environment.",
       "  - The script iterates day by day, paginates within each day with `start`,",
-      "    records successful days in the project sync ledger, and rebuilds the",
-      "    collection index at the end.",
-      "  - By default, indexes are flushed at the end or on exit/error. Use",
+      "    records successful days in the project sync ledger, and appends fetched",
+      "    records to a collection delta index during the run.",
+      "  - By default, the delta index is compacted into the full index at the end",
+      "    or on exit/error. Use",
       "    `--flush-each-day` only when you need day-by-day index visibility.",
       "  - By default, only the collection index is refreshed. Use",
       "    `--refresh-project-index` when project-level reference indexes must",
@@ -136,18 +137,26 @@ base_query <- if (is.null(parsed[["search-query"]])) {
 sync_state <- litxr_read_sync_state(cfg, collection_id)
 
 local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
-records <- litxr:::.litxr_read_journal_records(local_path)
-records_dirty <- FALSE
-flush_indexes <- function() {
+existing_index <- litxr:::.litxr_read_journal_records(local_path)
+existing_delta <- litxr:::.litxr_read_collection_delta(local_path)
+known_keys <- union(
+  litxr:::.litxr_upsert_key(existing_index),
+  litxr:::.litxr_upsert_key(existing_delta)
+)
+records_dirty <- nrow(existing_delta) > 0L
+rm(existing_index, existing_delta)
+records_after <- length(known_keys)
+compact_indexes <- function() {
   if (isTRUE(records_dirty)) {
-    litxr:::.litxr_write_journal_index(records, local_path)
-    if (isTRUE(parsed[["refresh-project-index"]])) {
-      litxr:::.litxr_update_project_indexes(cfg, journal, records)
-    }
+    litxr_compact_collection_index(
+      collection_id,
+      cfg,
+      refresh_project_index = isTRUE(parsed[["refresh-project-index"]])
+    )
     records_dirty <<- FALSE
   }
 }
-on.exit(flush_indexes(), add = TRUE)
+on.exit(compact_indexes(), add = TRUE)
 
 day_seq <- seq(date_from, date_to, by = "day")
 total_incoming <- 0L
@@ -209,15 +218,14 @@ for (i in seq_along(day_seq)) {
       break
     }
 
-    incoming_keys <- litxr:::.litxr_upsert_key(incoming)
-    records <- litxr:::.litxr_upsert_journal_records(records, incoming, local_path = local_path)
-    records_keys <- litxr:::.litxr_upsert_key(records)
-    touched_records <- records[records_keys %in% incoming_keys, ]
-    litxr:::.litxr_write_journal_record_files(touched_records, local_path, day_journal)
+    litxr:::.litxr_append_collection_delta(incoming, local_path)
     records_dirty <- TRUE
 
+    incoming_keys <- litxr:::.litxr_upsert_key(incoming)
+    known_keys <- union(known_keys, incoming_keys)
     total_incoming <- total_incoming + page_n
     day_total <- day_total + page_n
+    records_after <- length(known_keys)
     day_range <- litxr:::.litxr_records_date_range(incoming)
     if (is.na(day_fetched_from) || (!is.na(day_range$from) && nzchar(day_range$from) && day_range$from < day_fetched_from)) {
       day_fetched_from <- day_range$from
@@ -236,12 +244,6 @@ for (i in seq_along(day_seq)) {
     }
   }
 
-  if (sleep_seconds > 0) {
-    Sys.sleep(sleep_seconds)
-  }
-
-  records_after_day <- nrow(records)
-
   litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
     collection_id = collection_id,
     remote_channel = "arxiv",
@@ -257,12 +259,13 @@ for (i in seq_along(day_seq)) {
     page_start = 0L,
     page_size = page_size,
     records_fetched = day_total,
-    records_after = records_after_day,
+    records_after = records_after,
     notes = ""
   ))
 
   if (isTRUE(parsed[["flush-each-day"]])) {
-    flush_indexes()
+    compact_indexes()
+    records_after <- nrow(litxr_read_collection(collection_id, cfg))
   }
 
   if (is.na(overall_fetched_from) || (!is.na(day_fetched_from) && nzchar(day_fetched_from) && day_fetched_from < overall_fetched_from)) {
@@ -273,8 +276,8 @@ for (i in seq_along(day_seq)) {
   }
 }
 
-flush_indexes()
-records_after_range <- nrow(records)
+compact_indexes()
+records_after_range <- nrow(litxr_read_collection(collection_id, cfg))
 
 litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
   collection_id = collection_id,

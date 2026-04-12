@@ -92,7 +92,13 @@ litxr_read_collection <- function(collection_id, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
   journal <- .litxr_get_journal(cfg, collection_id)
-  .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
+  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+  records <- .litxr_read_journal_records(local_path)
+  delta <- .litxr_read_collection_delta(local_path)
+  if (nrow(delta)) {
+    return(.litxr_upsert_records(records, delta))
+  }
+  records
 }
 
 #' Summarize publication-date coverage for one collection
@@ -345,6 +351,49 @@ litxr_refresh_collection_index <- function(collection_id, config = NULL) {
   )
   index_path <- .litxr_write_journal_index(records, local_path)
   .litxr_update_project_indexes(cfg, journal, records)
+  invisible(index_path)
+}
+
+#' Compact pending collection delta records into the main fst index
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param refresh_project_index Whether to refresh project-level canonical
+#'   reference indexes after compaction.
+#'
+#' @return Invisibly returns the compacted fst index path.
+#' @export
+litxr_compact_collection_index <- function(collection_id, config = NULL, refresh_project_index = FALSE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, collection_id)
+  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+
+  records <- .litxr_read_journal_records(local_path)
+  delta <- .litxr_read_collection_delta(local_path)
+  delta_keys <- character()
+  if (nrow(delta)) {
+    delta_keys <- .litxr_upsert_key(delta)
+    records <- .litxr_upsert_records(
+      records,
+      delta,
+      conflict_path = file.path(.litxr_journal_paths(local_path)$json, "_upsert_conflicts.jsonl")
+    )
+  }
+
+  index_path <- .litxr_write_journal_index(records, local_path)
+  if (length(delta_keys)) {
+    records_keys <- .litxr_upsert_key(records)
+    touched_records <- records[records_keys %in% delta_keys, ]
+    .litxr_write_journal_record_files(touched_records, local_path, journal)
+  }
+  .litxr_clear_collection_delta(local_path)
+
+  if (isTRUE(refresh_project_index)) {
+    .litxr_update_project_indexes(cfg, journal, records)
+  }
+
   invisible(index_path)
 }
 
@@ -2067,6 +2116,10 @@ litxr_add_refs <- function(
   file.path(.litxr_journal_paths(local_path)$index, "references.fst")
 }
 
+.litxr_delta_index_path <- function(local_path) {
+  file.path(.litxr_journal_paths(local_path)$index, "references_delta.fst")
+}
+
 .litxr_index_encode <- function(records) {
   out <- data.table::copy(records)
 
@@ -2139,6 +2192,37 @@ litxr_add_refs <- function(
   }
 
   .litxr_index_decode(fst::read_fst(index_path, as.data.table = TRUE))
+}
+
+.litxr_read_collection_delta <- function(local_path) {
+  path <- .litxr_delta_index_path(local_path)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
+}
+
+.litxr_append_collection_delta <- function(records, local_path) {
+  paths <- .litxr_ensure_journal_dirs(local_path)
+  if (!nrow(records)) {
+    return(invisible(.litxr_delta_index_path(local_path)))
+  }
+
+  existing <- .litxr_read_collection_delta(local_path)
+  delta <- .litxr_upsert_records(existing, records)
+  fst::write_fst(
+    as.data.frame(.litxr_index_encode(delta)),
+    .litxr_delta_index_path(local_path)
+  )
+  invisible(.litxr_delta_index_path(local_path))
+}
+
+.litxr_clear_collection_delta <- function(local_path) {
+  path <- .litxr_delta_index_path(local_path)
+  if (file.exists(path)) {
+    unlink(path)
+  }
+  invisible(path)
 }
 
 .litxr_project_root <- function(cfg) {

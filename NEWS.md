@@ -1,3 +1,13 @@
+# litxr 0.0.5.7
+
+- Added a collection-local delta FST index for arXiv range repair so fetched
+  pages are appended to `index/references_delta.fst` during a run and compacted
+  into `index/references.fst` once at the end or on exit/error.
+- Added `litxr_compact_collection_index()` for explicit delta compaction and
+  made `litxr_read_collection()` include pending delta rows before compaction.
+- Removed the extra post-day sleep in `scripts/repair_arxiv_range.R`; request
+  pacing remains before each active day and between paginated API requests.
+
 # litxr 0.0.5.6
 
 - Made project-level index refresh opt-in for `scripts/repair_arxiv_range.R`

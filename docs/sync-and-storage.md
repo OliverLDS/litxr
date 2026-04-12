@@ -36,6 +36,7 @@ Main collection-level functions:
 - `litxr_read_collection()`
 - `litxr_collection_date_stats()`
 - `litxr_refresh_collection_index()`
+- `litxr_compact_collection_index()`
 - `litxr_rebuild_collection_index()`
 
 Backward-compatible journal wrappers still exist:
@@ -86,11 +87,13 @@ Helpers:
 
 `scripts/repair_arxiv_range.R` records successful day-level repair windows in
 `sync_state.fst` and skips already completed days unless `--force` is used. It
-flushes local indexes at the end and on exit/error by default. Use
-`--flush-each-day` only when day-by-day index visibility is more important than
-speed. By default, it refreshes only the collection-level index; use
-`--refresh-project-index` when project-level reference indexes must be refreshed
-during the repair run.
+writes fetched pages to `index/references_delta.fst` during the run, then
+compacts that delta into `index/references.fst` at the end and on exit/error by
+default. This avoids repeatedly rewriting the full collection index after every
+day. Use `--flush-each-day` only when day-by-day full-index visibility is more
+important than speed. By default, it refreshes only the collection-level index;
+use `--refresh-project-index` when project-level reference indexes must be
+refreshed during the repair run.
 
 Use `litxr_refresh_collection_index()` when recently written JSON files need to
 be merged into the existing `fst` index without a full JSON scan. Use

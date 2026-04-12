@@ -69,6 +69,7 @@ Read and export:
 
 - `litxr_read_collection()`
 - `litxr_refresh_collection_index()`
+- `litxr_compact_collection_index()`
 - `litxr_collection_date_stats()`
 - `litxr_read_references()`
 - `litxr_find_refs()`
@@ -112,6 +113,8 @@ Included shell helpers:
 
 The arXiv repair scripts now prefer `--collection-id`; `--journal-id` still
 works as a compatibility alias.
+Range repair writes fetched pages to a small delta index during the run and
+compacts that delta into the full collection index once at the end by default.
 
 ## Status
 
