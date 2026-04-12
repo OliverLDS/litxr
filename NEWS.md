@@ -1,3 +1,11 @@
+# litxr 0.0.5.6
+
+- Made project-level index refresh opt-in for `scripts/repair_arxiv_range.R`
+  through `--refresh-project-index`.
+- Kept collection-level index refresh enabled by default so
+  `litxr_read_collection()` and `litxr_collection_date_stats()` see repaired
+  records without paying the full project-index refresh cost.
+
 # litxr 0.0.5.5
 
 - Restored the faster default behavior in `scripts/repair_arxiv_range.R` by

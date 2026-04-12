@@ -28,6 +28,11 @@ parse_args <- function(args) {
       i <- i + 1L
       next
     }
+    if (identical(name, "refresh-project-index")) {
+      out[["refresh-project-index"]] <- TRUE
+      i <- i + 1L
+      next
+    }
 
     if (i == length(args)) {
       stop("Missing value for argument: ", key, call. = FALSE)
@@ -44,7 +49,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/repair_arxiv_range.R --collection-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 [--page-size 200] [--sleep-seconds 10] [--search-query 'cat:cs.AI'] [--force] [--flush-each-day]",
+      "  Rscript scripts/repair_arxiv_range.R --collection-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 [--page-size 200] [--sleep-seconds 10] [--search-query 'cat:cs.AI'] [--force] [--flush-each-day] [--refresh-project-index]",
       "",
       "Notes:",
       "  - LITXR_CONFIG must be set in the environment.",
@@ -53,6 +58,9 @@ usage <- function() {
       "    collection index at the end.",
       "  - By default, indexes are flushed at the end or on exit/error. Use",
       "    `--flush-each-day` only when you need day-by-day index visibility.",
+      "  - By default, only the collection index is refreshed. Use",
+      "    `--refresh-project-index` when project-level reference indexes must",
+      "    be refreshed during the repair run.",
       "  - `--journal-id` still works as a compatibility alias.",
       sep = "\n"
     )
@@ -133,7 +141,9 @@ records_dirty <- FALSE
 flush_indexes <- function() {
   if (isTRUE(records_dirty)) {
     litxr:::.litxr_write_journal_index(records, local_path)
-    litxr:::.litxr_update_project_indexes(cfg, journal, records)
+    if (isTRUE(parsed[["refresh-project-index"]])) {
+      litxr:::.litxr_update_project_indexes(cfg, journal, records)
+    }
     records_dirty <<- FALSE
   }
 }

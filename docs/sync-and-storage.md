@@ -88,7 +88,9 @@ Helpers:
 `sync_state.fst` and skips already completed days unless `--force` is used. It
 flushes local indexes at the end and on exit/error by default. Use
 `--flush-each-day` only when day-by-day index visibility is more important than
-speed.
+speed. By default, it refreshes only the collection-level index; use
+`--refresh-project-index` when project-level reference indexes must be refreshed
+during the repair run.
 
 Use `litxr_refresh_collection_index()` when recently written JSON files need to
 be merged into the existing `fst` index without a full JSON scan. Use
