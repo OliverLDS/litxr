@@ -23,6 +23,11 @@ parse_args <- function(args) {
       i <- i + 1L
       next
     }
+    if (identical(name, "flush-each-day")) {
+      out[["flush-each-day"]] <- TRUE
+      i <- i + 1L
+      next
+    }
 
     if (i == length(args)) {
       stop("Missing value for argument: ", key, call. = FALSE)
@@ -39,13 +44,15 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/repair_arxiv_range.R --collection-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 [--page-size 200] [--sleep-seconds 10] [--search-query 'cat:cs.AI'] [--force]",
+      "  Rscript scripts/repair_arxiv_range.R --collection-id arxiv_cs_ai --date-from 2026-01-01 --date-to 2026-01-31 [--page-size 200] [--sleep-seconds 10] [--search-query 'cat:cs.AI'] [--force] [--flush-each-day]",
       "",
       "Notes:",
       "  - LITXR_CONFIG must be set in the environment.",
       "  - The script iterates day by day, paginates within each day with `start`,",
       "    records successful days in the project sync ledger, and rebuilds the",
       "    collection index at the end.",
+      "  - By default, indexes are flushed at the end or on exit/error. Use",
+      "    `--flush-each-day` only when you need day-by-day index visibility.",
       "  - `--journal-id` still works as a compatibility alias.",
       sep = "\n"
     )
@@ -244,7 +251,9 @@ for (i in seq_along(day_seq)) {
     notes = ""
   ))
 
-  flush_indexes()
+  if (isTRUE(parsed[["flush-each-day"]])) {
+    flush_indexes()
+  }
 
   if (is.na(overall_fetched_from) || (!is.na(day_fetched_from) && nzchar(day_fetched_from) && day_fetched_from < overall_fetched_from)) {
     overall_fetched_from <- day_fetched_from

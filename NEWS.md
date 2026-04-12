@@ -1,3 +1,10 @@
+# litxr 0.0.5.5
+
+- Restored the faster default behavior in `scripts/repair_arxiv_range.R` by
+  flushing indexes at the end and on exit/error instead of after every day.
+- Added `--flush-each-day` for workflows that explicitly need day-by-day index
+  visibility during long arXiv repair runs.
+
 # litxr 0.0.5.4
 
 - Added `litxr_refresh_collection_index()` for fast mtime-based index refresh

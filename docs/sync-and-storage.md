@@ -86,7 +86,9 @@ Helpers:
 
 `scripts/repair_arxiv_range.R` records successful day-level repair windows in
 `sync_state.fst` and skips already completed days unless `--force` is used. It
-also refreshes local indexes after completed days and on exit.
+flushes local indexes at the end and on exit/error by default. Use
+`--flush-each-day` only when day-by-day index visibility is more important than
+speed.
 
 Use `litxr_refresh_collection_index()` when recently written JSON files need to
 be merged into the existing `fst` index without a full JSON scan. Use
