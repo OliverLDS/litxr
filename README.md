@@ -68,6 +68,7 @@ Sync and ingest:
 Read and export:
 
 - `litxr_read_collection()`
+- `litxr_refresh_collection_index()`
 - `litxr_collection_date_stats()`
 - `litxr_read_references()`
 - `litxr_find_refs()`

@@ -132,6 +132,22 @@ stopifnot(!file.exists(index_path))
 rebuilt_path <- litxr::litxr_rebuild_journal_index(journal$journal_id, cfg_export)
 stopifnot(file.exists(rebuilt_path))
 
+new_record <- data.table::copy(record)
+new_record$ref_id[[1]] <- "doi:10.1000/newer"
+new_record$source_id[[1]] <- "10.1000/newer"
+new_record$doi[[1]] <- "10.1000/newer"
+new_record$title[[1]] <- "Newer Example Paper"
+new_record$pub_date[[1]] <- as.POSIXct("2024-02-01", tz = "UTC")
+new_record$year[[1]] <- 2024L
+new_record$month[[1]] <- 2L
+new_record$day[[1]] <- 1L
+litxr:::.litxr_write_journal_record_files(new_record, local_path, journal)
+stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) == 1L)
+refreshed_path <- litxr::litxr_refresh_collection_index(journal$journal_id, cfg_export)
+stopifnot(file.exists(refreshed_path))
+refreshed_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
+stopifnot(any(refreshed_records$doi == "10.1000/newer"))
+
 out <- file.path(td_export, "references.bib")
 litxr::litxr_export_bib(out, journal_ids = journal$journal_id, config = cfg_export)
 

@@ -35,6 +35,7 @@ Main collection-level functions:
 - `litxr_repair_collection()`
 - `litxr_read_collection()`
 - `litxr_collection_date_stats()`
+- `litxr_refresh_collection_index()`
 - `litxr_rebuild_collection_index()`
 
 Backward-compatible journal wrappers still exist:
@@ -83,8 +84,14 @@ Helpers:
 - `scripts/repair_arxiv.R`
 - `scripts/repair_arxiv_range.R`
 
-`scripts/repair_arxiv_range.R` now records successful day-level repair windows
-in `sync_state.fst` and skips already completed days unless `--force` is used.
+`scripts/repair_arxiv_range.R` records successful day-level repair windows in
+`sync_state.fst` and skips already completed days unless `--force` is used. It
+also refreshes local indexes after completed days and on exit.
+
+Use `litxr_refresh_collection_index()` when recently written JSON files need to
+be merged into the existing `fst` index without a full JSON scan. Use
+`litxr_rebuild_collection_index()` for full correctness-first rebuilds after
+schema changes, legacy cleanup, or suspected index corruption.
 
 For local coverage diagnostics, use:
 

@@ -122,6 +122,16 @@ sync_state <- litxr_read_sync_state(cfg, collection_id)
 
 local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
 records <- litxr:::.litxr_read_journal_records(local_path)
+records_dirty <- FALSE
+flush_indexes <- function() {
+  if (isTRUE(records_dirty)) {
+    litxr:::.litxr_write_journal_index(records, local_path)
+    litxr:::.litxr_update_project_indexes(cfg, journal, records)
+    records_dirty <<- FALSE
+  }
+}
+on.exit(flush_indexes(), add = TRUE)
+
 day_seq <- seq(date_from, date_to, by = "day")
 total_incoming <- 0L
 overall_fetched_from <- NA_character_
@@ -187,6 +197,7 @@ for (i in seq_along(day_seq)) {
     records_keys <- litxr:::.litxr_upsert_key(records)
     touched_records <- records[records_keys %in% incoming_keys, ]
     litxr:::.litxr_write_journal_record_files(touched_records, local_path, day_journal)
+    records_dirty <- TRUE
 
     total_incoming <- total_incoming + page_n
     day_total <- day_total + page_n
@@ -233,6 +244,8 @@ for (i in seq_along(day_seq)) {
     notes = ""
   ))
 
+  flush_indexes()
+
   if (is.na(overall_fetched_from) || (!is.na(day_fetched_from) && nzchar(day_fetched_from) && day_fetched_from < overall_fetched_from)) {
     overall_fetched_from <- day_fetched_from
   }
@@ -241,8 +254,7 @@ for (i in seq_along(day_seq)) {
   }
 }
 
-litxr:::.litxr_write_journal_index(records, local_path)
-litxr:::.litxr_update_project_indexes(cfg, journal, records)
+flush_indexes()
 records_after_range <- nrow(records)
 
 litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(

@@ -1,3 +1,12 @@
+# litxr 0.0.5.4
+
+- Added `litxr_refresh_collection_index()` for fast mtime-based index refresh
+  from recently changed JSON record files.
+- Kept `litxr_rebuild_collection_index()` as the full correctness-first rebuild
+  path for schema migrations, legacy cleanup, and suspected index corruption.
+- Updated arXiv range repair to flush indexes after completed days and on
+  script exit/error when records were written.
+
 # litxr 0.0.5.3
 
 - Reduced repeated full-collection JSON rewrites in small-update paths such as

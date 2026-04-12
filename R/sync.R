@@ -294,6 +294,60 @@ litxr_rebuild_collection_index <- function(collection_id, config = NULL) {
   invisible(index_path)
 }
 
+#' Refresh the local collection fst index from recently changed JSON files
+#'
+#' This is a fast, mtime-based refresh for the common case where JSON record
+#' files were written after `index/references.fst` was last updated. It does
+#' not replace `litxr_rebuild_collection_index()`, which remains the
+#' correctness-first full rebuild for schema migrations and legacy cleanup.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the refreshed fst index path.
+#' @export
+litxr_refresh_collection_index <- function(collection_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, collection_id)
+  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
+  paths <- .litxr_journal_paths(local_path)
+  index_path <- .litxr_index_path(local_path)
+
+  existing <- .litxr_read_journal_index(local_path)
+  if (is.null(existing) || !file.exists(index_path)) {
+    return(litxr_rebuild_collection_index(collection_id, cfg))
+  }
+
+  if (!dir.exists(paths$json)) {
+    return(invisible(index_path))
+  }
+
+  files <- sort(list.files(paths$json, pattern = "\\.json$", full.names = TRUE))
+  if (!length(files)) {
+    return(invisible(index_path))
+  }
+
+  index_mtime <- file.info(index_path)$mtime
+  changed_files <- files[file.info(files)$mtime > index_mtime]
+  if (!length(changed_files)) {
+    return(invisible(index_path))
+  }
+
+  incoming <- .litxr_prefer_complete_records(
+    data.table::rbindlist(lapply(changed_files, .litxr_storage_payload_to_row), fill = TRUE)
+  )
+  records <- .litxr_upsert_records(
+    existing,
+    incoming,
+    conflict_path = file.path(paths$json, "_upsert_conflicts.jsonl")
+  )
+  index_path <- .litxr_write_journal_index(records, local_path)
+  .litxr_update_project_indexes(cfg, journal, records)
+  invisible(index_path)
+}
+
 #' Rebuild the local journal fst index from JSON files
 #'
 #' Backward-compatible wrapper around `litxr_rebuild_collection_index()`.
