@@ -15,6 +15,46 @@ Project-level readers:
 - free-text query over common bibliographic fields
 - exact filters like `entry_type`, `year`, `collection_id`, `doi`, `ref_id`, `isbn`
 
+## Embedding Search
+
+Embedding indexes are cached under `project.data_root/embeddings/` and keyed by
+collection, source text field, and exact embedding model. The package does not
+choose a provider; pass an embedding function so corpus and query embeddings use
+the same model.
+
+Example:
+
+```r
+embed_fun <- function(texts) {
+  inferencer::embed_openrouter(texts, model = "your-embedding-model")
+}
+
+litxr_build_embedding_index(
+  "arxiv_cs_ai",
+  cfg,
+  field = "abstract",
+  embed_fun = embed_fun,
+  model = "your-embedding-model",
+  provider = "openrouter",
+  batch_size = 64
+)
+
+litxr_search_embeddings(
+  "graph neural networks for planning",
+  "arxiv_cs_ai",
+  cfg,
+  field = "abstract",
+  embed_fun = embed_fun,
+  model = "your-embedding-model",
+  top_n = 20
+)
+```
+
+Use the same `model` value for corpus build and query search. If provider
+payloads are rejected, rerun with a smaller `batch_size`. Completed batches are
+written to disk as the build proceeds, so reruns without `overwrite = TRUE`
+continue from missing references instead of recomputing the whole corpus.
+
 ## Markdown
 
 Project-level markdown helpers:

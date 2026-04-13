@@ -1,3 +1,15 @@
+# litxr 0.0.6
+
+- Added provider-neutral cached embedding indexes for collection text fields,
+  starting with abstract embeddings from `litxr_read_collection()`.
+- Added `litxr_build_embedding_index()`, `litxr_read_embedding_index()`,
+  `litxr_search_embeddings()`, and `litxr_cosine_similarity()`.
+- Store embedding metadata, numeric matrices, and manifests under
+  `project.data_root/embeddings/`, keyed by collection, field, and exact model.
+- Documented how to use external embedding functions such as
+  `inferencer::embed_openrouter()` or `inferencer::embed_gemini()` while keeping
+  the package independent of a specific embedding provider.
+
 # litxr 0.0.5.8
 
 - Added `litxr_next_arxiv_repair_range()` to compute the next arXiv repair

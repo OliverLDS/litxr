@@ -23,6 +23,7 @@ Under `project.data_root/`:
 - `index/reference_collections.fst`: reference-to-collection memberships
 - `index/enrichment_status.fst`: markdown/digest coverage
 - `index/sync_state.fst`: sync and repair history
+- `embeddings/`: cached embedding metadata, matrices, and manifests
 - `llm/`: project-level structured digests keyed by `ref_id`
 - `md/`: project-level markdown keyed by `ref_id`
 

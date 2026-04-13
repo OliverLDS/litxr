@@ -125,6 +125,7 @@ arxiv_record$ref_id[[1]] <- "arxiv:2501.00001"
 arxiv_record$source[[1]] <- "arxiv"
 arxiv_record$source_id[[1]] <- "2501.00001"
 arxiv_record$title[[1]] <- "Example arXiv Paper"
+arxiv_record$abstract[[1]] <- "Neural search over local article abstracts."
 arxiv_record$pub_date[[1]] <- as.POSIXct("2025-01-03", tz = "UTC")
 arxiv_record$year[[1]] <- 2025L
 arxiv_record$month[[1]] <- 1L
@@ -171,6 +172,47 @@ arxiv_window_state <- litxr::litxr_next_arxiv_repair_range(
 )
 stopifnot(identical(arxiv_window_state$latest_date[[1]], as.Date("2026-04-09")))
 stopifnot(identical(arxiv_window_state$date_from[[1]], as.Date("2026-04-10")))
+
+mock_embed <- function(texts) {
+  cbind(
+    neural = as.numeric(grepl("neural", tolower(texts), fixed = TRUE)),
+    finance = as.numeric(grepl("finance", tolower(texts), fixed = TRUE)),
+    length = nchar(texts) / 100
+  )
+}
+embed_meta <- litxr::litxr_build_embedding_index(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-v1",
+  provider = "mock",
+  batch_size = 1L,
+  overwrite = TRUE
+)
+stopifnot(nrow(embed_meta) == 1L)
+embed_index <- litxr::litxr_read_embedding_index(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-v1"
+)
+stopifnot(nrow(embed_index$metadata) == 1L)
+stopifnot(nrow(embed_index$matrix) == 1L)
+stopifnot(identical(embed_index$manifest$model, "mock-embedding-v1"))
+embed_search <- litxr::litxr_search_embeddings(
+  "neural retrieval",
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-v1",
+  top_n = 1L
+)
+stopifnot(nrow(embed_search) == 1L)
+stopifnot(identical(embed_search$ref_id[[1]], "arxiv:2501.00001"))
+stopifnot(embed_search$score[[1]] > 0)
+stopifnot(identical(litxr::litxr_cosine_similarity(c(1, 0), matrix(c(1, 0, 0, 1), ncol = 2, byrow = TRUE)), c(1, 0)))
 
 project_refs <- litxr::litxr_read_references(cfg_export)
 stopifnot(nrow(project_refs) >= 1L)

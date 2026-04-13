@@ -72,6 +72,8 @@ Read and export:
 - `litxr_refresh_collection_index()`
 - `litxr_compact_collection_index()`
 - `litxr_collection_date_stats()`
+- `litxr_build_embedding_index()`
+- `litxr_search_embeddings()`
 - `litxr_read_references()`
 - `litxr_find_refs()`
 - `litxr_export_bib()`
@@ -100,6 +102,7 @@ Project-level canonical data lives under `project.data_root/`, including:
 - `index/reference_collections.fst`
 - `index/enrichment_status.fst`
 - `index/sync_state.fst`
+- `embeddings/`
 - `md/`
 - `llm/`
 

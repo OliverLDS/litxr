@@ -650,6 +650,233 @@ litxr_find_refs <- function(
   refs
 }
 
+#' Build a cached embedding index for one collection field
+#'
+#' Embeds one text field from `litxr_read_collection()` in batches and caches the
+#' resulting numeric matrix under `project.data_root/embeddings/`. The embedding
+#' function is user supplied so callers can use providers such as
+#' `inferencer::embed_openrouter()` or `inferencer::embed_gemini()`.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Text field to embed, such as `"abstract"`.
+#' @param embed_fun Function taking a character vector and returning embeddings
+#'   as a matrix, data frame, or list of numeric vectors.
+#' @param model Exact embedding model name. The same value must be used for
+#'   search queries.
+#' @param provider Optional provider label, such as `"openrouter"` or
+#'   `"gemini"`.
+#' @param batch_size Number of texts per embedding request.
+#' @param overwrite Whether to rebuild the cache from scratch.
+#' @param limit Optional maximum number of new texts to embed in this run.
+#'
+#' @return Metadata `data.table` for cached embeddings.
+#' @export
+litxr_build_embedding_index <- function(
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  embed_fun,
+  model,
+  provider = NA_character_,
+  batch_size = 64L,
+  overwrite = FALSE,
+  limit = NULL
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (!is.function(embed_fun)) {
+    stop("`embed_fun` must be a function that accepts a character vector.", call. = FALSE)
+  }
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+  batch_size <- as.integer(batch_size)
+  if (is.na(batch_size) || batch_size <= 0L) {
+    stop("`batch_size` must be a positive integer.", call. = FALSE)
+  }
+
+  records <- litxr_read_collection(collection_id, cfg)
+  if (!nrow(records)) {
+    return(.litxr_empty_embedding_metadata())
+  }
+  if (!(field %in% names(records))) {
+    stop("Field not found in collection records: ", field, call. = FALSE)
+  }
+
+  text <- as.character(records[[field]])
+  text[is.na(text)] <- ""
+  text <- trimws(text)
+  keep <- !is.na(records$ref_id) & nzchar(records$ref_id) & nzchar(text)
+  targets <- records[keep, ]
+  targets[["litxr_embedding_text__"]] <- text[keep]
+
+  if (!nrow(targets)) {
+    return(.litxr_empty_embedding_metadata())
+  }
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  existing <- if (isTRUE(overwrite)) {
+    list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+  } else {
+    .litxr_read_embedding_index_parts(paths)
+  }
+
+  existing_ref_ids <- if (nrow(existing$metadata)) existing$metadata$ref_id else character()
+  todo <- if (isTRUE(overwrite)) targets else targets[!(targets$ref_id %in% existing_ref_ids), ]
+  if (!is.null(limit)) {
+    limit <- as.integer(limit)
+    if (is.na(limit) || limit < 0L) {
+      stop("`limit` must be a non-negative integer.", call. = FALSE)
+    }
+    todo <- todo[seq_len(min(nrow(todo), limit)), ]
+  }
+  if (!nrow(todo)) {
+    return(existing$metadata)
+  }
+
+  metadata <- existing$metadata
+  embeddings <- existing$matrix
+
+  for (start in seq(1L, nrow(todo), by = batch_size)) {
+    end <- min(start + batch_size - 1L, nrow(todo))
+    batch <- todo[start:end, ]
+    batch_matrix <- .litxr_as_embedding_matrix(embed_fun(batch$litxr_embedding_text__))
+    if (nrow(batch_matrix) != nrow(batch)) {
+      stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " texts.", call. = FALSE)
+    }
+
+    if (nrow(embeddings) && ncol(embeddings) != ncol(batch_matrix)) {
+      stop("Embedding dimension changed from ", ncol(embeddings), " to ", ncol(batch_matrix), ".", call. = FALSE)
+    }
+    if (!nrow(embeddings)) {
+      embeddings <- matrix(numeric(), nrow = 0L, ncol = ncol(batch_matrix))
+    }
+
+    batch_metadata <- .litxr_embedding_metadata_from_records(
+      batch,
+      collection_id = collection_id,
+      field = field,
+      model = as.character(model),
+      provider = as.character(provider)
+    )
+    metadata <- data.table::rbindlist(list(metadata, batch_metadata), fill = TRUE)
+    embeddings <- rbind(embeddings, batch_matrix)
+
+    .litxr_write_embedding_index(
+      paths = paths,
+      metadata = metadata,
+      embeddings = embeddings,
+      manifest = .litxr_embedding_manifest(
+        collection_id = collection_id,
+        field = field,
+        model = as.character(model),
+        provider = as.character(provider),
+        dimension = ncol(embeddings),
+        records = nrow(metadata)
+      )
+    )
+  }
+
+  metadata
+}
+
+#' Read a cached embedding index
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param model Exact embedding model name used when building the cache.
+#'
+#' @return List with `metadata`, `matrix`, and `manifest`.
+#' @export
+litxr_read_embedding_index <- function(collection_id, config = NULL, field = "abstract", model) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+  .litxr_read_embedding_index_parts(.litxr_embedding_index_paths(cfg, collection_id, field, model))
+}
+
+#' Search cached collection embeddings
+#'
+#' Embeds the query with the supplied `embed_fun`, checks that `model` matches
+#' the cached corpus model, and ranks cached records by cosine similarity.
+#'
+#' @param query Query text.
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param embed_fun Function taking a character vector and returning embeddings.
+#' @param model Exact embedding model name. Must match the cached corpus model.
+#' @param top_n Number of matches to return.
+#'
+#' @return `data.table` of matches with `score`.
+#' @export
+litxr_search_embeddings <- function(
+  query,
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  embed_fun,
+  model,
+  top_n = 20L
+) {
+  if (missing(query) || !nzchar(as.character(query))) {
+    stop("`query` must be supplied and non-empty.", call. = FALSE)
+  }
+  if (!is.function(embed_fun)) {
+    stop("`embed_fun` must be a function that accepts a character vector.", call. = FALSE)
+  }
+  top_n <- as.integer(top_n)
+  if (is.na(top_n) || top_n < 0L) {
+    stop("`top_n` must be a non-negative integer.", call. = FALSE)
+  }
+  index <- litxr_read_embedding_index(collection_id, config = config, field = field, model = model)
+  if (!nrow(index$metadata) || !nrow(index$matrix)) {
+    return(data.table::data.table())
+  }
+  manifest_model <- index$manifest$model %||% NA_character_
+  if (!identical(as.character(model), as.character(manifest_model))) {
+    stop("Query model does not match cached corpus model: ", manifest_model, call. = FALSE)
+  }
+
+  query_matrix <- .litxr_as_embedding_matrix(embed_fun(as.character(query[[1]])))
+  if (nrow(query_matrix) != 1L) {
+    stop("`embed_fun` must return exactly one embedding for the query.", call. = FALSE)
+  }
+  scores <- litxr_cosine_similarity(query_matrix[1, ], index$matrix)
+  out <- data.table::copy(index$metadata)
+  out[["score"]] <- scores
+  data.table::setorderv(out, "score", order = -1L)
+  out[seq_len(min(nrow(out), as.integer(top_n))), ]
+}
+
+#' Compute cosine similarity against an embedding matrix
+#'
+#' @param query_vec Numeric query embedding vector.
+#' @param embedding_matrix Numeric matrix with one embedding per row.
+#'
+#' @return Numeric vector of cosine similarity scores.
+#' @export
+litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
+  query_vec <- as.numeric(query_vec)
+  embedding_matrix <- as.matrix(embedding_matrix)
+  storage.mode(embedding_matrix) <- "double"
+  if (ncol(embedding_matrix) != length(query_vec)) {
+    stop("Query vector length does not match embedding matrix columns.", call. = FALSE)
+  }
+  numerator <- as.numeric(embedding_matrix %*% query_vec)
+  denom <- sqrt(rowSums(embedding_matrix^2)) * sqrt(sum(query_vec^2))
+  out <- numerator / denom
+  out[is.na(out) | is.infinite(out)] <- 0
+  out
+}
+
 #' Create a default structured LLM digest template
 #'
 #' @param ref_id Reference identifier.
@@ -2293,6 +2520,162 @@ litxr_add_refs <- function(
     unlink(path)
   }
   invisible(path)
+}
+
+.litxr_embedding_slug <- function(x) {
+  x <- tolower(as.character(x))
+  x <- gsub("[^a-z0-9]+", "_", x)
+  x <- gsub("^_+|_+$", "", x)
+  if (!nzchar(x)) x <- "default"
+  x
+}
+
+.litxr_project_embeddings_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "embeddings")
+}
+
+.litxr_ensure_project_embeddings_dir <- function(cfg) {
+  dir_path <- .litxr_project_embeddings_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
+.litxr_embedding_index_paths <- function(cfg, collection_id, field, model) {
+  base_dir <- file.path(
+    .litxr_project_embeddings_dir(cfg),
+    .litxr_embedding_slug(collection_id),
+    .litxr_embedding_slug(field),
+    .litxr_embedding_slug(model)
+  )
+  list(
+    dir = base_dir,
+    metadata = file.path(base_dir, "metadata.fst"),
+    matrix = file.path(base_dir, "matrix.rds"),
+    manifest = file.path(base_dir, "manifest.json")
+  )
+}
+
+.litxr_empty_embedding_metadata <- function() {
+  data.table::data.table(
+    ref_id = character(),
+    source = character(),
+    source_id = character(),
+    title = character(),
+    year = integer(),
+    collection_id = character(),
+    field = character(),
+    model = character(),
+    provider = character(),
+    text_nchar = integer(),
+    embedded_at = character()
+  )
+}
+
+.litxr_as_embedding_matrix <- function(x) {
+  if (is.data.frame(x)) {
+    x <- as.matrix(x)
+  }
+  if (is.matrix(x)) {
+    storage.mode(x) <- "double"
+    return(x)
+  }
+  if (is.list(x) && !is.null(x$embeddings)) {
+    return(.litxr_as_embedding_matrix(x$embeddings))
+  }
+  if (is.list(x) && !is.null(x$data)) {
+    return(.litxr_as_embedding_matrix(x$data))
+  }
+  if (is.list(x) && length(x) && all(vapply(x, is.numeric, logical(1)))) {
+    out <- do.call(rbind, lapply(x, as.numeric))
+    storage.mode(out) <- "double"
+    return(out)
+  }
+  if (is.list(x) && length(x) && all(vapply(x, function(row) is.list(row) && !is.null(row$embedding), logical(1)))) {
+    out <- do.call(rbind, lapply(x, function(row) as.numeric(row$embedding)))
+    storage.mode(out) <- "double"
+    return(out)
+  }
+  if (is.numeric(x)) {
+    out <- matrix(as.numeric(x), nrow = 1L)
+    storage.mode(out) <- "double"
+    return(out)
+  }
+  stop("Unable to coerce embedding output to a numeric matrix.", call. = FALSE)
+}
+
+.litxr_embedding_manifest <- function(collection_id, field, model, provider, dimension, records) {
+  list(
+    collection_id = as.character(collection_id),
+    field = as.character(field),
+    model = as.character(model),
+    provider = as.character(provider),
+    dimension = as.integer(dimension),
+    records = as.integer(records),
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+}
+
+.litxr_embedding_metadata_from_records <- function(records, collection_id, field, model, provider) {
+  value_or_na <- function(name, type = "character") {
+    if (name %in% names(records)) {
+      return(records[[name]])
+    }
+    switch(
+      type,
+      integer = rep(NA_integer_, nrow(records)),
+      rep(NA_character_, nrow(records))
+    )
+  }
+
+  data.table::data.table(
+    ref_id = value_or_na("ref_id"),
+    source = value_or_na("source"),
+    source_id = value_or_na("source_id"),
+    title = value_or_na("title"),
+    year = as.integer(value_or_na("year", "integer")),
+    collection_id = as.character(collection_id),
+    field = as.character(field),
+    model = as.character(model),
+    provider = as.character(provider),
+    text_nchar = nchar(records$litxr_embedding_text__, type = "chars", allowNA = TRUE),
+    embedded_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+}
+
+.litxr_read_embedding_index_parts <- function(paths) {
+  metadata <- if (file.exists(paths$metadata)) {
+    fst::read_fst(paths$metadata, as.data.table = TRUE)
+  } else {
+    .litxr_empty_embedding_metadata()
+  }
+  embeddings <- if (file.exists(paths$matrix)) {
+    readRDS(paths$matrix)
+  } else {
+    matrix(numeric(), nrow = 0L, ncol = 0L)
+  }
+  embeddings <- as.matrix(embeddings)
+  storage.mode(embeddings) <- "double"
+  manifest <- if (file.exists(paths$manifest)) {
+    jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE)
+  } else {
+    list()
+  }
+  if (nrow(metadata) != nrow(embeddings)) {
+    stop("Embedding metadata rows do not match matrix rows in cache: ", paths$dir, call. = FALSE)
+  }
+  list(metadata = metadata, matrix = embeddings, manifest = manifest)
+}
+
+.litxr_write_embedding_index <- function(paths, metadata, embeddings, manifest) {
+  if (!dir.exists(paths$dir)) {
+    dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  fst::write_fst(as.data.frame(metadata), paths$metadata)
+  saveRDS(embeddings, paths$matrix)
+  jsonlite::write_json(manifest, paths$manifest, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  invisible(paths)
 }
 
 .litxr_project_root <- function(cfg) {
