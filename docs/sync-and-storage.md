@@ -82,8 +82,10 @@ Practical notes:
 Helpers:
 
 - `litxr_repair_collection(..., submitted_from = ..., submitted_to = ...)`
+- `litxr_next_arxiv_repair_range()`
 - `scripts/repair_arxiv.R`
 - `scripts/repair_arxiv_range.R`
+- `scripts/repair_arxiv_latest.R`
 
 `scripts/repair_arxiv_range.R` records successful day-level repair windows in
 `sync_state.fst` and skips already completed days unless `--force` is used. It
@@ -107,6 +109,20 @@ stats_day <- litxr_collection_date_stats("arxiv_cs_ai", cfg, by = "day")
 attr(stats_day, "date_min")
 attr(stats_day, "date_max")
 attr(stats_day, "missing_dates")
+```
+
+To plan the next repair window through today, use either the sync ledger or the
+collection index explicitly:
+
+```r
+litxr_next_arxiv_repair_range("arxiv_cs_ai", cfg, basis = "sync_state")
+litxr_next_arxiv_repair_range("arxiv_cs_ai", cfg, basis = "collection_index")
+```
+
+For shell-driven updates from the next collection-index date through today:
+
+```sh
+Rscript scripts/repair_arxiv_latest.R --collection-id arxiv_cs_ai
 ```
 
 ## DOI And Manual Ingest

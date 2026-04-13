@@ -159,6 +159,76 @@ litxr_collection_date_stats <- function(collection_id, config = NULL, by = c("da
   out
 }
 
+#' Compute the next arXiv repair date range
+#'
+#' Returns the next day range to pass to `scripts/repair_arxiv_range.R`.
+#' `basis = "sync_state"` uses the latest successful arXiv `repair_range_day`
+#' row. `basis = "collection_index"` uses the maximum `pub_date` currently
+#' visible in the collection index.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param basis Whether to use the sync ledger or collection index to choose the
+#'   latest completed date.
+#' @param date_to Last date to include in the proposed repair range. Defaults to
+#'   `Sys.Date()`.
+#'
+#' @return One-row `data.table` with `collection_id`, `basis`, `latest_date`,
+#'   `date_from`, `date_to`, and `needs_repair`.
+#' @export
+litxr_next_arxiv_repair_range <- function(
+  collection_id,
+  config = NULL,
+  basis = c("sync_state", "collection_index"),
+  date_to = Sys.Date()
+) {
+  basis <- match.arg(basis)
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  journal <- .litxr_get_journal(cfg, collection_id)
+  if (!identical(journal$remote_channel, "arxiv")) {
+    stop("`litxr_next_arxiv_repair_range()` only supports arXiv collections.", call. = FALSE)
+  }
+
+  date_to <- as.Date(date_to)
+  if (is.na(date_to)) {
+    stop("`date_to` must be parseable as a Date.", call. = FALSE)
+  }
+
+  latest_date <- switch(
+    basis,
+    sync_state = {
+      state <- litxr_read_sync_state(config = cfg, collection_id = collection_id)
+      done <- state[
+        state$remote_channel == "arxiv" &
+          state$sync_type == "repair_range_day" &
+          state$status == "success" &
+          !is.na(state$range_to),
+      ]
+      dates <- suppressWarnings(as.Date(done$range_to))
+      dates <- dates[!is.na(dates)]
+      if (length(dates)) max(dates) else as.Date(NA)
+    },
+    collection_index = {
+      stats_day <- litxr_collection_date_stats(collection_id, cfg, by = "day")
+      dates <- suppressWarnings(as.Date(stats_day$date))
+      dates <- dates[!is.na(dates)]
+      if (length(dates)) max(dates) else as.Date(NA)
+    }
+  )
+
+  date_from <- if (is.na(latest_date)) as.Date(NA) else latest_date + 1L
+  data.table::data.table(
+    collection_id = collection_id,
+    basis = basis,
+    latest_date = latest_date,
+    date_from = date_from,
+    date_to = date_to,
+    needs_repair = !is.na(date_from) && date_from <= date_to
+  )
+}
+
 #' Read locally stored records for one journal
 #'
 #' Backward-compatible wrapper around `litxr_read_collection()`.

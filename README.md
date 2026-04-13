@@ -62,6 +62,7 @@ Sync and ingest:
 - `litxr_sync_collection()`
 - `litxr_sync_all()`
 - `litxr_repair_collection()`
+- `litxr_next_arxiv_repair_range()`
 - `litxr_add_dois()`
 - `litxr_add_refs()`
 
@@ -108,6 +109,7 @@ Included shell helpers:
 
 - `scripts/repair_arxiv.R`
 - `scripts/repair_arxiv_range.R`
+- `scripts/repair_arxiv_latest.R`
 - `scripts/build_llm_digests.R`
 - `scripts/example_digest_builder.R`
 

@@ -1,3 +1,13 @@
+# litxr 0.0.5.8
+
+- Added `litxr_next_arxiv_repair_range()` to compute the next arXiv repair
+  window from either the sync ledger or the collection index.
+- Added `scripts/repair_arxiv_latest.R`, a shell-friendly wrapper that computes
+  the next repair window and calls `scripts/repair_arxiv_range.R` through an
+  absolute script path.
+- Documented collection-index versus sync-state date bases for latest arXiv
+  repair planning.
+
 # litxr 0.0.5.7
 
 - Added a collection-local delta FST index for arXiv range repair so fetched

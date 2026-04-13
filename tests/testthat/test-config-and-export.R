@@ -115,6 +115,63 @@ stopifnot(identical(attr(date_stats, "date_min"), "2024-01-15"))
 stopifnot(identical(attr(date_stats, "date_max"), "2024-01-15"))
 stopifnot(length(attr(date_stats, "missing_dates")) == 0L)
 
+arxiv_collection <- Filter(
+  function(collection) identical(collection$remote_channel, "arxiv"),
+  cfg_export$collections
+)[[1]]
+arxiv_local_path <- litxr:::.litxr_resolve_local_path(cfg_export, arxiv_collection$local_path)
+arxiv_record <- data.table::copy(record)
+arxiv_record$ref_id[[1]] <- "arxiv:2501.00001"
+arxiv_record$source[[1]] <- "arxiv"
+arxiv_record$source_id[[1]] <- "2501.00001"
+arxiv_record$title[[1]] <- "Example arXiv Paper"
+arxiv_record$pub_date[[1]] <- as.POSIXct("2025-01-03", tz = "UTC")
+arxiv_record$year[[1]] <- 2025L
+arxiv_record$month[[1]] <- 1L
+arxiv_record$day[[1]] <- 3L
+arxiv_record$doi[[1]] <- NA_character_
+arxiv_record$arxiv_version[[1]] <- 1L
+arxiv_record$collection_id[[1]] <- arxiv_collection$collection_id
+arxiv_record$collection_title[[1]] <- arxiv_collection$title
+litxr:::.litxr_write_journal_records(arxiv_record, arxiv_local_path, arxiv_collection, cfg = cfg_export)
+
+arxiv_window_index <- litxr::litxr_next_arxiv_repair_range(
+  arxiv_collection$collection_id,
+  cfg_export,
+  basis = "collection_index",
+  date_to = "2025-01-05"
+)
+stopifnot(identical(arxiv_window_index$latest_date[[1]], as.Date("2025-01-03")))
+stopifnot(identical(arxiv_window_index$date_from[[1]], as.Date("2025-01-04")))
+stopifnot(isTRUE(arxiv_window_index$needs_repair[[1]]))
+
+litxr:::.litxr_append_sync_state(cfg_export, litxr:::.litxr_make_sync_state_row(
+  collection_id = arxiv_collection$collection_id,
+  remote_channel = "arxiv",
+  sync_type = "repair_range_day",
+  status = "success",
+  started_at = "2026-01-01 00:00:00 UTC",
+  completed_at = "2026-01-01 00:00:10 UTC",
+  query = "cat:cs.AI",
+  range_from = "2026-04-08",
+  range_to = "2026-04-09",
+  fetched_from = "2026-04-09",
+  fetched_to = "2026-04-09",
+  page_start = 0L,
+  page_size = 200L,
+  records_fetched = 1L,
+  records_after = 1L,
+  notes = "test"
+))
+arxiv_window_state <- litxr::litxr_next_arxiv_repair_range(
+  arxiv_collection$collection_id,
+  cfg_export,
+  basis = "sync_state",
+  date_to = "2026-04-13"
+)
+stopifnot(identical(arxiv_window_state$latest_date[[1]], as.Date("2026-04-09")))
+stopifnot(identical(arxiv_window_state$date_from[[1]], as.Date("2026-04-10")))
+
 project_refs <- litxr::litxr_read_references(cfg_export)
 stopifnot(nrow(project_refs) >= 1L)
 stopifnot(any(project_refs$ref_id == "doi:10.1000/example"))
@@ -241,6 +298,9 @@ rebuilt_one <- rebuilt[rebuilt$ref_id == "doi:10.1000/example", ]
 stopifnot(nrow(rebuilt_one) == 1L)
 stopifnot(identical(rebuilt_one$doi[[1]], "10.1000/example"))
 stopifnot(identical(rebuilt_one$journal[[1]], "Journal of Finance"))
+latest_script_candidates <- file.path(c(".", "..", "../.."), "scripts", "repair_arxiv_latest.R")
+latest_script <- latest_script_candidates[file.exists(latest_script_candidates)][[1]]
+stopifnot(inherits(parse(latest_script), "expression"))
 
 new_cr_message <- list(
   title = "New DOI Paper",
