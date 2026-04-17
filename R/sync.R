@@ -571,6 +571,8 @@ litxr_read_reference_collections <- function(config = NULL) {
 #'
 #' Provides simple deterministic filtering over the project-level reference
 #' index, with optional collection membership filtering and substring matching.
+#' Exact `ref_id` searches fall back to configured collection indexes when the
+#' project-level index has not yet been refreshed.
 #'
 #' @param query Optional substring query matched against `title`, `authors`,
 #'   `journal`, `container_title`, and `url`.
@@ -578,7 +580,9 @@ litxr_read_reference_collections <- function(config = NULL) {
 #' @param year Optional year filter.
 #' @param collection_id Optional collection membership filter.
 #' @param doi Optional DOI filter.
-#' @param ref_id Optional internal reference id filter.
+#' @param ref_id Optional reference id filter. For arXiv records, both
+#'   canonical ids such as `"arxiv:2405.03710"` and bare ids such as
+#'   `"2405.03710"` are accepted.
 #' @param isbn Optional ISBN filter.
 #' @param issn Optional ISSN substring filter.
 #' @param config Optional parsed config list or a direct config path. When
@@ -599,9 +603,32 @@ litxr_find_refs <- function(
 ) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
+  ref_keys <- if (!is.null(ref_id) && nzchar(as.character(ref_id))) {
+    .litxr_expand_reference_keys(ref_id)
+  } else {
+    character()
+  }
+  exact_ref_only <- length(ref_keys) &&
+    is.null(query) &&
+    is.null(entry_type) &&
+    is.null(year) &&
+    is.null(collection_id) &&
+    is.null(doi) &&
+    is.null(isbn) &&
+    is.null(issn)
+  if (isTRUE(exact_ref_only)) {
+    exact <- .litxr_read_project_references_by_keys(cfg, ref_keys)
+    if (nrow(exact)) {
+      return(exact)
+    }
+    return(.litxr_find_collection_refs_by_keys(cfg, ref_keys))
+  }
 
   refs <- litxr_read_references(cfg)
   if (!nrow(refs)) {
+    if (length(ref_keys)) {
+      return(.litxr_find_collection_refs_by_keys(cfg, ref_keys, collection_id = collection_id))
+    }
     return(refs)
   }
 
@@ -621,7 +648,11 @@ litxr_find_refs <- function(
     refs <- refs[refs$doi %in% doi, ]
   }
   if (!is.null(ref_id) && nzchar(as.character(ref_id))) {
-    refs <- refs[refs$ref_id %in% ref_id, ]
+    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+    refs <- refs[refs$ref_id %in% ref_keys | source_id %in% ref_keys, ]
+    if (!nrow(refs)) {
+      return(.litxr_find_collection_refs_by_keys(cfg, ref_keys, collection_id = collection_id))
+    }
   }
   if (!is.null(isbn) && nzchar(as.character(isbn))) {
     refs <- refs[refs$isbn %in% isbn, ]
@@ -655,7 +686,9 @@ litxr_find_refs <- function(
 #' Embeds one text field from `litxr_read_collection()` in batches and caches the
 #' resulting numeric matrix under `project.data_root/embeddings/`. The embedding
 #' function is user supplied so callers can use providers such as
-#' `inferencer::embed_openrouter()` or `inferencer::embed_gemini()`.
+#' `inferencer::embed_openrouter()` or `inferencer::embed_gemini()`. Completed
+#' batches are written to append-only delta shards and compacted into the main
+#' embedding index once at the end.
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
@@ -717,13 +750,17 @@ litxr_build_embedding_index <- function(
   }
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
-  existing <- if (isTRUE(overwrite)) {
-    list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
-  } else {
-    .litxr_read_embedding_index_parts(paths)
+  existing <- .litxr_read_embedding_index_parts(paths)
+  if (isTRUE(overwrite)) {
+    .litxr_clear_embedding_delta(paths)
+    existing <- list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
   }
+  existing_delta <- .litxr_read_embedding_delta_parts(paths)
 
-  existing_ref_ids <- if (nrow(existing$metadata)) existing$metadata$ref_id else character()
+  existing_ref_ids <- unique(c(
+    if (nrow(existing$metadata)) existing$metadata$ref_id else character(),
+    if (nrow(existing_delta$metadata)) existing_delta$metadata$ref_id else character()
+  ))
   todo <- if (isTRUE(overwrite)) targets else targets[!(targets$ref_id %in% existing_ref_ids), ]
   if (!is.null(limit)) {
     limit <- as.integer(limit)
@@ -733,11 +770,15 @@ litxr_build_embedding_index <- function(
     todo <- todo[seq_len(min(nrow(todo), limit)), ]
   }
   if (!nrow(todo)) {
-    return(existing$metadata)
+    return(.litxr_compact_embedding_index(
+      paths = paths,
+      collection_id = collection_id,
+      field = field,
+      model = as.character(model),
+      provider = as.character(provider),
+      overwrite = isTRUE(overwrite)
+    ))
   }
-
-  metadata <- existing$metadata
-  embeddings <- existing$matrix
 
   for (start in seq(1L, nrow(todo), by = batch_size)) {
     end <- min(start + batch_size - 1L, nrow(todo))
@@ -747,11 +788,9 @@ litxr_build_embedding_index <- function(
       stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " texts.", call. = FALSE)
     }
 
-    if (nrow(embeddings) && ncol(embeddings) != ncol(batch_matrix)) {
-      stop("Embedding dimension changed from ", ncol(embeddings), " to ", ncol(batch_matrix), ".", call. = FALSE)
-    }
-    if (!nrow(embeddings)) {
-      embeddings <- matrix(numeric(), nrow = 0L, ncol = ncol(batch_matrix))
+    existing_dimension <- .litxr_embedding_existing_dimension(existing, existing_delta)
+    if (!is.na(existing_dimension) && existing_dimension != ncol(batch_matrix)) {
+      stop("Embedding dimension changed from ", existing_dimension, " to ", ncol(batch_matrix), ".", call. = FALSE)
     }
 
     batch_metadata <- .litxr_embedding_metadata_from_records(
@@ -761,25 +800,34 @@ litxr_build_embedding_index <- function(
       model = as.character(model),
       provider = as.character(provider)
     )
-    metadata <- data.table::rbindlist(list(metadata, batch_metadata), fill = TRUE)
-    embeddings <- rbind(embeddings, batch_matrix)
 
-    .litxr_write_embedding_index(
+    .litxr_append_embedding_delta(
       paths = paths,
-      metadata = metadata,
-      embeddings = embeddings,
+      metadata = batch_metadata,
+      embeddings = batch_matrix,
       manifest = .litxr_embedding_manifest(
         collection_id = collection_id,
         field = field,
         model = as.character(model),
         provider = as.character(provider),
-        dimension = ncol(embeddings),
-        records = nrow(metadata)
+        dimension = ncol(batch_matrix),
+        records = nrow(batch_metadata)
       )
+    )
+    existing_delta <- .litxr_merge_embedding_parts(
+      existing_delta,
+      list(metadata = batch_metadata, matrix = batch_matrix, manifest = list())
     )
   }
 
-  metadata
+  .litxr_compact_embedding_index(
+    paths = paths,
+    collection_id = collection_id,
+    field = field,
+    model = as.character(model),
+    provider = as.character(provider),
+    overwrite = isTRUE(overwrite)
+  )
 }
 
 #' Read a cached embedding index
@@ -1545,6 +1593,7 @@ litxr_add_refs <- function(
     return(records[0, ])
   }
 
+  keys <- .litxr_expand_reference_keys(keys)
   out <- data.table::copy(records)
   doi <- if ("doi" %in% names(out)) out[["doi"]] else rep(NA_character_, nrow(out))
   ref_id <- if ("ref_id" %in% names(out)) out[["ref_id"]] else rep(NA_character_, nrow(out))
@@ -1564,6 +1613,70 @@ litxr_add_refs <- function(
   out[["litxr_matched_key__"]] <- matched_key
 
   out[keep, ]
+}
+
+.litxr_expand_reference_keys <- function(keys) {
+  keys <- unique(as.character(unlist(keys, use.names = FALSE)))
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+  if (!length(keys)) {
+    return(character())
+  }
+
+  arxiv_base <- keys
+  arxiv_base <- sub("^arxiv:", "", arxiv_base, ignore.case = TRUE)
+  arxiv_base <- sub("v[0-9]+$", "", arxiv_base)
+  arxiv_like <- grepl("^[0-9]{4}\\.[0-9]{4,5}$", arxiv_base) |
+    grepl("^[a-z.-]+/[0-9]{7}$", arxiv_base, ignore.case = TRUE)
+  unique(c(keys, arxiv_base[arxiv_like], paste0("arxiv:", arxiv_base[arxiv_like])))
+}
+
+.litxr_keys_include_arxiv <- function(keys) {
+  keys <- as.character(keys)
+  any(
+    grepl("^arxiv:", keys, ignore.case = TRUE) |
+      grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", keys) |
+      grepl("^[a-z.-]+/[0-9]{7}(v[0-9]+)?$", keys, ignore.case = TRUE)
+  )
+}
+
+.litxr_find_collection_refs_by_keys <- function(cfg, keys, collection_id = NULL) {
+  collections <- .litxr_config_collections(cfg)
+  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+    keep_id <- as.character(collection_id[[1]])
+    collections <- Filter(function(collection) {
+      identical(collection$collection_id, keep_id) || identical(collection$journal_id, keep_id)
+    }, collections)
+  } else if (.litxr_keys_include_arxiv(keys)) {
+    collections <- Filter(function(collection) {
+      identical(collection$remote_channel, "arxiv")
+    }, collections)
+  }
+  if (!length(collections)) {
+    return(data.table::data.table())
+  }
+
+  rows <- lapply(collections, function(collection) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    records <- .litxr_read_journal_records_by_keys(local_path, keys)
+    delta <- .litxr_read_collection_delta(local_path)
+    if (nrow(delta)) {
+      delta_source_id <- if ("source_id" %in% names(delta)) delta$source_id else rep(NA_character_, nrow(delta))
+      delta <- delta[delta$ref_id %in% keys | delta_source_id %in% keys, ]
+      if (nrow(delta)) {
+        records <- .litxr_upsert_records(records, delta)
+      }
+    }
+    if (!nrow(records)) {
+      return(records)
+    }
+    records
+  })
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  if (!nrow(out)) {
+    return(out)
+  }
+  key <- .litxr_upsert_key(out)
+  out[!duplicated(key), ]
 }
 
 .litxr_normalize_manual_refs <- function(refs) {
@@ -2491,6 +2604,48 @@ litxr_add_refs <- function(
   .litxr_index_decode(fst::read_fst(index_path, as.data.table = TRUE))
 }
 
+.litxr_read_journal_records_by_keys <- function(local_path, keys) {
+  index_path <- .litxr_index_path(local_path)
+  if (!file.exists(index_path)) {
+    records <- .litxr_read_journal_records(local_path)
+    if (!nrow(records)) {
+      return(records)
+    }
+    source_id <- if ("source_id" %in% names(records)) records$source_id else rep(NA_character_, nrow(records))
+    return(records[records$ref_id %in% keys | source_id %in% keys, ])
+  }
+
+  index_columns <- fst::metadata_fst(index_path)$columnNames
+  if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
+    records <- .litxr_read_journal_index(local_path)
+    if (is.null(records) || !nrow(records)) {
+      return(data.table::data.table())
+    }
+    source_id <- if ("source_id" %in% names(records)) records$source_id else rep(NA_character_, nrow(records))
+    return(records[records$ref_id %in% keys | source_id %in% keys, ])
+  }
+
+  idx <- integer()
+  if ("ref_id" %in% index_columns) {
+    ref_data <- fst::read_fst(index_path, columns = "ref_id", as.data.table = TRUE)
+    idx <- which(ref_data$ref_id %in% keys)
+  }
+  if (!length(idx) && "source_id" %in% index_columns) {
+    source_data <- fst::read_fst(index_path, columns = "source_id", as.data.table = TRUE)
+    idx <- which(source_data$source_id %in% keys)
+  }
+  if (!length(idx)) {
+    return(data.table::data.table())
+  }
+
+  rows <- lapply(idx, function(i) {
+    .litxr_index_decode(fst::read_fst(index_path, from = i, to = i, as.data.table = TRUE))
+  })
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  key <- .litxr_upsert_key(out)
+  out[!duplicated(key), ]
+}
+
 .litxr_read_collection_delta <- function(local_path) {
   path <- .litxr_delta_index_path(local_path)
   if (!file.exists(path)) {
@@ -2553,7 +2708,11 @@ litxr_add_refs <- function(
     dir = base_dir,
     metadata = file.path(base_dir, "metadata.fst"),
     matrix = file.path(base_dir, "matrix.rds"),
-    manifest = file.path(base_dir, "manifest.json")
+    manifest = file.path(base_dir, "manifest.json"),
+    delta_dir = file.path(base_dir, "delta"),
+    delta_metadata = file.path(base_dir, "delta_metadata.fst"),
+    delta_matrix = file.path(base_dir, "delta_matrix.rds"),
+    delta_manifest = file.path(base_dir, "delta_manifest.json")
   )
 }
 
@@ -2645,25 +2804,61 @@ litxr_add_refs <- function(
 }
 
 .litxr_read_embedding_index_parts <- function(paths) {
-  metadata <- if (file.exists(paths$metadata)) {
-    fst::read_fst(paths$metadata, as.data.table = TRUE)
+  .litxr_read_embedding_parts(
+    metadata_path = paths$metadata,
+    matrix_path = paths$matrix,
+    manifest_path = paths$manifest,
+    cache_dir = paths$dir
+  )
+}
+
+.litxr_read_embedding_delta_parts <- function(paths) {
+  delta <- .litxr_read_embedding_parts(
+    metadata_path = paths$delta_metadata,
+    matrix_path = paths$delta_matrix,
+    manifest_path = paths$delta_manifest,
+    cache_dir = paths$dir
+  )
+
+  shard_paths <- .litxr_embedding_delta_shard_paths(paths)
+  if (!length(shard_paths)) {
+    return(delta)
+  }
+
+  for (shard_path in shard_paths) {
+    shard <- readRDS(shard_path)
+    if (!is.list(shard) || is.null(shard$metadata) || is.null(shard$matrix)) {
+      stop("Invalid embedding delta shard: ", shard_path, call. = FALSE)
+    }
+    shard$metadata <- data.table::as.data.table(shard$metadata)
+    shard$matrix <- .litxr_as_embedding_matrix(shard$matrix)
+    shard$manifest <- shard$manifest %||% list()
+    delta <- .litxr_merge_embedding_parts(delta, shard)
+  }
+
+  delta
+}
+
+.litxr_read_embedding_parts <- function(metadata_path, matrix_path, manifest_path, cache_dir) {
+  metadata <- if (file.exists(metadata_path)) {
+    fst::read_fst(metadata_path, as.data.table = TRUE)
   } else {
     .litxr_empty_embedding_metadata()
   }
-  embeddings <- if (file.exists(paths$matrix)) {
-    readRDS(paths$matrix)
+  embeddings <- if (file.exists(matrix_path)) {
+    readRDS(matrix_path)
   } else {
     matrix(numeric(), nrow = 0L, ncol = 0L)
   }
   embeddings <- as.matrix(embeddings)
   storage.mode(embeddings) <- "double"
-  manifest <- if (file.exists(paths$manifest)) {
-    jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE)
+  manifest <- if (file.exists(manifest_path)) {
+    jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
   } else {
     list()
   }
   if (nrow(metadata) != nrow(embeddings)) {
-    stop("Embedding metadata rows do not match matrix rows in cache: ", paths$dir, call. = FALSE)
+    stop("Embedding metadata rows do not match matrix rows in cache: ", cache_dir, call. = FALSE)
   }
   list(metadata = metadata, matrix = embeddings, manifest = manifest)
 }
@@ -2675,6 +2870,117 @@ litxr_add_refs <- function(
   fst::write_fst(as.data.frame(metadata), paths$metadata)
   saveRDS(embeddings, paths$matrix)
   jsonlite::write_json(manifest, paths$manifest, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  invisible(paths)
+}
+
+.litxr_write_embedding_delta <- function(paths, metadata, embeddings, manifest) {
+  if (!dir.exists(paths$dir)) {
+    dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  fst::write_fst(as.data.frame(metadata), paths$delta_metadata)
+  saveRDS(embeddings, paths$delta_matrix)
+  jsonlite::write_json(manifest, paths$delta_manifest, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  invisible(paths)
+}
+
+.litxr_append_embedding_delta <- function(paths, metadata, embeddings, manifest) {
+  if (!dir.exists(paths$delta_dir)) {
+    dir.create(paths$delta_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  shard_path <- .litxr_embedding_delta_shard_path(paths)
+  tmp_path <- paste0(shard_path, ".tmp")
+  saveRDS(
+    list(metadata = metadata, matrix = embeddings, manifest = manifest),
+    tmp_path
+  )
+  if (!file.rename(tmp_path, shard_path)) {
+    unlink(tmp_path)
+    stop("Failed to write embedding delta shard: ", shard_path, call. = FALSE)
+  }
+  invisible(shard_path)
+}
+
+.litxr_embedding_delta_shard_paths <- function(paths) {
+  if (is.null(paths$delta_dir) || !dir.exists(paths$delta_dir)) {
+    return(character())
+  }
+  sort(list.files(paths$delta_dir, pattern = "\\.rds$", full.names = TRUE))
+}
+
+.litxr_embedding_delta_shard_path <- function(paths) {
+  stamp <- format(Sys.time(), "%Y%m%d%H%M%OS6", tz = "UTC")
+  stamp <- gsub("[^0-9]", "", stamp)
+  token <- paste(sample(c(letters, LETTERS, 0:9), 10L, replace = TRUE), collapse = "")
+  file.path(paths$delta_dir, paste0("batch_", stamp, "_", Sys.getpid(), "_", token, ".rds"))
+}
+
+.litxr_embedding_existing_dimension <- function(existing, delta) {
+  if (nrow(delta$matrix)) {
+    return(ncol(delta$matrix))
+  }
+  if (nrow(existing$matrix)) {
+    return(ncol(existing$matrix))
+  }
+  NA_integer_
+}
+
+.litxr_merge_embedding_parts <- function(existing, incoming) {
+  if (!nrow(existing$metadata)) {
+    return(incoming)
+  }
+  if (!nrow(incoming$metadata)) {
+    return(existing)
+  }
+  if (ncol(existing$matrix) != ncol(incoming$matrix)) {
+    stop("Embedding dimension changed from ", ncol(existing$matrix), " to ", ncol(incoming$matrix), ".", call. = FALSE)
+  }
+
+  combined_metadata <- data.table::rbindlist(list(existing$metadata, incoming$metadata), fill = TRUE)
+  combined_matrix <- rbind(existing$matrix, incoming$matrix)
+  keep <- !duplicated(combined_metadata$ref_id, fromLast = TRUE)
+  list(
+    metadata = combined_metadata[keep, ],
+    matrix = combined_matrix[keep, , drop = FALSE],
+    manifest = incoming$manifest
+  )
+}
+
+.litxr_compact_embedding_index <- function(paths, collection_id, field, model, provider, overwrite = FALSE) {
+  delta <- .litxr_read_embedding_delta_parts(paths)
+  existing <- if (isTRUE(overwrite)) {
+    list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+  } else {
+    .litxr_read_embedding_index_parts(paths)
+  }
+  if (!nrow(delta$metadata)) {
+    return(existing$metadata)
+  }
+  merged <- .litxr_merge_embedding_parts(existing, delta)
+  if (!nrow(merged$metadata)) {
+    return(merged$metadata)
+  }
+  manifest <- .litxr_embedding_manifest(
+    collection_id = collection_id,
+    field = field,
+    model = model,
+    provider = provider,
+    dimension = ncol(merged$matrix),
+    records = nrow(merged$metadata)
+  )
+  .litxr_write_embedding_index(paths, merged$metadata, merged$matrix, manifest)
+  .litxr_clear_embedding_delta(paths)
+  merged$metadata
+}
+
+.litxr_clear_embedding_delta <- function(paths) {
+  for (path in c(paths$delta_metadata, paths$delta_matrix, paths$delta_manifest)) {
+    if (file.exists(path)) {
+      unlink(path)
+    }
+  }
+  if (!is.null(paths$delta_dir) && dir.exists(paths$delta_dir)) {
+    unlink(paths$delta_dir, recursive = TRUE)
+  }
   invisible(paths)
 }
 
@@ -2998,6 +3304,40 @@ litxr_add_refs <- function(
     return(data.table::data.table())
   }
   .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
+}
+
+.litxr_read_project_references_by_keys <- function(cfg, keys) {
+  path <- .litxr_project_references_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+
+  index_columns <- fst::metadata_fst(path)$columnNames
+  if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
+    refs <- .litxr_read_project_references_index(cfg)
+    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+    return(refs[refs$ref_id %in% keys | source_id %in% keys, ])
+  }
+
+  idx <- integer()
+  if ("ref_id" %in% index_columns) {
+    ref_data <- fst::read_fst(path, columns = "ref_id", as.data.table = TRUE)
+    idx <- which(ref_data$ref_id %in% keys)
+  }
+  if (!length(idx) && "source_id" %in% index_columns) {
+    source_data <- fst::read_fst(path, columns = "source_id", as.data.table = TRUE)
+    idx <- which(source_data$source_id %in% keys)
+  }
+  if (!length(idx)) {
+    return(data.table::data.table())
+  }
+
+  rows <- lapply(idx, function(i) {
+    .litxr_index_decode(fst::read_fst(path, from = i, to = i, as.data.table = TRUE))
+  })
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  key <- .litxr_upsert_key(out)
+  out[!duplicated(key), ]
 }
 
 .litxr_write_project_references_index <- function(cfg, records) {

@@ -134,7 +134,17 @@ arxiv_record$doi[[1]] <- NA_character_
 arxiv_record$arxiv_version[[1]] <- 1L
 arxiv_record$collection_id[[1]] <- arxiv_collection$collection_id
 arxiv_record$collection_title[[1]] <- arxiv_collection$title
-litxr:::.litxr_write_journal_records(arxiv_record, arxiv_local_path, arxiv_collection, cfg = cfg_export)
+arxiv_record_2 <- data.table::copy(arxiv_record)
+arxiv_record_2$ref_id[[1]] <- "arxiv:2501.00002"
+arxiv_record_2$source_id[[1]] <- "2501.00002"
+arxiv_record_2$title[[1]] <- "Second Example arXiv Paper"
+arxiv_record_2$abstract[[1]] <- "Finance-oriented retrieval over local article metadata."
+litxr:::.litxr_write_journal_records(
+  data.table::rbindlist(list(arxiv_record, arxiv_record_2), fill = TRUE),
+  arxiv_local_path,
+  arxiv_collection,
+  cfg = cfg_export
+)
 
 arxiv_window_index <- litxr::litxr_next_arxiv_repair_range(
   arxiv_collection$collection_id,
@@ -190,16 +200,29 @@ embed_meta <- litxr::litxr_build_embedding_index(
   batch_size = 1L,
   overwrite = TRUE
 )
-stopifnot(nrow(embed_meta) == 1L)
+stopifnot(nrow(embed_meta) == 2L)
 embed_index <- litxr::litxr_read_embedding_index(
   arxiv_collection$collection_id,
   cfg_export,
   field = "abstract",
   model = "mock-embedding-v1"
 )
-stopifnot(nrow(embed_index$metadata) == 1L)
-stopifnot(nrow(embed_index$matrix) == 1L)
+stopifnot(nrow(embed_index$metadata) == 2L)
+stopifnot(nrow(embed_index$matrix) == 2L)
 stopifnot(identical(embed_index$manifest$model, "mock-embedding-v1"))
+embed_paths <- litxr:::.litxr_embedding_index_paths(
+  cfg_export,
+  arxiv_collection$collection_id,
+  "abstract",
+  "mock-embedding-v1"
+)
+stopifnot(file.exists(embed_paths$metadata))
+stopifnot(file.exists(embed_paths$matrix))
+stopifnot(file.exists(embed_paths$manifest))
+stopifnot(!file.exists(embed_paths$delta_metadata))
+stopifnot(!file.exists(embed_paths$delta_matrix))
+stopifnot(!file.exists(embed_paths$delta_manifest))
+stopifnot(!dir.exists(embed_paths$delta_dir))
 embed_search <- litxr::litxr_search_embeddings(
   "neural retrieval",
   arxiv_collection$collection_id,
@@ -224,6 +247,18 @@ found_jof <- litxr::litxr_find_refs(query = "example paper", config = cfg_export
 stopifnot(any(found_jof$ref_id == "doi:10.1000/example"))
 found_jof_collection <- litxr::litxr_find_refs(collection_id = journal$journal_id, config = cfg_export)
 stopifnot(any(found_jof_collection$ref_id == "doi:10.1000/example"))
+found_arxiv_bare <- litxr::litxr_find_refs(ref_id = "2501.00001", config = cfg_export)
+stopifnot(nrow(found_arxiv_bare) == 1L)
+stopifnot(identical(found_arxiv_bare$ref_id[[1]], "arxiv:2501.00001"))
+found_arxiv_canonical <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg_export)
+stopifnot(nrow(found_arxiv_canonical) == 1L)
+stopifnot(identical(found_arxiv_canonical$source_id[[1]], "2501.00001"))
+project_refs_without_arxiv <- litxr::litxr_read_references(cfg_export)
+project_refs_without_arxiv <- project_refs_without_arxiv[project_refs_without_arxiv$ref_id != "arxiv:2501.00001", ]
+litxr:::.litxr_write_project_references_index(cfg_export, project_refs_without_arxiv)
+found_arxiv_fallback <- litxr::litxr_find_refs(ref_id = "2501.00001", config = cfg_export)
+stopifnot(nrow(found_arxiv_fallback) == 1L)
+stopifnot(identical(found_arxiv_fallback$ref_id[[1]], "arxiv:2501.00001"))
 
 index_path <- file.path(local_path, "index", "references.fst")
 file.remove(index_path)

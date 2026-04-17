@@ -52,8 +52,10 @@ litxr_search_embeddings(
 
 Use the same `model` value for corpus build and query search. If provider
 payloads are rejected, rerun with a smaller `batch_size`. Completed batches are
-written to disk as the build proceeds, so reruns without `overwrite = TRUE`
-continue from missing references instead of recomputing the whole corpus.
+written to append-only delta shards as the build proceeds, then compacted into
+the main embedding index once at the end. If the process is interrupted, the
+delta shards are left on disk and reruns without `overwrite = TRUE` continue
+from missing references instead of recomputing the whole corpus.
 
 ## Markdown
 

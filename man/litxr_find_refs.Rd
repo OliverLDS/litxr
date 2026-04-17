@@ -28,7 +28,9 @@ litxr_find_refs(
 
 \item{doi}{Optional DOI filter.}
 
-\item{ref_id}{Optional internal reference id filter.}
+\item{ref_id}{Optional reference id filter. For arXiv records, both
+canonical ids such as \code{"arxiv:2405.03710"} and bare ids such as
+\code{"2405.03710"} are accepted.}
 
 \item{isbn}{Optional ISBN filter.}
 
@@ -43,4 +45,6 @@ Filtered \code{data.table} of references.
 \description{
 Provides simple deterministic filtering over the project-level reference
 index, with optional collection membership filtering and substring matching.
+Exact \code{ref_id} searches fall back to configured collection indexes when the
+project-level index has not yet been refreshed.
 }

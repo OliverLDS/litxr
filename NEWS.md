@@ -1,3 +1,15 @@
+# litxr 0.0.6.1
+
+- Made `litxr_build_embedding_index()` write completed batches to append-only
+  delta shards and compact them into the main embedding index once at the end.
+- Kept interrupted embedding builds resumable by retaining delta shards until a
+  successful final compaction writes the main metadata and matrix files.
+- Made exact `litxr_find_refs(ref_id = ...)` searches faster by using row-level
+  FST reads and falling back to collection indexes when the project index is
+  stale.
+- Accepted bare arXiv ids such as `"2405.03710"` in `litxr_find_refs()` in
+  addition to canonical ids such as `"arxiv:2405.03710"`.
+
 # litxr 0.0.6
 
 - Added provider-neutral cached embedding indexes for collection text fields,

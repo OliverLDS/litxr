@@ -46,5 +46,7 @@ Metadata \code{data.table} for cached embeddings.
 Embeds one text field from \code{litxr_read_collection()} in batches and caches the
 resulting numeric matrix under \verb{project.data_root/embeddings/}. The embedding
 function is user supplied so callers can use providers such as
-\code{inferencer::embed_openrouter()} or \code{inferencer::embed_gemini()}.
+\code{inferencer::embed_openrouter()} or \code{inferencer::embed_gemini()}. Completed
+batches are written to append-only delta shards and compacted into the main
+embedding index once at the end.
 }
