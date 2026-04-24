@@ -5,6 +5,33 @@ suppressPackageStartupMessages({
   library(litxr)
 })
 
+args <- commandArgs(trailingOnly = TRUE)
+
+read_flag <- function(flag, default = NULL) {
+  idx <- match(flag, args)
+  if (is.na(idx)) {
+    return(default)
+  }
+  if (idx == length(args)) {
+    stop("Missing value for ", flag, call. = FALSE)
+  }
+  args[[idx + 1L]]
+}
+
+year_from <- read_flag("--year-from", NULL)
+year_to <- read_flag("--year-to", NULL)
+year_from <- if (is.null(year_from)) NULL else as.integer(year_from)
+year_to <- if (is.null(year_to)) NULL else as.integer(year_to)
+if (!is.null(year_from) && (is.na(year_from) || year_from < 0L)) {
+  stop("`--year-from` must be a non-negative integer.", call. = FALSE)
+}
+if (!is.null(year_to) && (is.na(year_to) || year_to < 0L)) {
+  stop("`--year-to` must be a non-negative integer.", call. = FALSE)
+}
+if (!is.null(year_from) && !is.null(year_to) && year_to < year_from) {
+  stop("`--year-to` must be on or after `--year-from`.", call. = FALSE)
+}
+
 script_path <- {
   args_full <- commandArgs(trailingOnly = FALSE)
   file_flag <- "--file="
@@ -57,13 +84,27 @@ query_index <- litxr::litxr_build_label_query_index(
   batch_size = 32L
 )
 
+ref_ids <- NULL
+if (!is.null(year_from) || !is.null(year_to)) {
+  refs <- litxr::litxr_read_collection("arxiv_cs_ai", cfg)
+  keep <- rep(TRUE, nrow(refs))
+  if (!is.null(year_from)) {
+    keep <- keep & !is.na(refs$year) & refs$year >= year_from
+  }
+  if (!is.null(year_to)) {
+    keep <- keep & !is.na(refs$year) & refs$year <= year_to
+  }
+  ref_ids <- unique(as.character(refs$ref_id[keep & !is.na(refs$ref_id) & nzchar(refs$ref_id)]))
+}
+
 scores <- litxr::litxr_score_collection_categories(
   "arxiv_cs_ai",
   query_set_id = "ai-category-query-set-v1",
   config = cfg,
   field = "abstract",
   model = embed_model,
-  aggregations = "max"
+  aggregations = "max",
+  ref_ids = ref_ids
 )
 
 if (!nrow(scores)) {
@@ -81,4 +122,12 @@ top3_out <- top3[, c("category_id", "ref_id", "title", "year", "score_max"), wit
 
 cat(sprintf("delta_rows=%d\n", nrow(delta_meta)))
 cat(sprintf("query_rows=%d\n", nrow(query_index$metadata)))
+if (!is.null(year_from) || !is.null(year_to)) {
+  cat(sprintf(
+    "year_filter: year_from=%s year_to=%s matched_ref_ids=%d\n",
+    if (is.null(year_from)) "NA" else year_from,
+    if (is.null(year_to)) "NA" else year_to,
+    length(ref_ids)
+  ))
+}
 print(top3_out)

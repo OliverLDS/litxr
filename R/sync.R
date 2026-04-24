@@ -3908,6 +3908,19 @@ litxr_add_refs <- function(
   )
 }
 
+.litxr_normalize_embedding_metadata <- function(metadata) {
+  metadata <- data.table::as.data.table(metadata)
+  if (!nrow(metadata)) {
+    return(.litxr_empty_embedding_metadata())
+  }
+  out <- data.table::data.table(
+    ref_id = if ("ref_id" %in% names(metadata)) as.character(metadata$ref_id) else rep(NA_character_, nrow(metadata)),
+    title = if ("title" %in% names(metadata)) as.character(metadata$title) else rep(NA_character_, nrow(metadata)),
+    year = if ("year" %in% names(metadata)) as.integer(metadata$year) else rep(NA_integer_, nrow(metadata))
+  )
+  out
+}
+
 .litxr_prepare_embedding_targets <- function(collection_id, cfg, field, model, overwrite = FALSE, limit = NULL) {
   if (missing(model) || !nzchar(as.character(model))) {
     stop("`model` must be supplied and non-empty.", call. = FALSE)
@@ -4092,7 +4105,7 @@ litxr_add_refs <- function(
 
 .litxr_read_embedding_parts <- function(metadata_path, matrix_path, matrix_f32_path = NULL, manifest_path, cache_dir, read_matrix = TRUE) {
   metadata <- if (file.exists(metadata_path)) {
-    fst::read_fst(metadata_path, as.data.table = TRUE)
+    .litxr_normalize_embedding_metadata(fst::read_fst(metadata_path, as.data.table = TRUE))
   } else {
     .litxr_empty_embedding_metadata()
   }
@@ -4427,7 +4440,11 @@ litxr_add_refs <- function(
   parts <- lapply(shard_keys, function(key) {
     shard_paths <- .litxr_embedding_shard_paths(paths, key)
     shard_manifest <- if (file.exists(shard_paths$manifest)) jsonlite::fromJSON(shard_paths$manifest, simplifyVector = FALSE) else list()
-    metadata <- if (file.exists(shard_paths$metadata)) fst::read_fst(shard_paths$metadata, as.data.table = TRUE) else .litxr_empty_embedding_metadata()
+    metadata <- if (file.exists(shard_paths$metadata)) {
+      .litxr_normalize_embedding_metadata(fst::read_fst(shard_paths$metadata, as.data.table = TRUE))
+    } else {
+      .litxr_empty_embedding_metadata()
+    }
     matrix_data <- if (!isTRUE(read_matrix)) {
       NULL
     } else if (file.exists(shard_paths$matrix_f32)) {

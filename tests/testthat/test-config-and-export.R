@@ -538,6 +538,56 @@ embed_corrupt_delta <- litxr::litxr_embed_collection_delta(
 )
 stopifnot(nrow(embed_corrupt_delta) == 1L)
 stopifnot(length(litxr:::.litxr_embedding_delta_shard_paths(embed_corrupt_paths)) == 1L)
+
+embed_legacy_paths <- litxr:::.litxr_embedding_index_paths(
+  cfg_export,
+  arxiv_collection$collection_id,
+  "abstract",
+  "mock-embedding-legacy-v1"
+)
+dir.create(embed_legacy_paths$dir, recursive = TRUE, showWarnings = FALSE)
+fst::write_fst(
+  as.data.frame(data.table::data.table(
+    ref_id = c("arxiv:2501.00001", "arxiv:2501.00002"),
+    source = "arxiv",
+    source_id = c("2501.00001", "2501.00002"),
+    title = c("Example arXiv Paper", "Second Example arXiv Paper"),
+    year = c(2025L, 2025L),
+    collection_id = arxiv_collection$collection_id,
+    field = "abstract",
+    model = "mock-embedding-legacy-v1",
+    provider = "mock",
+    text_nchar = c(10L, 11L),
+    embedded_at = c("2026-01-01 00:00:00 UTC", "2026-01-01 00:00:01 UTC")
+  )),
+  embed_legacy_paths$metadata
+)
+jsonlite::write_json(
+  list(
+    collection_id = arxiv_collection$collection_id,
+    field = "abstract",
+    model = "mock-embedding-legacy-v1",
+    provider = "mock",
+    dimension = 3L,
+    records = 2L,
+    updated_at = "2026-01-01 00:00:00 UTC"
+  ),
+  embed_legacy_paths$manifest,
+  auto_unbox = TRUE,
+  pretty = TRUE,
+  null = "null"
+)
+saveRDS(matrix(c(1, 0, 0.1, 0, 1, 0.2), nrow = 2L, byrow = TRUE), embed_legacy_paths$matrix)
+embed_legacy_index <- litxr::litxr_read_embedding_index(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-legacy-v1"
+)
+stopifnot(identical(names(embed_legacy_index$metadata), c("ref_id", "title", "year")))
+stopifnot(nrow(embed_legacy_index$metadata) == 2L)
+stopifnot(nrow(embed_legacy_index$matrix) == 2L)
+
 embed_corrupt_build <- suppressWarnings(litxr::litxr_build_embedding_index(
   arxiv_collection$collection_id,
   cfg_export,

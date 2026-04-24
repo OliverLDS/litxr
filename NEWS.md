@@ -1,3 +1,16 @@
+# litxr 0.0.6.4
+
+- Added `--year-from` and `--year-to` filters to
+  `scripts/label_arxiv_categories.R`.
+- Normalized legacy embedding metadata on read so old wide embedding caches now
+  expose the current minimal schema (`ref_id`, `title`, `year`).
+- Removed the redundant `scripts/repair_arxiv.R` wrapper.
+- Improved local sample scripts:
+  `scripts/get_arxiv_abstract.sh` now validates arXiv ids and errors clearly on
+  zero/multiple/missing-abstract matches, and
+  `scripts/repair_arxiv_embedding.R` now uses CLI args plus delta-only embedding
+  with before/after coverage output.
+
 # litxr 0.0.6.3
 
 - Added embedding-cache inspection and reset helpers:
