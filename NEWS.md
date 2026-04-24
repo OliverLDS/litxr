@@ -1,3 +1,22 @@
+# litxr 0.0.6.2
+
+- Added embedding-based category labeling helpers:
+  `litxr_build_label_query_index()`,
+  `litxr_score_collection_categories()`, and
+  `litxr_label_collection_by_category()`.
+- Added support for precomputed query vectors in
+  `litxr_search_embeddings()` and `litxr_search_embedding_delta()` so routine
+  searches do not need a fresh embedding API call.
+- Added explicit delta-only embedding helpers:
+  `litxr_embed_collection_delta()`, `litxr_compact_embedding_delta()`, and
+  `litxr_search_embedding_delta()`.
+- Reduced compacted corpus embedding metadata to `ref_id`, `title`, and `year`,
+  and reduced label-query metadata to category/query fields only.
+- Changed newly compacted corpus embedding caches to float32 year-sharded
+  storage, with atomic writes for the compacted cache files.
+- Added a checked-in AI category query set under `inst/extdata/` and a sample
+  labeling workflow script under `scripts/label_arxiv_categories.R`.
+
 # litxr 0.0.6.1
 
 - Made `litxr_build_embedding_index()` write completed batches to append-only

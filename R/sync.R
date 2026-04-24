@@ -706,6 +706,71 @@ litxr_find_refs <- function(
 #'
 #' @return Metadata `data.table` for cached embeddings.
 #' @export
+litxr_embed_collection_delta <- function(
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  embed_fun,
+  model,
+  provider = NA_character_,
+  batch_size = 64L,
+  overwrite = FALSE,
+  limit = NULL
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  prepared <- .litxr_prepare_embedding_targets(
+    collection_id = collection_id,
+    cfg = cfg,
+    field = field,
+    model = model,
+    overwrite = overwrite,
+    limit = limit
+  )
+  if (!nrow(prepared$targets)) {
+    return(prepared$delta$metadata)
+  }
+
+  .litxr_write_embedding_delta_batches(
+    targets = prepared$targets,
+    paths = prepared$paths,
+    collection_id = collection_id,
+    field = field,
+    embed_fun = embed_fun,
+    model = as.character(model),
+    provider = as.character(provider),
+    batch_size = batch_size,
+    existing = prepared$existing,
+    existing_delta = prepared$delta
+  )
+}
+
+#' Build a cached embedding index for one collection field
+#'
+#' Embeds one text field from `litxr_read_collection()` in batches and caches the
+#' resulting numeric matrix under `project.data_root/embeddings/`. The embedding
+#' function is user supplied so callers can use providers such as
+#' `inferencer::embed_openrouter()` or `inferencer::embed_gemini()`. Completed
+#' batches are written to append-only delta shards and compacted into the main
+#' embedding index once at the end.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Text field to embed, such as `"abstract"`.
+#' @param embed_fun Function taking a character vector and returning embeddings
+#'   as a matrix, data frame, or list of numeric vectors.
+#' @param model Exact embedding model name. The same value must be used for
+#'   search queries.
+#' @param provider Optional provider label, such as `"openrouter"` or
+#'   `"gemini"`.
+#' @param batch_size Number of texts per embedding request.
+#' @param overwrite Whether to rebuild the cache from scratch.
+#' @param limit Optional maximum number of new texts to embed in this run.
+#'
+#' @return Metadata `data.table` for cached embeddings.
+#' @export
 litxr_build_embedding_index <- function(
   collection_id,
   config = NULL,
@@ -722,54 +787,20 @@ litxr_build_embedding_index <- function(
   if (!is.function(embed_fun)) {
     stop("`embed_fun` must be a function that accepts a character vector.", call. = FALSE)
   }
-  if (missing(model) || !nzchar(as.character(model))) {
-    stop("`model` must be supplied and non-empty.", call. = FALSE)
-  }
-  batch_size <- as.integer(batch_size)
-  if (is.na(batch_size) || batch_size <= 0L) {
-    stop("`batch_size` must be a positive integer.", call. = FALSE)
-  }
-
-  records <- litxr_read_collection(collection_id, cfg)
-  if (!nrow(records)) {
-    return(.litxr_empty_embedding_metadata())
-  }
-  if (!(field %in% names(records))) {
-    stop("Field not found in collection records: ", field, call. = FALSE)
-  }
-
-  text <- as.character(records[[field]])
-  text[is.na(text)] <- ""
-  text <- trimws(text)
-  keep <- !is.na(records$ref_id) & nzchar(records$ref_id) & nzchar(text)
-  targets <- records[keep, ]
-  targets[["litxr_embedding_text__"]] <- text[keep]
-
-  if (!nrow(targets)) {
-    return(.litxr_empty_embedding_metadata())
-  }
+  delta <- litxr_embed_collection_delta(
+    collection_id = collection_id,
+    config = cfg,
+    field = field,
+    embed_fun = embed_fun,
+    model = model,
+    provider = provider,
+    batch_size = batch_size,
+    overwrite = overwrite,
+    limit = limit
+  )
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
-  existing <- .litxr_read_embedding_index_parts(paths)
-  if (isTRUE(overwrite)) {
-    .litxr_clear_embedding_delta(paths)
-    existing <- list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
-  }
-  existing_delta <- .litxr_read_embedding_delta_parts(paths)
-
-  existing_ref_ids <- unique(c(
-    if (nrow(existing$metadata)) existing$metadata$ref_id else character(),
-    if (nrow(existing_delta$metadata)) existing_delta$metadata$ref_id else character()
-  ))
-  todo <- if (isTRUE(overwrite)) targets else targets[!(targets$ref_id %in% existing_ref_ids), ]
-  if (!is.null(limit)) {
-    limit <- as.integer(limit)
-    if (is.na(limit) || limit < 0L) {
-      stop("`limit` must be a non-negative integer.", call. = FALSE)
-    }
-    todo <- todo[seq_len(min(nrow(todo), limit)), ]
-  }
-  if (!nrow(todo)) {
+  if (!nrow(delta) && !length(.litxr_embedding_delta_shard_paths(paths))) {
     return(.litxr_compact_embedding_index(
       paths = paths,
       collection_id = collection_id,
@@ -780,46 +811,43 @@ litxr_build_embedding_index <- function(
     ))
   }
 
-  for (start in seq(1L, nrow(todo), by = batch_size)) {
-    end <- min(start + batch_size - 1L, nrow(todo))
-    batch <- todo[start:end, ]
-    batch_matrix <- .litxr_as_embedding_matrix(embed_fun(batch$litxr_embedding_text__))
-    if (nrow(batch_matrix) != nrow(batch)) {
-      stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " texts.", call. = FALSE)
-    }
+  litxr_compact_embedding_delta(
+    collection_id = collection_id,
+    config = cfg,
+    field = field,
+    model = model,
+    provider = provider,
+    overwrite = overwrite
+  )
+}
 
-    existing_dimension <- .litxr_embedding_existing_dimension(existing, existing_delta)
-    if (!is.na(existing_dimension) && existing_dimension != ncol(batch_matrix)) {
-      stop("Embedding dimension changed from ", existing_dimension, " to ", ncol(batch_matrix), ".", call. = FALSE)
-    }
-
-    batch_metadata <- .litxr_embedding_metadata_from_records(
-      batch,
-      collection_id = collection_id,
-      field = field,
-      model = as.character(model),
-      provider = as.character(provider)
-    )
-
-    .litxr_append_embedding_delta(
-      paths = paths,
-      metadata = batch_metadata,
-      embeddings = batch_matrix,
-      manifest = .litxr_embedding_manifest(
-        collection_id = collection_id,
-        field = field,
-        model = as.character(model),
-        provider = as.character(provider),
-        dimension = ncol(batch_matrix),
-        records = nrow(batch_metadata)
-      )
-    )
-    existing_delta <- .litxr_merge_embedding_parts(
-      existing_delta,
-      list(metadata = batch_metadata, matrix = batch_matrix, manifest = list())
-    )
+#' Compact pending embedding delta shards into the main embedding cache
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param model Exact embedding model name used when building the cache.
+#' @param provider Optional provider label used in the resulting manifest.
+#' @param overwrite Whether the compacted result should ignore any existing main
+#'   embedding cache and rebuild it from delta only.
+#'
+#' @return Metadata `data.table` for the compacted main embedding index.
+#' @export
+litxr_compact_embedding_delta <- function(
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  model,
+  provider = NA_character_,
+  overwrite = FALSE
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
   }
-
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
   .litxr_compact_embedding_index(
     paths = paths,
     collection_id = collection_id,
@@ -828,6 +856,82 @@ litxr_build_embedding_index <- function(
     provider = as.character(provider),
     overwrite = isTRUE(overwrite)
   )
+}
+
+#' Search embedding delta shards instead of the compacted main cache
+#'
+#' Embeds the query with the supplied `embed_fun`, or uses a precomputed
+#' `query_vec`, then ranks records from one or more selected delta shard files
+#' by cosine similarity. Use `date` to select shard files whose timestamp prefix
+#' matches a `YYYY-MM-DD` day, or `shard` to point at one specific shard file
+#' directly.
+#'
+#' @param query Query text. Ignored when `query_vec` is supplied.
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param embed_fun Function taking a character vector and returning embeddings.
+#'   Required only when `query_vec` is not supplied.
+#' @param query_vec Optional precomputed numeric query embedding vector.
+#' @param model Exact embedding model name. Must match the selected delta shard
+#'   model.
+#' @param date Optional date used to filter shard filenames. Accepts values
+#'   coercible by `as.Date()`.
+#' @param shard Optional shard filename or full shard path under the collection's
+#'   embedding delta directory.
+#' @param top_n Number of matches to return.
+#'
+#' @return `data.table` of matches with `score`.
+#' @export
+litxr_search_embedding_delta <- function(
+  query,
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  embed_fun = NULL,
+  query_vec = NULL,
+  model,
+  date = NULL,
+  shard = NULL,
+  top_n = 20L
+) {
+  top_n <- as.integer(top_n)
+  if (is.na(top_n) || top_n < 0L) {
+    stop("`top_n` must be a non-negative integer.", call. = FALSE)
+  }
+
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  shard_paths <- .litxr_select_embedding_delta_shards(paths, shard = shard, date = date)
+  if (!length(shard_paths)) {
+    return(data.table::data.table())
+  }
+
+  delta <- .litxr_read_embedding_delta_shards(shard_paths)
+  if (!nrow(delta$metadata) || !nrow(delta$matrix)) {
+    return(data.table::data.table())
+  }
+  manifest_model <- delta$manifest$model %||% NA_character_
+  if (!identical(as.character(model), as.character(manifest_model))) {
+    stop("Query model does not match selected delta shard model: ", manifest_model, call. = FALSE)
+  }
+
+  query_vector <- .litxr_resolve_query_vector(
+    query = query,
+    embed_fun = embed_fun,
+    query_vec = query_vec
+  )
+  scores <- litxr_cosine_similarity(query_vector, delta$matrix)
+  out <- data.table::copy(delta$metadata)
+  out[["score"]] <- scores
+  data.table::setorderv(out, "score", order = -1L)
+  out[seq_len(min(nrow(out), as.integer(top_n))), ]
 }
 
 #' Read a cached embedding index
@@ -851,15 +955,18 @@ litxr_read_embedding_index <- function(collection_id, config = NULL, field = "ab
 
 #' Search cached collection embeddings
 #'
-#' Embeds the query with the supplied `embed_fun`, checks that `model` matches
-#' the cached corpus model, and ranks cached records by cosine similarity.
+#' Embeds the query with the supplied `embed_fun`, or uses a precomputed
+#' `query_vec`, checks that `model` matches the cached corpus model, and ranks
+#' cached records by cosine similarity.
 #'
-#' @param query Query text.
+#' @param query Query text. Ignored when `query_vec` is supplied.
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
 #' @param field Embedded text field.
 #' @param embed_fun Function taking a character vector and returning embeddings.
+#'   Required only when `query_vec` is not supplied.
+#' @param query_vec Optional precomputed numeric query embedding vector.
 #' @param model Exact embedding model name. Must match the cached corpus model.
 #' @param top_n Number of matches to return.
 #'
@@ -870,16 +977,11 @@ litxr_search_embeddings <- function(
   collection_id,
   config = NULL,
   field = "abstract",
-  embed_fun,
+  embed_fun = NULL,
+  query_vec = NULL,
   model,
   top_n = 20L
 ) {
-  if (missing(query) || !nzchar(as.character(query))) {
-    stop("`query` must be supplied and non-empty.", call. = FALSE)
-  }
-  if (!is.function(embed_fun)) {
-    stop("`embed_fun` must be a function that accepts a character vector.", call. = FALSE)
-  }
   top_n <- as.integer(top_n)
   if (is.na(top_n) || top_n < 0L) {
     stop("`top_n` must be a non-negative integer.", call. = FALSE)
@@ -893,15 +995,291 @@ litxr_search_embeddings <- function(
     stop("Query model does not match cached corpus model: ", manifest_model, call. = FALSE)
   }
 
-  query_matrix <- .litxr_as_embedding_matrix(embed_fun(as.character(query[[1]])))
-  if (nrow(query_matrix) != 1L) {
-    stop("`embed_fun` must return exactly one embedding for the query.", call. = FALSE)
-  }
-  scores <- litxr_cosine_similarity(query_matrix[1, ], index$matrix)
+  query_vector <- .litxr_resolve_query_vector(
+    query = query,
+    embed_fun = embed_fun,
+    query_vec = query_vec
+  )
+  scores <- litxr_cosine_similarity(query_vector, index$matrix)
   out <- data.table::copy(index$metadata)
   out[["score"]] <- scores
   data.table::setorderv(out, "score", order = -1L)
   out[seq_len(min(nrow(out), as.integer(top_n))), ]
+}
+
+#' Build a cached category-query embedding index
+#'
+#' Builds and caches embeddings for a set of category-defining query sentences.
+#' The query set can be supplied as a named R list or a JSON/YAML file path.
+#'
+#' @param query_set Named list mapping category ids to character vectors of
+#'   query sentences, or a path to a JSON/YAML file containing that structure.
+#' @param query_set_id Identifier for this category query set.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param embed_fun Function taking a character vector and returning embeddings.
+#' @param model Exact embedding model name.
+#' @param provider Optional provider label, such as `"openrouter"` or
+#'   `"gemini"`.
+#' @param batch_size Number of query sentences per embedding request.
+#' @param overwrite Whether to rebuild the cached query index from scratch.
+#'
+#' @return List with `metadata`, `matrix`, and `manifest`.
+#' @export
+litxr_build_label_query_index <- function(
+  query_set,
+  query_set_id = "default",
+  config = NULL,
+  embed_fun,
+  model,
+  provider = NA_character_,
+  batch_size = 64L,
+  overwrite = FALSE
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (!is.function(embed_fun)) {
+    stop("`embed_fun` must be a function that accepts a character vector.", call. = FALSE)
+  }
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+  batch_size <- as.integer(batch_size)
+  if (is.na(batch_size) || batch_size <= 0L) {
+    stop("`batch_size` must be a positive integer.", call. = FALSE)
+  }
+
+  queries <- .litxr_normalize_label_query_set(query_set)
+  paths <- .litxr_label_query_index_paths(cfg, query_set_id, model)
+  existing <- .litxr_read_label_query_index_parts(paths, read_matrix = FALSE)
+  if (isTRUE(overwrite)) {
+    existing <- list(metadata = .litxr_empty_label_query_metadata(), matrix = NULL, manifest = list())
+  }
+
+  existing_ids <- if (nrow(existing$metadata)) existing$metadata$query_id else character()
+  todo <- if (isTRUE(overwrite)) queries else queries[!(queries$query_id %in% existing_ids), ]
+
+  parts <- if (isTRUE(overwrite)) {
+    list(
+      metadata = .litxr_empty_label_query_metadata(),
+      matrix = matrix(numeric(), nrow = 0L, ncol = 0L),
+      manifest = list()
+    )
+  } else {
+    .litxr_read_label_query_index_parts(paths, read_matrix = TRUE)
+  }
+
+  if (nrow(todo)) {
+    for (start in seq(1L, nrow(todo), by = batch_size)) {
+      end <- min(start + batch_size - 1L, nrow(todo))
+      batch <- todo[start:end, ]
+      batch_matrix <- .litxr_as_embedding_matrix(embed_fun(batch$query_text))
+      if (nrow(batch_matrix) != nrow(batch)) {
+        stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " query sentences.", call. = FALSE)
+      }
+
+      existing_dimension <- .litxr_label_query_existing_dimension(parts)
+      if (!is.na(existing_dimension) && existing_dimension != ncol(batch_matrix)) {
+        stop("Label query embedding dimension changed from ", existing_dimension, " to ", ncol(batch_matrix), ".", call. = FALSE)
+      }
+
+      batch_meta <- data.table::copy(batch)
+
+      parts$metadata <- data.table::rbindlist(list(parts$metadata, batch_meta), fill = TRUE)
+      parts$matrix <- if (!nrow(parts$matrix)) {
+        batch_matrix
+      } else {
+        rbind(parts$matrix, batch_matrix)
+      }
+      keep <- !duplicated(parts$metadata$query_id, fromLast = TRUE)
+      parts$metadata <- parts$metadata[keep, ]
+      parts$matrix <- parts$matrix[keep, , drop = FALSE]
+    }
+  }
+
+  manifest <- list(
+    query_set_id = as.character(query_set_id),
+    model = as.character(model),
+    provider = as.character(provider),
+    dimension = if (nrow(parts$matrix)) as.integer(ncol(parts$matrix)) else as.integer(existing$manifest$dimension %||% 0L),
+    records = as.integer(nrow(parts$metadata)),
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+  .litxr_write_label_query_index(paths, parts$metadata, parts$matrix, manifest)
+  .litxr_read_label_query_index_parts(paths, read_matrix = TRUE)
+}
+
+#' Score one collection against category-query embeddings
+#'
+#' Scores each collection record against all query sentences in a cached category
+#' query index, then aggregates within category by `max`, `mean`, or
+#' `top_k_mean`.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param query_set_id Identifier of a cached category query set.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field. Must match the collection embedding index.
+#' @param model Exact embedding model name. Must match both corpus and query
+#'   indexes.
+#' @param aggregations Character vector of aggregation names chosen from
+#'   `"max"`, `"mean"`, and `"top_k_mean"`.
+#' @param top_k Number of top query scores to average when
+#'   `aggregations` includes `"top_k_mean"`.
+#' @param ref_ids Optional subset of collection `ref_id`s to score.
+#' @param include_query_scores Whether to include the full per-query score table.
+#'
+#' @return If `include_query_scores = FALSE`, a `data.table` with one row per
+#'   `ref_id` and `category_id`. Otherwise a list with `category_scores` and
+#'   `query_scores`.
+#' @export
+litxr_score_collection_categories <- function(
+  collection_id,
+  query_set_id = "default",
+  config = NULL,
+  field = "abstract",
+  model,
+  aggregations = c("max", "mean"),
+  top_k = 3L,
+  ref_ids = NULL,
+  include_query_scores = FALSE
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  aggregations <- unique(as.character(aggregations))
+  valid_aggregations <- c("max", "mean", "top_k_mean")
+  if (!length(aggregations) || !all(aggregations %in% valid_aggregations)) {
+    stop("`aggregations` must be chosen from: ", paste(valid_aggregations, collapse = ", "), call. = FALSE)
+  }
+  top_k <- as.integer(top_k)
+  if (is.na(top_k) || top_k <= 0L) {
+    stop("`top_k` must be a positive integer.", call. = FALSE)
+  }
+
+  corpus <- litxr_read_embedding_index(collection_id, cfg, field = field, model = model)
+  queries <- .litxr_read_label_query_index(query_set_id, cfg, model = model)
+  if (!nrow(corpus$metadata) || !nrow(corpus$matrix) || !nrow(queries$metadata) || !nrow(queries$matrix)) {
+    out <- data.table::data.table()
+    if (isTRUE(include_query_scores)) {
+      return(list(category_scores = out, query_scores = out))
+    }
+    return(out)
+  }
+
+  if (!identical(as.character(model), as.character(queries$manifest$model %||% NA_character_))) {
+    stop("Category query index model does not match `model`: ", queries$manifest$model %||% NA_character_, call. = FALSE)
+  }
+  if (ncol(corpus$matrix) != ncol(queries$matrix)) {
+    stop("Collection and query embedding dimensions do not match.", call. = FALSE)
+  }
+
+  corpus_meta <- data.table::copy(corpus$metadata)
+  corpus_matrix <- corpus$matrix
+  if (!is.null(ref_ids)) {
+    keep <- corpus_meta$ref_id %in% as.character(ref_ids)
+    corpus_meta <- corpus_meta[keep, ]
+    corpus_matrix <- corpus_matrix[keep, , drop = FALSE]
+  }
+  if (!nrow(corpus_meta)) {
+    out <- data.table::data.table()
+    if (isTRUE(include_query_scores)) {
+      return(list(category_scores = out, query_scores = out))
+    }
+    return(out)
+  }
+
+  score_matrix <- .litxr_cosine_similarity_matrix(corpus_matrix, queries$matrix)
+  query_score_dt <- .litxr_query_score_table(corpus_meta, queries$metadata, score_matrix)
+  category_scores <- .litxr_aggregate_category_scores(query_score_dt, aggregations = aggregations, top_k = top_k)
+
+  if (isTRUE(include_query_scores)) {
+    return(list(category_scores = category_scores, query_scores = query_score_dt))
+  }
+  category_scores
+}
+
+#' Label collection records from aggregated category scores
+#'
+#' Applies simple threshold rules to aggregated category scores produced by
+#' `litxr_score_collection_categories()`.
+#'
+#' @param category_scores Aggregated score table from
+#'   `litxr_score_collection_categories()`.
+#' @param score_col Score column used for labeling, such as `"score_max"` or
+#'   `"score_mean"`.
+#' @param threshold Minimum score required for assignment. May be a scalar or a
+#'   named numeric vector keyed by `category_id`.
+#' @param multi_label Whether to return all categories above threshold for each
+#'   record instead of a single best category.
+#' @param margin Optional minimum gap between the top-ranked and second-ranked
+#'   categories in single-label mode.
+#'
+#' @return In single-label mode, one row per `ref_id`. In multi-label mode, one
+#'   row per assigned `ref_id` and `category_id`.
+#' @export
+litxr_label_collection_by_category <- function(
+  category_scores,
+  score_col = "score_max",
+  threshold = 0,
+  multi_label = FALSE,
+  margin = NULL
+) {
+  dt <- data.table::as.data.table(category_scores)
+  if (!nrow(dt)) {
+    return(dt)
+  }
+  required_cols <- c("ref_id", "category_id", score_col)
+  missing_cols <- setdiff(required_cols, names(dt))
+  if (length(missing_cols)) {
+    stop("Missing required columns in `category_scores`: ", paste(missing_cols, collapse = ", "), call. = FALSE)
+  }
+
+  dt <- data.table::copy(dt)
+  dt[["score"]] <- as.numeric(dt[[score_col]])
+  dt[["threshold"]] <- .litxr_threshold_by_category(dt$category_id, threshold)
+  dt[["above_threshold"]] <- !is.na(dt$score) & dt$score >= dt$threshold
+
+  if (isTRUE(multi_label)) {
+    out <- dt[dt$above_threshold, c("ref_id", "category_id", "score", "threshold"), with = FALSE]
+    if ("title" %in% names(dt)) {
+      title_map <- unique(dt[, c("ref_id", "title"), with = FALSE])
+      out <- merge(out, title_map, by = "ref_id", all.x = TRUE, sort = FALSE)
+      data.table::setcolorder(out, c("ref_id", "title", "category_id", "score", "threshold"))
+    }
+    return(out)
+  }
+
+  dt_ranked <- data.table::copy(dt)
+  data.table::setorderv(dt_ranked, c("ref_id", "score", "category_id"), order = c(1L, -1L, 1L))
+  groups <- split(seq_len(nrow(dt_ranked)), dt_ranked$ref_id)
+  rows <- lapply(groups, function(idx) {
+    chunk <- dt_ranked[idx, , drop = FALSE]
+    top <- chunk[1, , drop = FALSE]
+    top[["second_score"]] <- if (nrow(chunk) >= 2L) chunk$score[[2]] else NA_real_
+    top
+  })
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  out[["margin_to_second"]] <- out$score - out$second_score
+  out[["margin_pass"]] <- if (is.null(margin)) TRUE else {
+    margin_value <- as.numeric(margin[[1]])
+    if (is.na(margin_value) || margin_value < 0) {
+      stop("`margin` must be NULL or a non-negative number.", call. = FALSE)
+    }
+    is.na(out$second_score) | out$margin_to_second >= margin_value
+  }
+  out[["assigned"]] <- out$above_threshold & out$margin_pass
+  out[["assigned_category_id"]] <- ifelse(out$assigned, out$category_id, NA_character_)
+  out[["assigned_score"]] <- ifelse(out$assigned, out$score, NA_real_)
+
+  keep_cols <- c("ref_id", "assigned_category_id", "assigned_score", "threshold", "above_threshold", "second_score", "margin_to_second", "margin_pass", "assigned")
+  if ("title" %in% names(out)) {
+    keep_cols <- append(keep_cols, "title", after = 1L)
+  }
+  out[, keep_cols, with = FALSE]
 }
 
 #' Compute cosine similarity against an embedding matrix
@@ -922,6 +1300,249 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   denom <- sqrt(rowSums(embedding_matrix^2)) * sqrt(sum(query_vec^2))
   out <- numerator / denom
   out[is.na(out) | is.infinite(out)] <- 0
+  out
+}
+
+.litxr_resolve_query_vector <- function(query = NULL, embed_fun = NULL, query_vec = NULL) {
+  if (!is.null(query_vec)) {
+    query_matrix <- .litxr_as_embedding_matrix(query_vec)
+    if (nrow(query_matrix) != 1L) {
+      stop("`query_vec` must be a single embedding vector.", call. = FALSE)
+    }
+    return(as.numeric(query_matrix[1, ]))
+  }
+
+  if (missing(query) || is.null(query) || !nzchar(as.character(query[[1]]))) {
+    stop("`query` must be supplied and non-empty when `query_vec` is not supplied.", call. = FALSE)
+  }
+  if (!is.function(embed_fun)) {
+    stop("`embed_fun` must be a function when `query_vec` is not supplied.", call. = FALSE)
+  }
+
+  query_matrix <- .litxr_as_embedding_matrix(embed_fun(as.character(query[[1]])))
+  if (nrow(query_matrix) != 1L) {
+    stop("`embed_fun` must return exactly one embedding for the query.", call. = FALSE)
+  }
+  as.numeric(query_matrix[1, ])
+}
+
+.litxr_normalize_label_query_set <- function(query_set) {
+  if (is.character(query_set) && length(query_set) == 1L && file.exists(query_set)) {
+    ext <- tolower(tools::file_ext(query_set))
+    query_set <- switch(
+      ext,
+      json = jsonlite::fromJSON(query_set, simplifyVector = FALSE),
+      yml = yaml::read_yaml(query_set),
+      yaml = yaml::read_yaml(query_set),
+      stop("Unsupported label query set file extension: ", ext, call. = FALSE)
+    )
+  }
+
+  if (!is.list(query_set) || !length(query_set) || is.null(names(query_set)) || any(!nzchar(names(query_set)))) {
+    stop("`query_set` must be a named list or a JSON/YAML file path containing a named list.", call. = FALSE)
+  }
+
+  rows <- unlist(lapply(names(query_set), function(category_id) {
+    queries <- as.character(unlist(query_set[[category_id]], use.names = FALSE))
+    queries <- queries[!is.na(queries) & nzchar(trimws(queries))]
+    if (!length(queries)) {
+      return(list())
+    }
+    lapply(seq_along(queries), function(i) {
+      data.table::data.table(
+        category_id = as.character(category_id),
+        query_id = paste0(as.character(category_id), "__", sprintf("%03d", i)),
+        query_order = as.integer(i),
+        query_text = trimws(queries[[i]])
+      )
+    })
+  }), recursive = FALSE)
+
+  if (!length(rows)) {
+    return(.litxr_empty_label_query_metadata()[, c("category_id", "query_id", "query_order", "query_text"), with = FALSE])
+  }
+  data.table::rbindlist(rows, fill = TRUE)
+}
+
+.litxr_label_query_index_paths <- function(cfg, query_set_id, model) {
+  base_dir <- file.path(
+    .litxr_project_embeddings_dir(cfg),
+    "label_queries",
+    .litxr_embedding_slug(query_set_id),
+    .litxr_embedding_slug(model)
+  )
+  list(
+    dir = base_dir,
+    metadata = file.path(base_dir, "metadata.fst"),
+    matrix = file.path(base_dir, "matrix.rds"),
+    matrix_f32 = file.path(base_dir, "matrix.f32"),
+    manifest = file.path(base_dir, "manifest.json")
+  )
+}
+
+.litxr_empty_label_query_metadata <- function() {
+  data.table::data.table(
+    category_id = character(),
+    query_id = character(),
+    query_order = integer(),
+    query_text = character()
+  )
+}
+
+.litxr_read_label_query_index_parts <- function(paths, read_matrix = TRUE) {
+  metadata <- if (file.exists(paths$metadata)) {
+    fst::read_fst(paths$metadata, as.data.table = TRUE)
+  } else {
+    .litxr_empty_label_query_metadata()
+  }
+  matrix_data <- if (isTRUE(read_matrix) && file.exists(paths$matrix_f32)) {
+    .litxr_read_float32_matrix(
+      path = paths$matrix_f32,
+      nrow = nrow(metadata),
+      ncol = as.integer((jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE)$dimension %||% 0L)),
+      context = paths$dir
+    )
+  } else if (isTRUE(read_matrix) && file.exists(paths$matrix)) {
+    tryCatch(
+      readRDS(paths$matrix),
+      error = function(e) {
+        stop("Failed to read label query matrix cache at ", paths$matrix, ": ", conditionMessage(e), call. = FALSE)
+      }
+    )
+  } else if (isTRUE(read_matrix)) {
+    matrix(numeric(), nrow = 0L, ncol = 0L)
+  } else {
+    NULL
+  }
+  if (!is.null(matrix_data)) {
+    matrix_data <- as.matrix(matrix_data)
+    storage.mode(matrix_data) <- "double"
+    if (nrow(metadata) != nrow(matrix_data)) {
+      stop("Label query metadata rows do not match matrix rows in cache: ", paths$dir, call. = FALSE)
+    }
+  }
+  manifest <- if (file.exists(paths$manifest)) {
+    jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE)
+  } else {
+    list()
+  }
+  list(metadata = metadata, matrix = matrix_data, manifest = manifest)
+}
+
+.litxr_write_label_query_index <- function(paths, metadata, matrix, manifest) {
+  dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
+  .litxr_write_fst_atomic(as.data.frame(metadata), paths$metadata)
+  .litxr_write_float32_matrix_atomic(matrix, paths$matrix_f32)
+  if (file.exists(paths$matrix)) unlink(paths$matrix)
+  .litxr_write_json_atomic(manifest, paths$manifest)
+  invisible(paths)
+}
+
+.litxr_read_label_query_index <- function(query_set_id, cfg, model) {
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+  .litxr_read_label_query_index_parts(
+    .litxr_label_query_index_paths(cfg, query_set_id, model),
+    read_matrix = TRUE
+  )
+}
+
+.litxr_label_query_existing_dimension <- function(parts) {
+  if (!is.null(parts$matrix) && nrow(parts$matrix)) {
+    return(ncol(parts$matrix))
+  }
+  manifest_dimension <- suppressWarnings(as.integer(parts$manifest$dimension %||% NA_integer_))
+  if (!is.na(manifest_dimension) && manifest_dimension > 0L) {
+    return(manifest_dimension)
+  }
+  NA_integer_
+}
+
+.litxr_cosine_similarity_matrix <- function(embedding_matrix, query_matrix) {
+  embedding_matrix <- as.matrix(embedding_matrix)
+  query_matrix <- as.matrix(query_matrix)
+  storage.mode(embedding_matrix) <- "double"
+  storage.mode(query_matrix) <- "double"
+  if (ncol(embedding_matrix) != ncol(query_matrix)) {
+    stop("Embedding matrix and query matrix have different dimensions.", call. = FALSE)
+  }
+
+  embedding_norm <- sqrt(rowSums(embedding_matrix^2))
+  query_norm <- sqrt(rowSums(query_matrix^2))
+  denom <- embedding_norm %o% query_norm
+  scores <- embedding_matrix %*% t(query_matrix)
+  scores <- scores / denom
+  scores[is.na(scores) | is.infinite(scores)] <- 0
+  scores
+}
+
+.litxr_query_score_table <- function(corpus_meta, query_meta, score_matrix) {
+  score_dt <- data.table::data.table(
+    corpus_row = rep(seq_len(nrow(score_matrix)), times = ncol(score_matrix)),
+    query_row = rep(seq_len(ncol(score_matrix)), each = nrow(score_matrix)),
+    score = as.numeric(score_matrix)
+  )
+
+  corpus_map <- data.table::copy(corpus_meta)
+  corpus_map[["corpus_row"]] <- seq_len(nrow(corpus_map))
+  query_map <- data.table::copy(query_meta)
+  query_map[["query_row"]] <- seq_len(nrow(query_map))
+
+  out <- merge(score_dt, corpus_map, by = "corpus_row", all.x = TRUE, sort = FALSE)
+  out <- merge(
+    out,
+    query_map[, c("query_row", "category_id", "query_id", "query_order", "query_text"), with = FALSE],
+    by = "query_row",
+    all.x = TRUE,
+    sort = FALSE
+  )
+  keep_cols <- intersect(
+    c("ref_id", "title", "year", "category_id", "query_id", "query_order", "query_text", "score"),
+    names(out)
+  )
+  out[, keep_cols, with = FALSE]
+}
+
+.litxr_aggregate_category_scores <- function(query_score_dt, aggregations = c("max", "mean"), top_k = 3L) {
+  dt <- data.table::copy(query_score_dt)
+  if (!nrow(dt)) {
+    return(data.table::data.table())
+  }
+
+  split_key <- paste(dt$ref_id, dt$category_id, sep = "\r")
+  groups <- split(seq_len(nrow(dt)), split_key)
+  rows <- lapply(groups, function(idx) {
+    chunk <- dt[idx, , drop = FALSE]
+    ordered_scores <- sort(chunk$score, decreasing = TRUE)
+    values <- list(
+      ref_id = chunk$ref_id[[1]],
+      category_id = chunk$category_id[[1]],
+      query_n = nrow(chunk)
+    )
+    if ("title" %in% names(chunk)) values[["title"]] <- chunk$title[[1]]
+    if ("year" %in% names(chunk)) values[["year"]] <- chunk$year[[1]]
+    if ("max" %in% aggregations) values[["score_max"]] <- max(chunk$score)
+    if ("mean" %in% aggregations) values[["score_mean"]] <- mean(chunk$score)
+    if ("top_k_mean" %in% aggregations) values[["score_top_k_mean"]] <- mean(utils::head(ordered_scores, top_k))
+    data.table::as.data.table(values)
+  })
+  data.table::rbindlist(rows, fill = TRUE)
+}
+
+.litxr_threshold_by_category <- function(category_id, threshold) {
+  if (length(threshold) == 1L && is.null(names(threshold))) {
+    value <- as.numeric(threshold[[1]])
+    if (is.na(value)) stop("`threshold` must be numeric.", call. = FALSE)
+    return(rep(value, length(category_id)))
+  }
+  threshold_names <- names(threshold)
+  if (is.null(threshold_names) || any(!nzchar(threshold_names))) {
+    stop("`threshold` must be a scalar or a named numeric vector keyed by `category_id`.", call. = FALSE)
+  }
+  threshold <- stats::setNames(as.numeric(threshold), threshold_names)
+  out <- unname(threshold[as.character(category_id)])
+  out[is.na(out)] <- 0
   out
 }
 
@@ -2708,7 +3329,9 @@ litxr_add_refs <- function(
     dir = base_dir,
     metadata = file.path(base_dir, "metadata.fst"),
     matrix = file.path(base_dir, "matrix.rds"),
+    matrix_f32 = file.path(base_dir, "matrix.f32"),
     manifest = file.path(base_dir, "manifest.json"),
+    shards_dir = file.path(base_dir, "shards"),
     delta_dir = file.path(base_dir, "delta"),
     delta_metadata = file.path(base_dir, "delta_metadata.fst"),
     delta_matrix = file.path(base_dir, "delta_matrix.rds"),
@@ -2719,16 +3342,8 @@ litxr_add_refs <- function(
 .litxr_empty_embedding_metadata <- function() {
   data.table::data.table(
     ref_id = character(),
-    source = character(),
-    source_id = character(),
     title = character(),
-    year = integer(),
-    collection_id = character(),
-    field = character(),
-    model = character(),
-    provider = character(),
-    text_nchar = integer(),
-    embedded_at = character()
+    year = integer()
   )
 }
 
@@ -2790,25 +3405,148 @@ litxr_add_refs <- function(
 
   data.table::data.table(
     ref_id = value_or_na("ref_id"),
-    source = value_or_na("source"),
-    source_id = value_or_na("source_id"),
     title = value_or_na("title"),
-    year = as.integer(value_or_na("year", "integer")),
-    collection_id = as.character(collection_id),
-    field = as.character(field),
-    model = as.character(model),
-    provider = as.character(provider),
-    text_nchar = nchar(records$litxr_embedding_text__, type = "chars", allowNA = TRUE),
-    embedded_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+    year = as.integer(value_or_na("year", "integer"))
   )
 }
 
-.litxr_read_embedding_index_parts <- function(paths) {
+.litxr_prepare_embedding_targets <- function(collection_id, cfg, field, model, overwrite = FALSE, limit = NULL) {
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  records <- litxr_read_collection(collection_id, cfg)
+  if (!nrow(records)) {
+    return(list(
+      targets = data.table::data.table(),
+      paths = .litxr_embedding_index_paths(cfg, collection_id, field, model),
+      existing = list(metadata = .litxr_empty_embedding_metadata(), matrix = NULL, manifest = list()),
+      delta = list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+    ))
+  }
+  if (!(field %in% names(records))) {
+    stop("Field not found in collection records: ", field, call. = FALSE)
+  }
+
+  text <- as.character(records[[field]])
+  text[is.na(text)] <- ""
+  text <- trimws(text)
+  keep <- !is.na(records$ref_id) & nzchar(records$ref_id) & nzchar(text)
+  targets <- records[keep, ]
+  targets[["litxr_embedding_text__"]] <- text[keep]
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  existing <- .litxr_read_embedding_index_parts(paths, read_matrix = FALSE)
+  if (isTRUE(overwrite)) {
+    .litxr_clear_embedding_delta(paths)
+    existing <- list(metadata = .litxr_empty_embedding_metadata(), matrix = NULL, manifest = list())
+  }
+  delta <- .litxr_read_embedding_delta_parts(paths)
+
+  existing_ref_ids <- unique(c(
+    if (nrow(existing$metadata)) existing$metadata$ref_id else character(),
+    if (nrow(delta$metadata)) delta$metadata$ref_id else character()
+  ))
+  targets <- if (isTRUE(overwrite)) targets else targets[!(targets$ref_id %in% existing_ref_ids), ]
+  if (!is.null(limit)) {
+    limit <- as.integer(limit)
+    if (is.na(limit) || limit < 0L) {
+      stop("`limit` must be a non-negative integer.", call. = FALSE)
+    }
+    targets <- targets[seq_len(min(nrow(targets), limit)), ]
+  }
+
+  list(targets = targets, paths = paths, existing = existing, delta = delta)
+}
+
+.litxr_write_embedding_delta_batches <- function(
+  targets,
+  paths,
+  collection_id,
+  field,
+  embed_fun,
+  model,
+  provider,
+  batch_size,
+  existing,
+  existing_delta
+) {
+  if (!is.function(embed_fun)) {
+    stop("`embed_fun` must be a function that accepts a character vector.", call. = FALSE)
+  }
+  batch_size <- as.integer(batch_size)
+  if (is.na(batch_size) || batch_size <= 0L) {
+    stop("`batch_size` must be a positive integer.", call. = FALSE)
+  }
+  if (!nrow(targets)) {
+    return(existing_delta$metadata)
+  }
+
+  for (start in seq(1L, nrow(targets), by = batch_size)) {
+    end <- min(start + batch_size - 1L, nrow(targets))
+    batch <- targets[start:end, ]
+    batch_matrix <- .litxr_as_embedding_matrix(embed_fun(batch$litxr_embedding_text__))
+    if (nrow(batch_matrix) != nrow(batch)) {
+      stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " texts.", call. = FALSE)
+    }
+
+    existing_dimension <- .litxr_embedding_existing_dimension(existing, existing_delta)
+    if (!is.na(existing_dimension) && existing_dimension != ncol(batch_matrix)) {
+      stop("Embedding dimension changed from ", existing_dimension, " to ", ncol(batch_matrix), ".", call. = FALSE)
+    }
+
+    batch_metadata <- .litxr_embedding_metadata_from_records(
+      batch,
+      collection_id = collection_id,
+      field = field,
+      model = as.character(model),
+      provider = as.character(provider)
+    )
+
+    .litxr_append_embedding_delta(
+      paths = paths,
+      metadata = batch_metadata,
+      embeddings = batch_matrix,
+      manifest = .litxr_embedding_manifest(
+        collection_id = collection_id,
+        field = field,
+        model = as.character(model),
+        provider = as.character(provider),
+        dimension = ncol(batch_matrix),
+        records = nrow(batch_metadata)
+      )
+    )
+    existing_delta <- .litxr_merge_embedding_parts(
+      existing_delta,
+      list(
+        metadata = batch_metadata,
+        matrix = batch_matrix,
+        manifest = .litxr_embedding_manifest(
+          collection_id = collection_id,
+          field = field,
+          model = as.character(model),
+          provider = as.character(provider),
+          dimension = ncol(batch_matrix),
+          records = nrow(batch_metadata)
+        )
+      )
+    )
+  }
+
+  existing_delta$metadata
+}
+
+.litxr_read_embedding_index_parts <- function(paths, read_matrix = TRUE) {
+  if (.litxr_embedding_has_shards(paths)) {
+    return(.litxr_read_embedding_sharded_parts(paths, read_matrix = read_matrix))
+  }
   .litxr_read_embedding_parts(
     metadata_path = paths$metadata,
     matrix_path = paths$matrix,
+    matrix_f32_path = paths$matrix_f32,
     manifest_path = paths$manifest,
-    cache_dir = paths$dir
+    cache_dir = paths$dir,
+    read_matrix = read_matrix
   )
 }
 
@@ -2816,15 +3554,20 @@ litxr_add_refs <- function(
   delta <- .litxr_read_embedding_parts(
     metadata_path = paths$delta_metadata,
     matrix_path = paths$delta_matrix,
+    matrix_f32_path = NULL,
     manifest_path = paths$delta_manifest,
-    cache_dir = paths$dir
+    cache_dir = paths$dir,
+    read_matrix = TRUE
   )
+  .litxr_merge_embedding_parts(delta, .litxr_read_embedding_delta_shards(.litxr_embedding_delta_shard_paths(paths)))
+}
 
-  shard_paths <- .litxr_embedding_delta_shard_paths(paths)
+.litxr_read_embedding_delta_shards <- function(shard_paths) {
   if (!length(shard_paths)) {
-    return(delta)
+    return(list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list()))
   }
 
+  delta <- list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
   for (shard_path in shard_paths) {
     shard <- readRDS(shard_path)
     if (!is.list(shard) || is.null(shard$metadata) || is.null(shard$matrix)) {
@@ -2835,41 +3578,134 @@ litxr_add_refs <- function(
     shard$manifest <- shard$manifest %||% list()
     delta <- .litxr_merge_embedding_parts(delta, shard)
   }
-
   delta
 }
 
-.litxr_read_embedding_parts <- function(metadata_path, matrix_path, manifest_path, cache_dir) {
+.litxr_read_embedding_parts <- function(metadata_path, matrix_path, matrix_f32_path = NULL, manifest_path, cache_dir, read_matrix = TRUE) {
   metadata <- if (file.exists(metadata_path)) {
     fst::read_fst(metadata_path, as.data.table = TRUE)
   } else {
     .litxr_empty_embedding_metadata()
   }
-  embeddings <- if (file.exists(matrix_path)) {
-    readRDS(matrix_path)
-  } else {
-    matrix(numeric(), nrow = 0L, ncol = 0L)
-  }
-  embeddings <- as.matrix(embeddings)
-  storage.mode(embeddings) <- "double"
   manifest <- if (file.exists(manifest_path)) {
     jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
   } else {
     list()
   }
-  if (nrow(metadata) != nrow(embeddings)) {
+  embeddings <- if (!isTRUE(read_matrix)) {
+    NULL
+  } else if (!is.null(matrix_f32_path) && file.exists(matrix_f32_path)) {
+    .litxr_read_float32_matrix(
+      path = matrix_f32_path,
+      nrow = nrow(metadata),
+      ncol = as.integer(manifest$dimension %||% 0L),
+      context = cache_dir
+    )
+  } else if (file.exists(matrix_path)) {
+    tryCatch(
+      readRDS(matrix_path),
+      error = function(e) {
+        stop(
+          "Failed to read embedding matrix cache at ", matrix_path,
+          ". The file may be corrupted by an interrupted write. ",
+          "For delta-only embedding, update to the latest package and retry. ",
+          "To rebuild the main cache, use `overwrite = TRUE` after preserving any needed delta shards. ",
+          "Underlying error: ", conditionMessage(e),
+          call. = FALSE
+        )
+      }
+    )
+  } else {
+    matrix(numeric(), nrow = 0L, ncol = 0L)
+  }
+  if (!is.null(embeddings)) {
+    embeddings <- as.matrix(embeddings)
+    storage.mode(embeddings) <- "double"
+  }
+  if (!is.null(embeddings) && nrow(metadata) != nrow(embeddings)) {
     stop("Embedding metadata rows do not match matrix rows in cache: ", cache_dir, call. = FALSE)
   }
   list(metadata = metadata, matrix = embeddings, manifest = manifest)
+}
+
+.litxr_save_rds_atomic <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp_path <- paste0(path, ".tmp")
+  saveRDS(object, tmp_path)
+  if (!file.rename(tmp_path, path)) {
+    unlink(tmp_path)
+    stop("Failed to atomically write RDS file: ", path, call. = FALSE)
+  }
+  invisible(path)
+}
+
+.litxr_write_float32_matrix_atomic <- function(matrix, path) {
+  matrix <- as.matrix(matrix)
+  storage.mode(matrix) <- "double"
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp_path <- paste0(path, ".tmp")
+  con <- file(tmp_path, open = "wb")
+  on.exit(try(close(con), silent = TRUE), add = TRUE)
+  writeBin(as.numeric(matrix), con, size = 4L, endian = "little")
+  close(con)
+  if (!file.rename(tmp_path, path)) {
+    unlink(tmp_path)
+    stop("Failed to atomically write float32 matrix file: ", path, call. = FALSE)
+  }
+  invisible(path)
+}
+
+.litxr_read_float32_matrix <- function(path, nrow, ncol, context) {
+  nrow <- as.integer(nrow)
+  ncol <- as.integer(ncol)
+  if (is.na(nrow) || is.na(ncol) || nrow < 0L || ncol < 0L) {
+    stop("Invalid float32 matrix shape for cache: ", context, call. = FALSE)
+  }
+  if (nrow == 0L || ncol == 0L) {
+    return(matrix(numeric(), nrow = nrow, ncol = ncol))
+  }
+  expected <- as.double(nrow) * as.double(ncol)
+  con <- file(path, open = "rb")
+  on.exit(close(con), add = TRUE)
+  values <- tryCatch(
+    readBin(con, what = numeric(), n = expected, size = 4L, endian = "little"),
+    error = function(e) {
+      stop("Failed to read float32 embedding matrix cache at ", path, ": ", conditionMessage(e), call. = FALSE)
+    }
+  )
+  if (length(values) != expected) {
+    stop("Float32 embedding matrix cache has unexpected length at ", path, ".", call. = FALSE)
+  }
+  matrix(values, nrow = nrow, ncol = ncol, byrow = FALSE)
+}
+
+.litxr_write_json_atomic <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp_path <- paste0(path, ".tmp")
+  jsonlite::write_json(object, tmp_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  if (!file.rename(tmp_path, path)) {
+    unlink(tmp_path)
+    stop("Failed to atomically write JSON file: ", path, call. = FALSE)
+  }
+  invisible(path)
+}
+
+.litxr_write_fst_atomic <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp_path <- paste0(path, ".tmp")
+  fst::write_fst(object, tmp_path)
+  if (!file.rename(tmp_path, path)) {
+    unlink(tmp_path)
+    stop("Failed to atomically write fst file: ", path, call. = FALSE)
+  }
+  invisible(path)
 }
 
 .litxr_write_embedding_index <- function(paths, metadata, embeddings, manifest) {
   if (!dir.exists(paths$dir)) {
     dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
   }
-  fst::write_fst(as.data.frame(metadata), paths$metadata)
-  saveRDS(embeddings, paths$matrix)
-  jsonlite::write_json(manifest, paths$manifest, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  .litxr_write_embedding_sharded_index(paths, metadata, embeddings, manifest)
   invisible(paths)
 }
 
@@ -2877,9 +3713,9 @@ litxr_add_refs <- function(
   if (!dir.exists(paths$dir)) {
     dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
   }
-  fst::write_fst(as.data.frame(metadata), paths$delta_metadata)
-  saveRDS(embeddings, paths$delta_matrix)
-  jsonlite::write_json(manifest, paths$delta_manifest, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  .litxr_write_fst_atomic(as.data.frame(metadata), paths$delta_metadata)
+  .litxr_save_rds_atomic(embeddings, paths$delta_matrix)
+  .litxr_write_json_atomic(manifest, paths$delta_manifest)
   invisible(paths)
 }
 
@@ -2907,6 +3743,34 @@ litxr_add_refs <- function(
   sort(list.files(paths$delta_dir, pattern = "\\.rds$", full.names = TRUE))
 }
 
+.litxr_select_embedding_delta_shards <- function(paths, shard = NULL, date = NULL) {
+  shard_paths <- .litxr_embedding_delta_shard_paths(paths)
+  if (!length(shard_paths)) {
+    return(character())
+  }
+
+  if (!is.null(shard)) {
+    shard <- as.character(shard[[1]])
+    shard_full <- if (grepl("^/", shard)) shard else file.path(paths$delta_dir, shard)
+    shard_match <- normalizePath(shard_full, winslash = "/", mustWork = FALSE)
+    shard_paths_norm <- normalizePath(shard_paths, winslash = "/", mustWork = FALSE)
+    keep <- shard_paths_norm %in% shard_match | basename(shard_paths) %in% basename(shard)
+    return(shard_paths[keep])
+  }
+
+  if (!is.null(date)) {
+    date <- as.Date(date[[1]])
+    if (is.na(date)) {
+      stop("`date` must be coercible by `as.Date()`.", call. = FALSE)
+    }
+    date_key <- format(date, "%Y%m%d")
+    shard_stamp <- sub("^batch_([0-9]{8}).*$", "\\1", basename(shard_paths))
+    return(shard_paths[shard_stamp %in% date_key])
+  }
+
+  shard_paths
+}
+
 .litxr_embedding_delta_shard_path <- function(paths) {
   stamp <- format(Sys.time(), "%Y%m%d%H%M%OS6", tz = "UTC")
   stamp <- gsub("[^0-9]", "", stamp)
@@ -2915,11 +3779,15 @@ litxr_add_refs <- function(
 }
 
 .litxr_embedding_existing_dimension <- function(existing, delta) {
-  if (nrow(delta$matrix)) {
+  if (!is.null(delta$matrix) && nrow(delta$matrix)) {
     return(ncol(delta$matrix))
   }
-  if (nrow(existing$matrix)) {
+  if (!is.null(existing$matrix) && nrow(existing$matrix)) {
     return(ncol(existing$matrix))
+  }
+  manifest_dimension <- suppressWarnings(as.integer(existing$manifest$dimension %||% NA_integer_))
+  if (!is.na(manifest_dimension) && manifest_dimension > 0L) {
+    return(manifest_dimension)
   }
   NA_integer_
 }
@@ -2981,6 +3849,110 @@ litxr_add_refs <- function(
   if (!is.null(paths$delta_dir) && dir.exists(paths$delta_dir)) {
     unlink(paths$delta_dir, recursive = TRUE)
   }
+  invisible(paths)
+}
+
+.litxr_embedding_has_shards <- function(paths) {
+  !is.null(paths$shards_dir) && dir.exists(paths$shards_dir) && length(list.files(paths$shards_dir, full.names = FALSE)) > 0L
+}
+
+.litxr_embedding_shard_key <- function(year) {
+  year <- suppressWarnings(as.integer(year))
+  out <- ifelse(!is.na(year) & year >= 1000L & year <= 9999L, sprintf("%04d", year), "unknown")
+  as.character(out)
+}
+
+.litxr_embedding_shard_paths <- function(paths, shard_key) {
+  shard_dir <- file.path(paths$shards_dir, shard_key)
+  list(
+    dir = shard_dir,
+    metadata = file.path(shard_dir, "metadata.fst"),
+    matrix_f32 = file.path(shard_dir, "matrix.f32"),
+    manifest = file.path(shard_dir, "manifest.json")
+  )
+}
+
+.litxr_embedding_shard_keys <- function(paths) {
+  if (is.null(paths$shards_dir) || !dir.exists(paths$shards_dir)) {
+    return(character())
+  }
+  entries <- list.files(paths$shards_dir, full.names = FALSE)
+  entries[dir.exists(file.path(paths$shards_dir, entries))]
+}
+
+.litxr_read_embedding_sharded_parts <- function(paths, read_matrix = TRUE) {
+  shard_keys <- .litxr_embedding_shard_keys(paths)
+  manifest <- if (file.exists(paths$manifest)) jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE) else list()
+  if (!length(shard_keys)) {
+    return(list(metadata = .litxr_empty_embedding_metadata(), matrix = if (isTRUE(read_matrix)) matrix(numeric(), nrow = 0L, ncol = 0L) else NULL, manifest = manifest))
+  }
+
+  parts <- lapply(shard_keys, function(key) {
+    shard_paths <- .litxr_embedding_shard_paths(paths, key)
+    shard_manifest <- if (file.exists(shard_paths$manifest)) jsonlite::fromJSON(shard_paths$manifest, simplifyVector = FALSE) else list()
+    metadata <- if (file.exists(shard_paths$metadata)) fst::read_fst(shard_paths$metadata, as.data.table = TRUE) else .litxr_empty_embedding_metadata()
+    matrix_data <- if (!isTRUE(read_matrix)) {
+      NULL
+    } else if (file.exists(shard_paths$matrix_f32)) {
+      .litxr_read_float32_matrix(
+        path = shard_paths$matrix_f32,
+        nrow = nrow(metadata),
+        ncol = as.integer(shard_manifest$dimension %||% manifest$dimension %||% 0L),
+        context = shard_paths$dir
+      )
+    } else {
+      matrix(numeric(), nrow = 0L, ncol = as.integer(shard_manifest$dimension %||% manifest$dimension %||% 0L))
+    }
+    list(metadata = metadata, matrix = matrix_data, manifest = shard_manifest)
+  })
+
+  metadata <- data.table::rbindlist(lapply(parts, `[[`, "metadata"), fill = TRUE)
+  matrix_data <- if (isTRUE(read_matrix)) {
+    mats <- lapply(parts, `[[`, "matrix")
+    mats <- mats[vapply(mats, function(x) !is.null(x), logical(1))]
+    if (!length(mats)) matrix(numeric(), nrow = 0L, ncol = as.integer(manifest$dimension %||% 0L)) else do.call(rbind, mats)
+  } else {
+    NULL
+  }
+  list(metadata = metadata, matrix = matrix_data, manifest = manifest)
+}
+
+.litxr_write_embedding_sharded_index <- function(paths, metadata, embeddings, manifest) {
+  dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
+  if (dir.exists(paths$shards_dir)) unlink(paths$shards_dir, recursive = TRUE)
+  dir.create(paths$shards_dir, recursive = TRUE, showWarnings = FALSE)
+
+  shard_key <- .litxr_embedding_shard_key(metadata$year)
+  split_idx <- split(seq_len(nrow(metadata)), shard_key)
+  shard_manifest <- list()
+  for (key in names(split_idx)) {
+    idx <- split_idx[[key]]
+    shard_paths <- .litxr_embedding_shard_paths(paths, key)
+    dir.create(shard_paths$dir, recursive = TRUE, showWarnings = FALSE)
+    shard_meta <- metadata[idx, , drop = FALSE]
+    shard_matrix <- embeddings[idx, , drop = FALSE]
+    local_manifest <- list(
+      shard_key = key,
+      year = if (identical(key, "unknown")) NA_integer_ else as.integer(key),
+      dimension = as.integer(ncol(shard_matrix)),
+      records = as.integer(nrow(shard_meta)),
+      matrix_format = "float32",
+      updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+    )
+    .litxr_write_fst_atomic(as.data.frame(shard_meta), shard_paths$metadata)
+    .litxr_write_float32_matrix_atomic(shard_matrix, shard_paths$matrix_f32)
+    .litxr_write_json_atomic(local_manifest, shard_paths$manifest)
+    shard_manifest[[key]] <- local_manifest
+  }
+
+  manifest$storage_version <- 2L
+  manifest$matrix_format <- "float32"
+  manifest$shard_by <- "year"
+  manifest$shards <- shard_manifest
+  .litxr_write_json_atomic(manifest, paths$manifest)
+  if (file.exists(paths$metadata)) unlink(paths$metadata)
+  if (file.exists(paths$matrix)) unlink(paths$matrix)
+  if (file.exists(paths$matrix_f32)) unlink(paths$matrix_f32)
   invisible(paths)
 }
 

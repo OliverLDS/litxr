@@ -57,6 +57,76 @@ the main embedding index once at the end. If the process is interrupted, the
 delta shards are left on disk and reruns without `overwrite = TRUE` continue
 from missing references instead of recomputing the whole corpus.
 
+Newly compacted corpus embedding caches use float32 storage and are sharded by
+`year`. This reduces compacted cache size and avoids rewriting one monolithic
+matrix file for the whole corpus.
+
+If you want to separate those two stages explicitly, use:
+
+- `litxr_embed_collection_delta()` to write only the missing embeddings into
+  delta shards
+- `litxr_compact_embedding_delta()` to merge pending delta shards into the main
+  embedding cache
+- `litxr_search_embedding_delta()` to search selected delta shard files before
+  compaction, including filtering by shard date
+
+For repeated searches, both `litxr_search_embeddings()` and
+`litxr_search_embedding_delta()` also accept a precomputed numeric
+`query_vec`. In that mode, they do not call `embed_fun` or any external
+embedding API.
+
+## Category Labeling
+
+You can also build a small embedding-based labeling workflow for one corpus.
+The intended pattern is:
+
+1. Define a named list of category query sentences.
+2. Build a cached query embedding index with `litxr_build_label_query_index()`.
+3. Score one collection against those category queries with
+   `litxr_score_collection_categories()`.
+4. Apply threshold rules with `litxr_label_collection_by_category()`.
+
+Example:
+
+```r
+query_set <- list(
+  reasoning = c(
+    "This paper studies reasoning in language models.",
+    "This paper focuses on planning and multi-step inference."
+  ),
+  retrieval = c(
+    "This paper studies retrieval-augmented generation.",
+    "This paper focuses on dense retrieval and semantic search."
+  )
+)
+
+litxr_build_label_query_index(
+  query_set = query_set,
+  query_set_id = "ai-topics-v1",
+  config = cfg,
+  embed_fun = embed_fun,
+  model = "your-embedding-model"
+)
+
+scores <- litxr_score_collection_categories(
+  "arxiv_cs_ai",
+  query_set_id = "ai-topics-v1",
+  config = cfg,
+  field = "abstract",
+  model = "your-embedding-model",
+  aggregations = c("max", "mean")
+)
+
+labels <- litxr_label_collection_by_category(
+  scores,
+  score_col = "score_max",
+  threshold = 0.35
+)
+```
+
+For repeated category searches, keep the collection embedding index and the
+query-set embedding index on the same `model`.
+
 ## Markdown
 
 Project-level markdown helpers:

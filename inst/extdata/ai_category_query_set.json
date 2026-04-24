@@ -1,0 +1,98 @@
+{
+  "foundation_model_architecture_pretraining": [
+    "This paper proposes or analyzes a new architecture for large language models, foundation models, transformers, attention mechanisms, or neural sequence models.",
+    "This paper studies pretraining methods, training objectives, scaling laws, model capacity, or data-compute tradeoffs for foundation models.",
+    "This paper introduces improvements to transformer blocks, attention layers, positional encoding, context handling, or model structure.",
+    "This paper investigates mixture-of-experts models, sparse activation, modular neural architectures, or efficient scaling of large models.",
+    "This paper focuses on how model architecture or pretraining design affects generalization, reasoning, transfer, or downstream performance.",
+    "This paper presents a new foundation model or pretraining recipe and evaluates its performance across multiple tasks or benchmarks."
+  ],
+  "post_training_alignment_reinforcement_learning": [
+    "This paper studies instruction tuning, supervised fine-tuning, preference optimization, RLHF, DPO, or other post-training methods for large language models.",
+    "This paper proposes a method to improve model helpfulness, harmlessness, truthfulness, controllability, or instruction-following ability.",
+    "This paper uses reinforcement learning, reward models, preference data, or human feedback to optimize language model behavior.",
+    "This paper investigates self-improvement, self-training, critique, reflection, revision, or iterative refinement in AI models.",
+    "This paper compares different alignment methods or post-training pipelines for chat models and assistant-style foundation models.",
+    "This paper analyzes failure modes, tradeoffs, or unintended effects caused by post-training, preference learning, or alignment optimization."
+  ],
+  "reasoning_planning_agentic_ai": [
+    "This paper studies reasoning abilities in large language models, including mathematical reasoning, logical reasoning, symbolic reasoning, or multi-step inference.",
+    "This paper proposes methods for planning, task decomposition, long-horizon decision-making, or structured problem solving with language models.",
+    "This paper focuses on autonomous agents, agentic AI systems, tool use, API use, workflow execution, or environment interaction.",
+    "This paper investigates multi-agent systems, agent collaboration, agent communication, negotiation, coordination, or role-based AI workflows.",
+    "This paper evaluates chain-of-thought, tree-of-thought, self-correction, reflection, or other reasoning-enhancement techniques.",
+    "This paper studies how AI agents make decisions, use memory, select actions, recover from errors, or complete complex real-world tasks."
+  ],
+  "retrieval_memory_knowledge_grounding": [
+    "This paper studies retrieval-augmented generation, external knowledge grounding, document retrieval, evidence selection, or knowledge base question answering.",
+    "This paper proposes methods to reduce hallucination by grounding model outputs in retrieved documents, citations, databases, or verifiable sources.",
+    "This paper focuses on long-term memory, working memory, episodic memory, memory compression, or memory-augmented language models.",
+    "This paper improves dense retrieval, vector search, reranking, semantic search, hybrid search, or retrieval pipelines for AI systems.",
+    "This paper investigates long-context modeling, context compression, context selection, or efficient use of large document collections.",
+    "This paper studies factual consistency, source attribution, citation generation, or evidence-aware generation in language models."
+  ],
+  "multimodal_vision_audio_video_documents": [
+    "This paper studies multimodal models that combine text with images, video, audio, speech, charts, tables, or visual documents.",
+    "This paper focuses on vision-language models, visual question answering, image captioning, image understanding, or image-text reasoning.",
+    "This paper investigates video understanding, temporal reasoning, action recognition, video question answering, or multimodal sequence modeling.",
+    "This paper studies audio-language models, speech understanding, music generation, sound recognition, or audio-text multimodal learning.",
+    "This paper focuses on document understanding, OCR, layout analysis, table understanding, chart interpretation, or visually rich document reasoning.",
+    "This paper proposes a multimodal foundation model or evaluates cross-modal reasoning across text, image, video, audio, or structured visual inputs."
+  ],
+  "embodied_ai_robotics_world_models": [
+    "This paper studies embodied AI, robotics, robot learning, physical interaction, manipulation, navigation, or control.",
+    "This paper proposes vision-language-action models, robot policies, embodied agents, or AI systems that act in physical environments.",
+    "This paper investigates world models, environment dynamics, simulation, spatial reasoning, or planning in physical or virtual spaces.",
+    "This paper applies imitation learning, reinforcement learning, offline learning, or policy optimization to robotic tasks.",
+    "This paper focuses on 3D scene understanding, object manipulation, navigation, motion planning, or autonomous embodied task execution.",
+    "This paper evaluates how AI agents perceive, reason, and act in interactive environments such as robots, simulators, games, or real-world spaces."
+  ],
+  "efficient_training_inference_ai_systems": [
+    "This paper studies efficient training or inference for large language models, foundation models, transformers, or multimodal models.",
+    "This paper focuses on quantization, pruning, distillation, sparsity, compression, LoRA, adapters, or parameter-efficient fine-tuning.",
+    "This paper improves model serving, latency, throughput, batching, KV cache management, memory efficiency, or deployment performance.",
+    "This paper investigates distributed training, parallelism, GPU utilization, hardware-aware optimization, or scalable AI infrastructure.",
+    "This paper proposes small language models, edge AI, on-device inference, low-resource deployment, or resource-constrained model optimization.",
+    "This paper analyzes compute cost, memory cost, energy efficiency, inference speed, or practical system tradeoffs in AI model deployment."
+  ],
+  "evaluation_benchmarks_reliability": [
+    "This paper proposes or analyzes benchmarks, evaluation datasets, leaderboards, metrics, or testing frameworks for AI models.",
+    "This paper evaluates reliability, robustness, factuality, calibration, uncertainty, consistency, or generalization of language models.",
+    "This paper studies hallucination detection, factual error measurement, model confidence, or trustworthiness evaluation.",
+    "This paper investigates benchmark contamination, data leakage, reproducibility, evaluation bias, or limitations of existing benchmarks.",
+    "This paper uses human evaluation, automatic evaluation, judge models, preference evaluation, or metric design to assess model performance.",
+    "This paper analyzes model failure modes, adversarial evaluation, out-of-distribution behavior, or stress testing of AI systems."
+  ],
+  "safety_security_privacy_governance": [
+    "This paper studies AI safety, model risk, harmful behavior, misuse prevention, responsible AI, or trustworthy AI systems.",
+    "This paper investigates jailbreak attacks, prompt injection, adversarial prompting, red teaming, or security vulnerabilities in AI models.",
+    "This paper focuses on privacy leakage, memorization, data extraction, membership inference, model inversion, or sensitive information exposure.",
+    "This paper analyzes bias, fairness, discrimination, ethics, accountability, transparency, or governance of AI systems.",
+    "This paper proposes safeguards, safety filters, monitoring methods, refusal mechanisms, or risk assessment tools for deployed AI systems.",
+    "This paper studies regulatory, social, institutional, or policy-related challenges created by artificial intelligence systems."
+  ],
+  "data_centric_ai_synthetic_data": [
+    "This paper studies synthetic data generation, data augmentation, self-generated data, or LLM-generated training data.",
+    "This paper focuses on dataset curation, data filtering, data selection, data quality, data mixture design, or data-efficient training.",
+    "This paper investigates annotation methods, weak supervision, active learning, human labeling, or label-efficient learning for AI systems.",
+    "This paper analyzes dataset bias, data contamination, duplicate data, benchmark leakage, or training data quality problems.",
+    "This paper proposes methods to use AI models to clean, label, generate, transform, or improve datasets.",
+    "This paper studies how training data composition, quality, diversity, or selection strategies affect model performance and behavior."
+  ],
+  "ai_for_science_medicine_engineering": [
+    "This paper applies AI to scientific discovery, hypothesis generation, automated research, laboratory workflows, or scientific reasoning.",
+    "This paper studies biomedical AI, medical diagnosis, clinical decision support, healthcare foundation models, or patient-related applications.",
+    "This paper applies AI to biology, chemistry, drug discovery, protein design, genomics, molecular modeling, or materials science.",
+    "This paper focuses on AI for physics, engineering, simulation, computational science, numerical modeling, or scientific computing.",
+    "This paper proposes domain-specific foundation models for scientific, medical, engineering, or technical research applications.",
+    "This paper evaluates how AI systems can assist experts in scientific analysis, experiment design, technical reasoning, or domain-specific prediction."
+  ],
+  "business_social_applications_human_ai_workflows": [
+    "This paper studies enterprise AI, business process automation, workplace productivity, decision support, or AI-assisted organizational workflows.",
+    "This paper focuses on human-AI collaboration, copilots, assistants, interactive systems, user studies, or human-centered AI applications.",
+    "This paper applies AI to education, tutoring, writing, creativity, communication, content generation, or knowledge work.",
+    "This paper studies AI applications in finance, economics, law, marketing, customer service, operations, management, or professional services.",
+    "This paper investigates real-world AI deployment, adoption, user behavior, productivity impact, social impact, or economic consequences.",
+    "This paper analyzes how AI changes workflows, labor, organizations, decision-making, creativity, or human-machine interaction."
+  ]
+}

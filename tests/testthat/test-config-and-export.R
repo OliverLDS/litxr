@@ -210,15 +210,17 @@ embed_index <- litxr::litxr_read_embedding_index(
 stopifnot(nrow(embed_index$metadata) == 2L)
 stopifnot(nrow(embed_index$matrix) == 2L)
 stopifnot(identical(embed_index$manifest$model, "mock-embedding-v1"))
+stopifnot(identical(embed_index$manifest$matrix_format, "float32"))
+stopifnot(identical(embed_index$manifest$shard_by, "year"))
 embed_paths <- litxr:::.litxr_embedding_index_paths(
   cfg_export,
   arxiv_collection$collection_id,
   "abstract",
   "mock-embedding-v1"
 )
-stopifnot(file.exists(embed_paths$metadata))
-stopifnot(file.exists(embed_paths$matrix))
 stopifnot(file.exists(embed_paths$manifest))
+stopifnot(dir.exists(embed_paths$shards_dir))
+stopifnot(length(list.files(embed_paths$shards_dir, full.names = FALSE)) >= 1L)
 stopifnot(!file.exists(embed_paths$delta_metadata))
 stopifnot(!file.exists(embed_paths$delta_matrix))
 stopifnot(!file.exists(embed_paths$delta_manifest))
@@ -235,7 +237,210 @@ embed_search <- litxr::litxr_search_embeddings(
 stopifnot(nrow(embed_search) == 1L)
 stopifnot(identical(embed_search$ref_id[[1]], "arxiv:2501.00001"))
 stopifnot(embed_search$score[[1]] > 0)
+embed_search_vec <- litxr::litxr_search_embeddings(
+  query = NULL,
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  query_vec = c(1, 0, nchar("neural retrieval") / 100),
+  model = "mock-embedding-v1",
+  top_n = 1L
+)
+stopifnot(nrow(embed_search_vec) == 1L)
+stopifnot(identical(embed_search_vec$ref_id[[1]], "arxiv:2501.00001"))
+
+label_query_set <- list(
+  neural_methods = c(
+    "This paper studies neural retrieval methods.",
+    "This paper focuses on neural models and representation learning."
+  ),
+  finance_workflows = c(
+    "This paper studies finance-oriented workflows and enterprise productivity.",
+    "This paper focuses on finance applications and workflow automation."
+  )
+)
+label_query_index <- litxr::litxr_build_label_query_index(
+  query_set = label_query_set,
+  query_set_id = "mock-categories",
+  config = cfg_export,
+  embed_fun = mock_embed,
+  model = "mock-embedding-v1",
+  provider = "mock",
+  batch_size = 2L,
+  overwrite = TRUE
+)
+stopifnot(nrow(label_query_index$metadata) == 4L)
+category_scores <- litxr::litxr_score_collection_categories(
+  arxiv_collection$collection_id,
+  query_set_id = "mock-categories",
+  config = cfg_export,
+  field = "abstract",
+  model = "mock-embedding-v1",
+  aggregations = c("max", "mean", "top_k_mean"),
+  top_k = 2L
+)
+stopifnot(nrow(category_scores) == 4L)
+labels_single <- litxr::litxr_label_collection_by_category(
+  category_scores,
+  score_col = "score_max",
+  threshold = 0.1,
+  multi_label = FALSE
+)
+stopifnot(nrow(labels_single) == 2L)
+stopifnot(identical(
+  labels_single[labels_single$ref_id == "arxiv:2501.00001", ]$assigned_category_id[[1]],
+  "neural_methods"
+))
+stopifnot(identical(
+  labels_single[labels_single$ref_id == "arxiv:2501.00002", ]$assigned_category_id[[1]],
+  "finance_workflows"
+))
+labels_multi <- litxr::litxr_label_collection_by_category(
+  category_scores,
+  score_col = "score_mean",
+  threshold = c(neural_methods = 0.1, finance_workflows = 0.1),
+  multi_label = TRUE
+)
+stopifnot(nrow(labels_multi) >= 2L)
+stopifnot(any(labels_multi$ref_id == "arxiv:2501.00001" & labels_multi$category_id == "neural_methods"))
+stopifnot(any(labels_multi$ref_id == "arxiv:2501.00002" & labels_multi$category_id == "finance_workflows"))
 stopifnot(identical(litxr::litxr_cosine_similarity(c(1, 0), matrix(c(1, 0, 0, 1), ncol = 2, byrow = TRUE)), c(1, 0)))
+
+embed_delta_meta_1 <- litxr::litxr_embed_collection_delta(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-delta-v1",
+  provider = "mock",
+  batch_size = 1L,
+  overwrite = TRUE,
+  limit = 1L
+)
+stopifnot(nrow(embed_delta_meta_1) == 1L)
+embed_delta_paths <- litxr:::.litxr_embedding_index_paths(
+  cfg_export,
+  arxiv_collection$collection_id,
+  "abstract",
+  "mock-embedding-delta-v1"
+)
+delta_shards_1 <- litxr:::.litxr_embedding_delta_shard_paths(embed_delta_paths)
+stopifnot(length(delta_shards_1) == 1L)
+embed_delta_meta_2 <- litxr::litxr_embed_collection_delta(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-delta-v1",
+  provider = "mock",
+  batch_size = 1L
+)
+stopifnot(nrow(embed_delta_meta_2) == 2L)
+delta_shards_2 <- litxr:::.litxr_embedding_delta_shard_paths(embed_delta_paths)
+stopifnot(length(delta_shards_2) == 2L)
+delta_shard_search <- litxr::litxr_search_embedding_delta(
+  "neural retrieval",
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-delta-v1",
+  shard = basename(delta_shards_2[[1]]),
+  top_n = 5L
+)
+stopifnot(nrow(delta_shard_search) == 1L)
+delta_shard_search_vec <- litxr::litxr_search_embedding_delta(
+  query = NULL,
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  query_vec = c(1, 0, nchar("neural retrieval") / 100),
+  model = "mock-embedding-delta-v1",
+  shard = basename(delta_shards_2[[1]]),
+  top_n = 5L
+)
+stopifnot(nrow(delta_shard_search_vec) == 1L)
+delta_date <- as.Date(substr(sub("^batch_", "", basename(delta_shards_2[[1]])), 1L, 8L), format = "%Y%m%d")
+delta_date_search <- litxr::litxr_search_embedding_delta(
+  "retrieval",
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-delta-v1",
+  date = delta_date,
+  top_n = 5L
+)
+stopifnot(nrow(delta_date_search) == 2L)
+embed_delta_compact <- litxr::litxr_compact_embedding_delta(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-delta-v1",
+  provider = "mock"
+)
+stopifnot(nrow(embed_delta_compact) == 2L)
+stopifnot(!dir.exists(embed_delta_paths$delta_dir))
+embed_delta_index <- litxr::litxr_read_embedding_index(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-delta-v1"
+)
+stopifnot(nrow(embed_delta_index$metadata) == 2L)
+stopifnot(nrow(embed_delta_index$matrix) == 2L)
+
+embed_corrupt_paths <- litxr:::.litxr_embedding_index_paths(
+  cfg_export,
+  arxiv_collection$collection_id,
+  "abstract",
+  "mock-embedding-corrupt-v1"
+)
+dir.create(embed_corrupt_paths$dir, recursive = TRUE, showWarnings = FALSE)
+fst::write_fst(
+  as.data.frame(data.table::data.table(
+    ref_id = "arxiv:already.embedded",
+    source = "arxiv",
+    source_id = "already.embedded",
+    title = "Already Embedded",
+    year = 2025L,
+    collection_id = arxiv_collection$collection_id,
+    field = "abstract",
+    model = "mock-embedding-corrupt-v1",
+    provider = "mock",
+    text_nchar = 10L,
+    embedded_at = "2026-01-01 00:00:00 UTC"
+  )),
+  embed_corrupt_paths$metadata
+)
+jsonlite::write_json(
+  list(
+    collection_id = arxiv_collection$collection_id,
+    field = "abstract",
+    model = "mock-embedding-corrupt-v1",
+    provider = "mock",
+    dimension = 3L,
+    records = 1L,
+    updated_at = "2026-01-01 00:00:00 UTC"
+  ),
+  embed_corrupt_paths$manifest,
+  auto_unbox = TRUE,
+  pretty = TRUE,
+  null = "null"
+)
+writeBin(charToRaw("corrupt-rds"), embed_corrupt_paths$matrix)
+embed_corrupt_delta <- litxr::litxr_embed_collection_delta(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-corrupt-v1",
+  provider = "mock",
+  batch_size = 1L,
+  limit = 1L
+)
+stopifnot(nrow(embed_corrupt_delta) == 1L)
+stopifnot(length(litxr:::.litxr_embedding_delta_shard_paths(embed_corrupt_paths)) == 1L)
 
 project_refs <- litxr::litxr_read_references(cfg_export)
 stopifnot(nrow(project_refs) >= 1L)
