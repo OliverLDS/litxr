@@ -212,6 +212,28 @@ stopifnot(nrow(embed_index$matrix) == 2L)
 stopifnot(identical(embed_index$manifest$model, "mock-embedding-v1"))
 stopifnot(identical(embed_index$manifest$matrix_format, "float32"))
 stopifnot(identical(embed_index$manifest$shard_by, "year"))
+embed_state_full <- litxr::litxr_read_embedding_state(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-v1"
+)
+stopifnot(embed_state_full$records_total[[1]] == 2L)
+stopifnot(embed_state_full$embedded_main[[1]] == 2L)
+stopifnot(embed_state_full$embedded_delta[[1]] == 0L)
+stopifnot(embed_state_full$embedded_unique[[1]] == 2L)
+stopifnot(embed_state_full$missing[[1]] == 0L)
+embed_stats_full <- litxr::litxr_embedding_date_stats(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-v1",
+  by = "day"
+)
+stopifnot(nrow(embed_stats_full) == 1L)
+stopifnot(embed_stats_full$records_total[[1]] == 2L)
+stopifnot(embed_stats_full$embedded_unique[[1]] == 2L)
+stopifnot(embed_stats_full$missing[[1]] == 0L)
 embed_paths <- litxr:::.litxr_embedding_index_paths(
   cfg_export,
   arxiv_collection$collection_id,
@@ -338,6 +360,39 @@ embed_delta_meta_2 <- litxr::litxr_embed_collection_delta(
 stopifnot(nrow(embed_delta_meta_2) == 2L)
 delta_shards_2 <- litxr:::.litxr_embedding_delta_shard_paths(embed_delta_paths)
 stopifnot(length(delta_shards_2) == 2L)
+label_query_index_delta <- litxr::litxr_build_label_query_index(
+  query_set = label_query_set,
+  query_set_id = "mock-categories-delta",
+  config = cfg_export,
+  embed_fun = mock_embed,
+  model = "mock-embedding-delta-v1",
+  provider = "mock",
+  batch_size = 2L,
+  overwrite = TRUE
+)
+stopifnot(nrow(label_query_index_delta$metadata) == 4L)
+embed_state_delta <- litxr::litxr_read_embedding_state(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-delta-v1"
+)
+stopifnot(embed_state_delta$records_total[[1]] == 2L)
+stopifnot(embed_state_delta$embedded_main[[1]] == 0L)
+stopifnot(embed_state_delta$embedded_delta[[1]] == 2L)
+stopifnot(embed_state_delta$embedded_unique[[1]] == 2L)
+stopifnot(embed_state_delta$missing[[1]] == 0L)
+embed_stats_delta <- litxr::litxr_embedding_date_stats(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-delta-v1",
+  by = "day"
+)
+stopifnot(nrow(embed_stats_delta) == 1L)
+stopifnot(embed_stats_delta$records_total[[1]] == 2L)
+stopifnot(embed_stats_delta$embedded_unique[[1]] == 2L)
+stopifnot(embed_stats_delta$missing[[1]] == 0L)
 delta_shard_search <- litxr::litxr_search_embedding_delta(
   "neural retrieval",
   arxiv_collection$collection_id,
@@ -372,6 +427,48 @@ delta_date_search <- litxr::litxr_search_embedding_delta(
   top_n = 5L
 )
 stopifnot(nrow(delta_date_search) == 2L)
+delta_category_scores <- litxr::litxr_score_collection_categories_delta(
+  arxiv_collection$collection_id,
+  query_set_id = "mock-categories-delta",
+  config = cfg_export,
+  field = "abstract",
+  model = "mock-embedding-delta-v1",
+  aggregations = c("max", "mean", "top_k_mean"),
+  top_k = 2L
+)
+stopifnot(nrow(delta_category_scores) == 4L)
+stopifnot(any(
+  delta_category_scores$ref_id == "arxiv:2501.00001" &
+    delta_category_scores$category_id == "neural_methods"
+))
+delta_category_scores_day <- litxr::litxr_score_collection_categories_delta(
+  arxiv_collection$collection_id,
+  query_set_id = "mock-categories-delta",
+  config = cfg_export,
+  field = "abstract",
+  model = "mock-embedding-delta-v1",
+  aggregations = "max",
+  date = delta_date
+)
+stopifnot(nrow(delta_category_scores_day) == 4L)
+warn_msg <- NULL
+delta_category_scores_mismatch <- withCallingHandlers(
+  litxr::litxr_score_collection_categories_delta(
+    arxiv_collection$collection_id,
+    query_set_id = "mock-categories",
+    config = cfg_export,
+    field = "abstract",
+    model = "mock-embedding-delta-v1",
+    aggregations = "max"
+  ),
+  warning = function(w) {
+    warn_msg <<- conditionMessage(w)
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(nrow(delta_category_scores_mismatch) == 0L)
+stopifnot(!is.null(warn_msg))
+stopifnot(grepl("Available cached models for this query set", warn_msg, fixed = TRUE))
 embed_delta_compact <- litxr::litxr_compact_embedding_delta(
   arxiv_collection$collection_id,
   cfg_export,
@@ -441,6 +538,54 @@ embed_corrupt_delta <- litxr::litxr_embed_collection_delta(
 )
 stopifnot(nrow(embed_corrupt_delta) == 1L)
 stopifnot(length(litxr:::.litxr_embedding_delta_shard_paths(embed_corrupt_paths)) == 1L)
+embed_corrupt_build <- suppressWarnings(litxr::litxr_build_embedding_index(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-corrupt-v1",
+  provider = "mock",
+  batch_size = 1L,
+  limit = 1L
+))
+stopifnot(nrow(embed_corrupt_build) >= 1L)
+stopifnot(length(litxr:::.litxr_embedding_delta_shard_paths(embed_corrupt_paths)) >= 1L)
+embed_corrupt_diag <- litxr::litxr_diagnose_embedding_cache(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-corrupt-v1"
+)
+stopifnot(is.list(embed_corrupt_diag))
+stopifnot(nrow(embed_corrupt_diag$summary) == 1L)
+stopifnot(identical(embed_corrupt_diag$summary$storage_layout[[1]], "legacy_rds"))
+stopifnot(grepl("^legacy_rds", embed_corrupt_diag$summary$main_matrix_status[[1]]))
+stopifnot(!isTRUE(embed_corrupt_diag$summary$compact_without_overwrite_ok[[1]]))
+stopifnot(identical(
+  embed_corrupt_diag$summary$recommended_action[[1]],
+  "rebuild_from_collection_overwrite_true"
+))
+stopifnot(any(
+  embed_corrupt_diag$files$file_type == "matrix_rds" &
+    embed_corrupt_diag$files$exists
+))
+embed_corrupt_reset <- litxr::litxr_reset_embedding_cache(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-corrupt-v1",
+  preserve_delta = TRUE
+)
+stopifnot(is.list(embed_corrupt_reset))
+stopifnot(any(grepl("metadata\\.fst$", embed_corrupt_reset$removed)))
+stopifnot(any(grepl("matrix\\.rds$", embed_corrupt_reset$removed)))
+stopifnot(!file.exists(embed_corrupt_paths$metadata))
+stopifnot(!file.exists(embed_corrupt_paths$matrix))
+stopifnot(file.exists(embed_corrupt_paths$delta_dir))
+stopifnot(nrow(embed_corrupt_reset$after$summary) == 1L)
+stopifnot(identical(embed_corrupt_reset$after$summary$storage_layout[[1]], "missing"))
+stopifnot(embed_corrupt_reset$after$summary$delta_shard_count[[1]] >= 1L)
+stopifnot(identical(embed_corrupt_reset$after$summary$recommended_action[[1]], "compact_delta"))
 
 project_refs <- litxr::litxr_read_references(cfg_export)
 stopifnot(nrow(project_refs) >= 1L)

@@ -1,3 +1,16 @@
+# litxr 0.0.6.3
+
+- Added embedding-cache inspection and reset helpers:
+  `litxr_diagnose_embedding_cache()` and `litxr_reset_embedding_cache()`.
+- Added embedding coverage helpers:
+  `litxr_read_embedding_state()` and `litxr_embedding_date_stats()`.
+- Added `litxr_score_collection_categories_delta()` for category scoring over
+  delta shards only.
+- Made `litxr_build_embedding_index()` preserve delta shards when the legacy
+  main matrix cache is unreadable instead of failing destructively.
+- Added explicit warnings when a category query set exists only under other
+  cached embedding models.
+
 # litxr 0.0.6.2
 
 - Added embedding-based category labeling helpers:

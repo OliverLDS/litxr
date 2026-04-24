@@ -159,6 +159,334 @@ litxr_collection_date_stats <- function(collection_id, config = NULL, by = c("da
   out
 }
 
+#' Summarize embedding coverage for one collection field
+#'
+#' Returns one summary row showing how many collection records are currently
+#' covered by the main embedding cache, pending delta shards, and their union.
+#' This helper reads embedding metadata only, so it still works when the main
+#' embedding matrix is unreadable.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param model Exact embedding model name used when building the cache.
+#'
+#' @return One-row `data.table`.
+#' @export
+litxr_read_embedding_state <- function(collection_id, config = NULL, field = "abstract", model) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  records <- litxr_read_collection(collection_id, cfg)
+  collection_ref_ids <- unique(as.character(records$ref_id[!is.na(records$ref_id) & nzchar(records$ref_id)]))
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  main <- .litxr_read_embedding_index_parts(paths, read_matrix = FALSE)
+  delta <- .litxr_read_embedding_delta_parts(paths, read_matrix = FALSE)
+
+  main_ref_ids <- unique(as.character(main$metadata$ref_id[!is.na(main$metadata$ref_id) & nzchar(main$metadata$ref_id)]))
+  delta_ref_ids <- unique(as.character(delta$metadata$ref_id[!is.na(delta$metadata$ref_id) & nzchar(delta$metadata$ref_id)]))
+  embedded_ref_ids <- unique(c(main_ref_ids, delta_ref_ids))
+  embedded_in_collection <- intersect(collection_ref_ids, embedded_ref_ids)
+  missing_ref_ids <- setdiff(collection_ref_ids, embedded_ref_ids)
+
+  data.table::data.table(
+    collection_id = as.character(collection_id),
+    field = as.character(field),
+    model = as.character(model),
+    records_total = length(collection_ref_ids),
+    embedded_main = length(intersect(collection_ref_ids, main_ref_ids)),
+    embedded_delta = length(intersect(collection_ref_ids, delta_ref_ids)),
+    embedded_unique = length(embedded_in_collection),
+    missing = length(missing_ref_ids),
+    coverage_pct = if (length(collection_ref_ids)) length(embedded_in_collection) / length(collection_ref_ids) else NA_real_
+  )
+}
+
+#' Diagnose one embedding cache on disk
+#'
+#' Reports the current on-disk embedding-cache layout, including whether the
+#' cache is still on the legacy monolithic `matrix.rds` layout, whether newer
+#' float32 shard files exist, how many pending delta shards are present, and
+#' whether a non-overwrite compaction should be expected to succeed.
+#'
+#' This helper reads collection refs plus embedding metadata only. It does not
+#' load the full embedding matrix into memory.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param model Exact embedding model name used when building the cache.
+#'
+#' @return List with `summary` and `files`.
+#' @export
+litxr_diagnose_embedding_cache <- function(collection_id, config = NULL, field = "abstract", model) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  records <- litxr_read_collection(collection_id, cfg)
+  collection_ref_ids <- unique(as.character(records$ref_id[!is.na(records$ref_id) & nzchar(records$ref_id)]))
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  manifest <- if (file.exists(paths$manifest)) jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE) else list()
+  main <- .litxr_read_embedding_index_parts(paths, read_matrix = FALSE)
+  delta <- .litxr_read_embedding_delta_parts(paths, read_matrix = FALSE)
+
+  main_ref_ids <- unique(as.character(main$metadata$ref_id[!is.na(main$metadata$ref_id) & nzchar(main$metadata$ref_id)]))
+  delta_ref_ids <- unique(as.character(delta$metadata$ref_id[!is.na(delta$metadata$ref_id) & nzchar(delta$metadata$ref_id)]))
+  embedded_ref_ids <- unique(c(main_ref_ids, delta_ref_ids))
+  shard_keys <- .litxr_embedding_shard_keys(paths)
+  delta_shards <- .litxr_embedding_delta_shard_paths(paths)
+
+  legacy_matrix_size <- .litxr_path_size(paths$matrix)
+  matrix_f32_size <- .litxr_path_size(paths$matrix_f32)
+  storage_layout <- if (length(shard_keys)) {
+    "sharded_float32"
+  } else if (file.exists(paths$matrix_f32)) {
+    "monolithic_float32"
+  } else if (file.exists(paths$matrix)) {
+    "legacy_rds"
+  } else if (nrow(main$metadata)) {
+    "metadata_only"
+  } else {
+    "missing"
+  }
+  legacy_rds_ok <- if (identical(storage_layout, "legacy_rds")) .litxr_rds_header_ok(paths$matrix) else NA
+  main_matrix_status <- if (identical(storage_layout, "sharded_float32")) {
+    paste0("sharded_float32:", length(shard_keys), "_shards")
+  } else if (identical(storage_layout, "monolithic_float32")) {
+    if (is.na(matrix_f32_size)) "float32_unknown_size" else paste0("float32_bytes:", matrix_f32_size)
+  } else if (identical(storage_layout, "legacy_rds")) {
+    if (is.na(legacy_matrix_size)) {
+      "legacy_rds_unknown_size"
+    } else if (legacy_matrix_size == 0) {
+      "legacy_rds_zero_bytes"
+    } else if (!isTRUE(legacy_rds_ok)) {
+      "legacy_rds_invalid"
+    } else {
+      paste0("legacy_rds_bytes:", legacy_matrix_size)
+    }
+  } else if (identical(storage_layout, "metadata_only")) {
+    "metadata_only"
+  } else {
+    "missing"
+  }
+  compact_without_overwrite_ok <- if (!nrow(main$metadata)) {
+    TRUE
+  } else if (identical(storage_layout, "sharded_float32") || identical(storage_layout, "monolithic_float32")) {
+    TRUE
+  } else if (identical(storage_layout, "legacy_rds")) {
+    is.finite(legacy_matrix_size) && legacy_matrix_size > 0 && isTRUE(legacy_rds_ok)
+  } else {
+    FALSE
+  }
+  recommended_action <- if (!compact_without_overwrite_ok && nrow(main$metadata)) {
+    "rebuild_from_collection_overwrite_true"
+  } else if (length(delta_ref_ids)) {
+    "compact_delta"
+  } else {
+    "none"
+  }
+
+  summary <- data.table::data.table(
+    collection_id = as.character(collection_id),
+    field = as.character(field),
+    model = as.character(model),
+    storage_layout = storage_layout,
+    manifest_storage_version = as.integer(manifest$storage_version %||% NA_integer_),
+    manifest_records = as.integer(manifest$records %||% NA_integer_),
+    manifest_dimension = as.integer(manifest$dimension %||% NA_integer_),
+    main_metadata_rows = nrow(main$metadata),
+    main_extra_vs_collection = length(setdiff(main_ref_ids, collection_ref_ids)),
+    main_matrix_status = main_matrix_status,
+    delta_shard_count = length(delta_shards),
+    delta_rows = nrow(delta$metadata),
+    delta_unique_ref_id = length(delta_ref_ids),
+    records_total = length(collection_ref_ids),
+    embedded_main = length(intersect(collection_ref_ids, main_ref_ids)),
+    embedded_delta = length(intersect(collection_ref_ids, delta_ref_ids)),
+    embedded_unique = length(intersect(collection_ref_ids, embedded_ref_ids)),
+    missing = length(setdiff(collection_ref_ids, embedded_ref_ids)),
+    compact_without_overwrite_ok = compact_without_overwrite_ok,
+    recommended_action = recommended_action
+  )
+
+  files <- data.table::rbindlist(list(
+    .litxr_embedding_cache_file_row("dir", paths$dir, FALSE),
+    .litxr_embedding_cache_file_row("manifest", paths$manifest, FALSE),
+    .litxr_embedding_cache_file_row("metadata", paths$metadata, FALSE),
+    .litxr_embedding_cache_file_row("matrix_rds", paths$matrix, FALSE),
+    .litxr_embedding_cache_file_row("matrix_f32", paths$matrix_f32, FALSE),
+    .litxr_embedding_cache_file_row("shards_dir", paths$shards_dir, TRUE),
+    .litxr_embedding_cache_file_row("delta_dir", paths$delta_dir, TRUE),
+    .litxr_embedding_cache_file_row("delta_metadata", paths$delta_metadata, FALSE),
+    .litxr_embedding_cache_file_row("delta_matrix", paths$delta_matrix, FALSE),
+    .litxr_embedding_cache_file_row("delta_manifest", paths$delta_manifest, FALSE)
+  ), fill = TRUE)
+
+  list(summary = summary, files = files)
+}
+
+#' Reset one embedding cache while optionally preserving delta shards
+#'
+#' Removes the main on-disk embedding cache for one collection field and model.
+#' By default, pending delta shards are preserved so any successfully embedded
+#' batches remain available for later recovery or compaction. This is useful
+#' when the main cache is stale or corrupted, such as a zero-byte legacy
+#' `matrix.rds`.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param model Exact embedding model name used when building the cache.
+#' @param preserve_delta Whether to keep existing delta shards.
+#'
+#' @return List with `before`, `after`, and `removed`.
+#' @export
+litxr_reset_embedding_cache <- function(
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  model,
+  preserve_delta = TRUE
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  before <- litxr_diagnose_embedding_cache(
+    collection_id = collection_id,
+    config = cfg,
+    field = field,
+    model = model
+  )
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  removed <- .litxr_remove_embedding_main(paths)
+  if (!isTRUE(preserve_delta)) {
+    .litxr_clear_embedding_delta(paths)
+    removed <- c(removed, paths$delta_dir, paths$delta_metadata, paths$delta_matrix, paths$delta_manifest)
+  }
+  removed <- unique(removed[nzchar(removed)])
+  after <- litxr_diagnose_embedding_cache(
+    collection_id = collection_id,
+    config = cfg,
+    field = field,
+    model = model
+  )
+
+  list(
+    before = before,
+    after = after,
+    removed = removed
+  )
+}
+
+#' Summarize embedding coverage by publication date
+#'
+#' Returns counts by day, month, or year for total collection records, embedded
+#' records, missing records, and embedding coverage. Coverage is computed from
+#' the union of the main embedding cache and pending delta shards. This helper
+#' reads embedding metadata only.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field.
+#' @param model Exact embedding model name used when building the cache.
+#' @param by One of `"day"`, `"month"`, or `"year"`.
+#'
+#' @return `data.table` with `date`, `records_total`, `embedded_unique`,
+#'   `missing`, and `coverage_pct`, sorted ascending by `date`.
+#' @importFrom stats aggregate
+#' @export
+litxr_embedding_date_stats <- function(
+  collection_id,
+  config = NULL,
+  field = "abstract",
+  model,
+  by = c("day", "month", "year")
+) {
+  by <- match.arg(by)
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  records <- litxr_read_collection(collection_id, cfg)
+  empty_out <- data.table::data.table(
+    date = as.Date(character()),
+    records_total = integer(),
+    embedded_unique = integer(),
+    missing = integer(),
+    coverage_pct = numeric()
+  )
+  attr(empty_out, "date_min") <- NA_character_
+  attr(empty_out, "date_max") <- NA_character_
+  attr(empty_out, "missing_dates") <- as.Date(character())
+
+  if (!nrow(records) || !("pub_date" %in% names(records))) {
+    return(empty_out)
+  }
+
+  pub_dates <- as.Date(records$pub_date)
+  keep <- !is.na(pub_dates) & !is.na(records$ref_id) & nzchar(records$ref_id)
+  if (!any(keep)) {
+    return(empty_out)
+  }
+  records <- records[keep, , drop = FALSE]
+  pub_dates <- pub_dates[keep]
+
+  bucket_dates <- switch(
+    by,
+    day = pub_dates,
+    month = as.Date(format(pub_dates, "%Y-%m-01")),
+    year = as.Date(paste0(format(pub_dates, "%Y"), "-01-01"))
+  )
+  records$date <- bucket_dates
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  main <- .litxr_read_embedding_index_parts(paths, read_matrix = FALSE)
+  delta <- .litxr_read_embedding_delta_parts(paths, read_matrix = FALSE)
+  embedded_ref_ids <- unique(c(
+    as.character(main$metadata$ref_id[!is.na(main$metadata$ref_id) & nzchar(main$metadata$ref_id)]),
+    as.character(delta$metadata$ref_id[!is.na(delta$metadata$ref_id) & nzchar(delta$metadata$ref_id)])
+  ))
+
+  records$embedded <- records$ref_id %in% embedded_ref_ids
+  total_counts <- stats::aggregate(ref_id ~ date, data = records, FUN = length)
+  embedded_counts <- stats::aggregate(embedded ~ date, data = records, FUN = sum)
+  out <- merge(total_counts, embedded_counts, by = "date", all = TRUE, sort = TRUE)
+  names(out) <- c("date", "records_total", "embedded_unique")
+  out$records_total <- as.integer(out$records_total)
+  out$embedded_unique <- as.integer(out$embedded_unique)
+  out$missing <- out$records_total - out$embedded_unique
+  out$coverage_pct <- ifelse(out$records_total > 0L, out$embedded_unique / out$records_total, NA_real_)
+  out <- data.table::as.data.table(out)
+  data.table::setorder(out, date)
+
+  attr(out, "date_min") <- as.character(min(pub_dates))
+  attr(out, "date_max") <- as.character(max(pub_dates))
+  attr(out, "missing_dates") <- if (identical(by, "day")) {
+    setdiff(seq(min(pub_dates), max(pub_dates), by = "day"), sort(unique(pub_dates)))
+  } else {
+    as.Date(character())
+  }
+
+  out
+}
+
 #' Compute the next arXiv repair date range
 #'
 #' Returns the next day range to pass to `scripts/repair_arxiv_range.R`.
@@ -811,13 +1139,28 @@ litxr_build_embedding_index <- function(
     ))
   }
 
-  litxr_compact_embedding_delta(
-    collection_id = collection_id,
-    config = cfg,
-    field = field,
-    model = model,
-    provider = provider,
-    overwrite = overwrite
+  tryCatch(
+    litxr_compact_embedding_delta(
+      collection_id = collection_id,
+      config = cfg,
+      field = field,
+      model = model,
+      provider = provider,
+      overwrite = overwrite
+    ),
+    error = function(e) {
+      if (!isTRUE(overwrite) && .litxr_is_embedding_matrix_read_error(e)) {
+        warning(
+          "Main embedding cache is unreadable, so newly embedded rows were left in delta shards and were not compacted. ",
+          "Run `litxr_build_embedding_index(..., overwrite = TRUE)` to rebuild the main cache, or ",
+          "`litxr_compact_embedding_delta(..., overwrite = TRUE)` if you want to compact from delta only. ",
+          "Original error: ", conditionMessage(e),
+          call. = FALSE
+        )
+        return(.litxr_read_embedding_delta_parts(paths)$metadata)
+      }
+      stop(e)
+    }
   )
 }
 
@@ -1163,6 +1506,9 @@ litxr_score_collection_categories <- function(
   corpus <- litxr_read_embedding_index(collection_id, cfg, field = field, model = model)
   queries <- .litxr_read_label_query_index(query_set_id, cfg, model = model)
   if (!nrow(corpus$metadata) || !nrow(corpus$matrix) || !nrow(queries$metadata) || !nrow(queries$matrix)) {
+    if (!nrow(queries$metadata) || !nrow(queries$matrix)) {
+      .litxr_warn_label_query_model_mismatch(cfg, query_set_id, model)
+    }
     out <- data.table::data.table()
     if (isTRUE(include_query_scores)) {
       return(list(category_scores = out, query_scores = out))
@@ -1179,6 +1525,118 @@ litxr_score_collection_categories <- function(
 
   corpus_meta <- data.table::copy(corpus$metadata)
   corpus_matrix <- corpus$matrix
+  if (!is.null(ref_ids)) {
+    keep <- corpus_meta$ref_id %in% as.character(ref_ids)
+    corpus_meta <- corpus_meta[keep, ]
+    corpus_matrix <- corpus_matrix[keep, , drop = FALSE]
+  }
+  if (!nrow(corpus_meta)) {
+    out <- data.table::data.table()
+    if (isTRUE(include_query_scores)) {
+      return(list(category_scores = out, query_scores = out))
+    }
+    return(out)
+  }
+
+  score_matrix <- .litxr_cosine_similarity_matrix(corpus_matrix, queries$matrix)
+  query_score_dt <- .litxr_query_score_table(corpus_meta, queries$metadata, score_matrix)
+  category_scores <- .litxr_aggregate_category_scores(query_score_dt, aggregations = aggregations, top_k = top_k)
+
+  if (isTRUE(include_query_scores)) {
+    return(list(category_scores = category_scores, query_scores = query_score_dt))
+  }
+  category_scores
+}
+
+#' Score cached category queries against embedding delta shards
+#'
+#' Scores a cached category-query index against one or more selected embedding
+#' delta shards for the same collection field and model. This uses locally
+#' cached query vectors only and does not call any external embedding API.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param query_set_id Identifier of a cached category query set.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Embedded text field. Must match the delta shard model cache.
+#' @param model Exact embedding model name used for both the collection delta
+#'   shards and the cached query set.
+#' @param aggregations Character vector of aggregation rules to compute. Choose
+#'   from `"max"`, `"mean"`, and `"top_k_mean"`.
+#' @param top_k Positive integer used when `aggregations` includes
+#'   `"top_k_mean"`.
+#' @param ref_ids Optional subset of `ref_id` values to score.
+#' @param date Optional date used to filter delta shard filenames. Accepts
+#'   values coercible by `as.Date()`.
+#' @param shard Optional shard filename or full shard path under the collection's
+#'   embedding delta directory.
+#' @param include_query_scores Whether to also return per-query scores before
+#'   aggregation.
+#'
+#' @return Aggregated category-score `data.table`, or a list with
+#'   `category_scores` and `query_scores` when `include_query_scores = TRUE`.
+#' @export
+litxr_score_collection_categories_delta <- function(
+  collection_id,
+  query_set_id = "default",
+  config = NULL,
+  field = "abstract",
+  model,
+  aggregations = c("max", "mean"),
+  top_k = 3L,
+  ref_ids = NULL,
+  date = NULL,
+  shard = NULL,
+  include_query_scores = FALSE
+) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  if (missing(model) || !nzchar(as.character(model))) {
+    stop("`model` must be supplied and non-empty.", call. = FALSE)
+  }
+
+  aggregations <- unique(as.character(aggregations))
+  valid_aggregations <- c("max", "mean", "top_k_mean")
+  if (!length(aggregations) || !all(aggregations %in% valid_aggregations)) {
+    stop("`aggregations` must be chosen from: ", paste(valid_aggregations, collapse = ", "), call. = FALSE)
+  }
+  top_k <- as.integer(top_k)
+  if (is.na(top_k) || top_k <= 0L) {
+    stop("`top_k` must be a positive integer.", call. = FALSE)
+  }
+
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  shard_paths <- .litxr_select_embedding_delta_shards(paths, shard = shard, date = date)
+  delta <- if (length(shard_paths)) .litxr_read_embedding_delta_shards(shard_paths) else list(
+    metadata = .litxr_empty_embedding_metadata(),
+    matrix = matrix(numeric(), nrow = 0L, ncol = 0L),
+    manifest = list()
+  )
+  queries <- .litxr_read_label_query_index(query_set_id, cfg, model = model)
+  if (!nrow(delta$metadata) || !nrow(delta$matrix) || !nrow(queries$metadata) || !nrow(queries$matrix)) {
+    if (!nrow(queries$metadata) || !nrow(queries$matrix)) {
+      .litxr_warn_label_query_model_mismatch(cfg, query_set_id, model)
+    }
+    out <- data.table::data.table()
+    if (isTRUE(include_query_scores)) {
+      return(list(category_scores = out, query_scores = out))
+    }
+    return(out)
+  }
+
+  manifest_model <- delta$manifest$model %||% NA_character_
+  if (!identical(as.character(model), as.character(manifest_model))) {
+    stop("Delta shard model does not match `model`: ", manifest_model, call. = FALSE)
+  }
+  if (!identical(as.character(model), as.character(queries$manifest$model %||% NA_character_))) {
+    stop("Category query index model does not match `model`: ", queries$manifest$model %||% NA_character_, call. = FALSE)
+  }
+  if (ncol(delta$matrix) != ncol(queries$matrix)) {
+    stop("Delta shard and query embedding dimensions do not match.", call. = FALSE)
+  }
+
+  corpus_meta <- data.table::copy(delta$metadata)
+  corpus_matrix <- delta$matrix
   if (!is.null(ref_ids)) {
     keep <- corpus_meta$ref_id %in% as.character(ref_ids)
     corpus_meta <- corpus_meta[keep, ]
@@ -1446,6 +1904,46 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     .litxr_label_query_index_paths(cfg, query_set_id, model),
     read_matrix = TRUE
   )
+}
+
+.litxr_label_query_available_models <- function(cfg, query_set_id) {
+  query_root <- file.path(
+    .litxr_project_embeddings_dir(cfg),
+    "label_queries",
+    .litxr_embedding_slug(query_set_id)
+  )
+  if (!dir.exists(query_root)) {
+    return(character())
+  }
+  model_dirs <- list.dirs(query_root, recursive = FALSE, full.names = TRUE)
+  if (!length(model_dirs)) {
+    return(character())
+  }
+  models <- vapply(model_dirs, function(path) {
+    manifest_path <- file.path(path, "manifest.json")
+    if (file.exists(manifest_path)) {
+      manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
+      return(as.character(manifest$model %||% basename(path)))
+    }
+    basename(path)
+  }, character(1))
+  unique(models[nzchar(models)])
+}
+
+.litxr_warn_label_query_model_mismatch <- function(cfg, query_set_id, requested_model) {
+  available_models <- .litxr_label_query_available_models(cfg, query_set_id)
+  available_models <- setdiff(available_models, as.character(requested_model))
+  if (!length(available_models)) {
+    return(invisible(NULL))
+  }
+  warning(
+    "No cached category query index found for `query_set_id = \"", query_set_id,
+    "\"` under model `", requested_model, "`. Available cached models for this query set: ",
+    paste(sort(available_models), collapse = ", "),
+    ". Rebuild the query cache with the requested model or use a matching model.",
+    call. = FALSE
+  )
+  invisible(NULL)
 }
 
 .litxr_label_query_existing_dimension <- function(parts) {
@@ -3550,31 +4048,42 @@ litxr_add_refs <- function(
   )
 }
 
-.litxr_read_embedding_delta_parts <- function(paths) {
+.litxr_read_embedding_delta_parts <- function(paths, read_matrix = TRUE) {
   delta <- .litxr_read_embedding_parts(
     metadata_path = paths$delta_metadata,
     matrix_path = paths$delta_matrix,
     matrix_f32_path = NULL,
     manifest_path = paths$delta_manifest,
     cache_dir = paths$dir,
-    read_matrix = TRUE
+    read_matrix = read_matrix
   )
-  .litxr_merge_embedding_parts(delta, .litxr_read_embedding_delta_shards(.litxr_embedding_delta_shard_paths(paths)))
+  .litxr_merge_embedding_parts(delta, .litxr_read_embedding_delta_shards(
+    .litxr_embedding_delta_shard_paths(paths),
+    read_matrix = read_matrix
+  ))
 }
 
-.litxr_read_embedding_delta_shards <- function(shard_paths) {
+.litxr_read_embedding_delta_shards <- function(shard_paths, read_matrix = TRUE) {
   if (!length(shard_paths)) {
-    return(list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list()))
+    return(list(
+      metadata = .litxr_empty_embedding_metadata(),
+      matrix = if (isTRUE(read_matrix)) matrix(numeric(), nrow = 0L, ncol = 0L) else NULL,
+      manifest = list()
+    ))
   }
 
-  delta <- list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+  delta <- list(
+    metadata = .litxr_empty_embedding_metadata(),
+    matrix = if (isTRUE(read_matrix)) matrix(numeric(), nrow = 0L, ncol = 0L) else NULL,
+    manifest = list()
+  )
   for (shard_path in shard_paths) {
     shard <- readRDS(shard_path)
     if (!is.list(shard) || is.null(shard$metadata) || is.null(shard$matrix)) {
       stop("Invalid embedding delta shard: ", shard_path, call. = FALSE)
     }
     shard$metadata <- data.table::as.data.table(shard$metadata)
-    shard$matrix <- .litxr_as_embedding_matrix(shard$matrix)
+    shard$matrix <- if (isTRUE(read_matrix)) .litxr_as_embedding_matrix(shard$matrix) else NULL
     shard$manifest <- shard$manifest %||% list()
     delta <- .litxr_merge_embedding_parts(delta, shard)
   }
@@ -3626,6 +4135,10 @@ litxr_add_refs <- function(
     stop("Embedding metadata rows do not match matrix rows in cache: ", cache_dir, call. = FALSE)
   }
   list(metadata = metadata, matrix = embeddings, manifest = manifest)
+}
+
+.litxr_is_embedding_matrix_read_error <- function(e) {
+  inherits(e, "error") && grepl("Failed to read embedding matrix cache at ", conditionMessage(e), fixed = TRUE)
 }
 
 .litxr_save_rds_atomic <- function(object, path) {
@@ -3799,6 +4312,15 @@ litxr_add_refs <- function(
   if (!nrow(incoming$metadata)) {
     return(existing)
   }
+  if (is.null(existing$matrix) || is.null(incoming$matrix)) {
+    combined_metadata <- data.table::rbindlist(list(existing$metadata, incoming$metadata), fill = TRUE)
+    keep <- !duplicated(combined_metadata$ref_id, fromLast = TRUE)
+    return(list(
+      metadata = combined_metadata[keep, ],
+      matrix = NULL,
+      manifest = incoming$manifest %||% existing$manifest
+    ))
+  }
   if (ncol(existing$matrix) != ncol(incoming$matrix)) {
     stop("Embedding dimension changed from ", ncol(existing$matrix), " to ", ncol(incoming$matrix), ".", call. = FALSE)
   }
@@ -3850,6 +4372,21 @@ litxr_add_refs <- function(
     unlink(paths$delta_dir, recursive = TRUE)
   }
   invisible(paths)
+}
+
+.litxr_remove_embedding_main <- function(paths) {
+  removed <- character()
+  for (path in c(paths$metadata, paths$matrix, paths$matrix_f32, paths$manifest)) {
+    if (file.exists(path)) {
+      unlink(path)
+      removed <- c(removed, path)
+    }
+  }
+  if (!is.null(paths$shards_dir) && dir.exists(paths$shards_dir)) {
+    unlink(paths$shards_dir, recursive = TRUE)
+    removed <- c(removed, paths$shards_dir)
+  }
+  removed
 }
 
 .litxr_embedding_has_shards <- function(paths) {
@@ -3958,6 +4495,36 @@ litxr_add_refs <- function(
 
 .litxr_project_root <- function(cfg) {
   .litxr_resolve_from_config_root(cfg, cfg$project$data_root)
+}
+
+.litxr_path_size <- function(path) {
+  if (!file.exists(path)) {
+    return(NA_real_)
+  }
+  as.numeric(file.info(path)$size)
+}
+
+.litxr_rds_header_ok <- function(path) {
+  if (!file.exists(path)) {
+    return(FALSE)
+  }
+  tryCatch({
+    infoRDS(path)
+    TRUE
+  }, error = function(e) FALSE)
+}
+
+.litxr_embedding_cache_file_row <- function(file_type, path, is_dir = FALSE) {
+  exists <- if (isTRUE(is_dir)) dir.exists(path) else file.exists(path)
+  info <- if (exists) file.info(path) else NULL
+  data.table::data.table(
+    file_type = as.character(file_type),
+    path = as.character(path),
+    exists = exists,
+    is_dir = isTRUE(is_dir),
+    size_bytes = if (exists) as.numeric(info$size) else NA_real_,
+    mtime = if (exists) format(as.POSIXct(info$mtime, tz = "UTC"), tz = "UTC", usetz = TRUE) else NA_character_
+  )
 }
 
 `%||%` <- function(x, y) {
