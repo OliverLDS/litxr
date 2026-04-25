@@ -1,3 +1,14 @@
+# litxr 0.0.6.5
+
+- Added `scripts/compact_arxiv_embedding_delta.R` as a small CLI wrapper for
+  compacting embedding delta into the main cache with before/after coverage
+  reporting.
+- Added `date_from`, `date_to`, and `chunk_size` support to
+  `litxr_score_collection_categories()`, with date filtering before scoring and
+  chunked processing for large corpora.
+- Improved `litxr_label_collection_by_category()` by replacing the previous
+  split/lapply path with a more efficient grouped implementation.
+
 # litxr 0.0.6.4
 
 - Added `--year-from` and `--year-to` filters to

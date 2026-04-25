@@ -13,6 +13,9 @@ litxr_score_collection_categories(
   aggregations = c("max", "mean"),
   top_k = 3L,
   ref_ids = NULL,
+  date_from = NULL,
+  date_to = NULL,
+  chunk_size = 5000L,
   include_query_scores = FALSE
 )
 }
@@ -36,6 +39,15 @@ indexes.}
 \code{aggregations} includes \code{"top_k_mean"}.}
 
 \item{ref_ids}{Optional subset of collection \code{ref_id}s to score.}
+
+\item{date_from}{Optional inclusive lower publication-date bound. Accepts
+values coercible by \code{as.Date()}.}
+
+\item{date_to}{Optional inclusive upper publication-date bound. Accepts
+values coercible by \code{as.Date()}.}
+
+\item{chunk_size}{Positive integer chunk size used when scoring large
+corpora. Smaller values reduce peak memory use.}
 
 \item{include_query_scores}{Whether to include the full per-query score table.}
 }

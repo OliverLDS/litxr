@@ -1470,6 +1470,12 @@ litxr_build_label_query_index <- function(
 #' @param top_k Number of top query scores to average when
 #'   `aggregations` includes `"top_k_mean"`.
 #' @param ref_ids Optional subset of collection `ref_id`s to score.
+#' @param date_from Optional inclusive lower publication-date bound. Accepts
+#'   values coercible by `as.Date()`.
+#' @param date_to Optional inclusive upper publication-date bound. Accepts
+#'   values coercible by `as.Date()`.
+#' @param chunk_size Positive integer chunk size used when scoring large
+#'   corpora. Smaller values reduce peak memory use.
 #' @param include_query_scores Whether to include the full per-query score table.
 #'
 #' @return If `include_query_scores = FALSE`, a `data.table` with one row per
@@ -1485,6 +1491,9 @@ litxr_score_collection_categories <- function(
   aggregations = c("max", "mean"),
   top_k = 3L,
   ref_ids = NULL,
+  date_from = NULL,
+  date_to = NULL,
+  chunk_size = 5000L,
   include_query_scores = FALSE
 ) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
@@ -1502,10 +1511,28 @@ litxr_score_collection_categories <- function(
   if (is.na(top_k) || top_k <= 0L) {
     stop("`top_k` must be a positive integer.", call. = FALSE)
   }
+  chunk_size <- as.integer(chunk_size)
+  if (is.na(chunk_size) || chunk_size <= 0L) {
+    stop("`chunk_size` must be a positive integer.", call. = FALSE)
+  }
 
-  corpus <- litxr_read_embedding_index(collection_id, cfg, field = field, model = model)
+  target_ref_ids <- .litxr_select_score_ref_ids(
+    collection_id = collection_id,
+    cfg = cfg,
+    ref_ids = ref_ids,
+    date_from = date_from,
+    date_to = date_to
+  )
+  if (!length(target_ref_ids)) {
+    out <- data.table::data.table()
+    if (isTRUE(include_query_scores)) {
+      return(list(category_scores = out, query_scores = out))
+    }
+    return(out)
+  }
+
   queries <- .litxr_read_label_query_index(query_set_id, cfg, model = model)
-  if (!nrow(corpus$metadata) || !nrow(corpus$matrix) || !nrow(queries$metadata) || !nrow(queries$matrix)) {
+  if (!nrow(queries$metadata) || !nrow(queries$matrix)) {
     if (!nrow(queries$metadata) || !nrow(queries$matrix)) {
       .litxr_warn_label_query_model_mismatch(cfg, query_set_id, model)
     }
@@ -1519,28 +1546,21 @@ litxr_score_collection_categories <- function(
   if (!identical(as.character(model), as.character(queries$manifest$model %||% NA_character_))) {
     stop("Category query index model does not match `model`: ", queries$manifest$model %||% NA_character_, call. = FALSE)
   }
-  if (ncol(corpus$matrix) != ncol(queries$matrix)) {
-    stop("Collection and query embedding dimensions do not match.", call. = FALSE)
-  }
-
-  corpus_meta <- data.table::copy(corpus$metadata)
-  corpus_matrix <- corpus$matrix
-  if (!is.null(ref_ids)) {
-    keep <- corpus_meta$ref_id %in% as.character(ref_ids)
-    corpus_meta <- corpus_meta[keep, ]
-    corpus_matrix <- corpus_matrix[keep, , drop = FALSE]
-  }
-  if (!nrow(corpus_meta)) {
-    out <- data.table::data.table()
-    if (isTRUE(include_query_scores)) {
-      return(list(category_scores = out, query_scores = out))
-    }
-    return(out)
-  }
-
-  score_matrix <- .litxr_cosine_similarity_matrix(corpus_matrix, queries$matrix)
-  query_score_dt <- .litxr_query_score_table(corpus_meta, queries$metadata, score_matrix)
-  category_scores <- .litxr_aggregate_category_scores(query_score_dt, aggregations = aggregations, top_k = top_k)
+  parts <- .litxr_collect_embedding_score_parts(
+    collection_id = collection_id,
+    cfg = cfg,
+    field = field,
+    model = model,
+    target_ref_ids = target_ref_ids,
+    query_meta = queries$metadata,
+    query_matrix = queries$matrix,
+    aggregations = aggregations,
+    top_k = top_k,
+    chunk_size = chunk_size,
+    include_query_scores = include_query_scores
+  )
+  category_scores <- parts$category_scores
+  query_score_dt <- parts$query_scores
 
   if (isTRUE(include_query_scores)) {
     return(list(category_scores = category_scores, query_scores = query_score_dt))
@@ -1702,25 +1722,23 @@ litxr_label_collection_by_category <- function(
   dt[["above_threshold"]] <- !is.na(dt$score) & dt$score >= dt$threshold
 
   if (isTRUE(multi_label)) {
-    out <- dt[dt$above_threshold, c("ref_id", "category_id", "score", "threshold"), with = FALSE]
+    keep_cols <- intersect(c("ref_id", "title", "category_id", "score", "threshold"), names(dt))
+    out <- dt[dt$above_threshold, keep_cols, with = FALSE]
     if ("title" %in% names(dt)) {
-      title_map <- unique(dt[, c("ref_id", "title"), with = FALSE])
-      out <- merge(out, title_map, by = "ref_id", all.x = TRUE, sort = FALSE)
       data.table::setcolorder(out, c("ref_id", "title", "category_id", "score", "threshold"))
     }
     return(out)
   }
 
   dt_ranked <- data.table::copy(dt)
-  data.table::setorderv(dt_ranked, c("ref_id", "score", "category_id"), order = c(1L, -1L, 1L))
-  groups <- split(seq_len(nrow(dt_ranked)), dt_ranked$ref_id)
-  rows <- lapply(groups, function(idx) {
-    chunk <- dt_ranked[idx, , drop = FALSE]
-    top <- chunk[1, , drop = FALSE]
-    top[["second_score"]] <- if (nrow(chunk) >= 2L) chunk$score[[2]] else NA_real_
-    top
-  })
-  out <- data.table::rbindlist(rows, fill = TRUE)
+  data.table::setorderv(dt_ranked, c("ref_id", "score", "category_id"), order = c(1L, -1L, 1L), na.last = TRUE)
+  dt_ranked[["row_in_ref"]] <- stats::ave(seq_len(nrow(dt_ranked)), dt_ranked$ref_id, FUN = seq_along)
+
+  top_rows <- dt_ranked[dt_ranked$row_in_ref == 1L, ]
+  second_rows <- dt_ranked[dt_ranked$row_in_ref == 2L, c("ref_id", "score"), with = FALSE]
+  data.table::setnames(second_rows, "score", "second_score")
+  out <- merge(top_rows, second_rows, by = "ref_id", all.x = TRUE, sort = FALSE)
+
   out[["margin_to_second"]] <- out$score - out$second_score
   out[["margin_pass"]] <- if (is.null(margin)) TRUE else {
     margin_value <- as.numeric(margin[[1]])
@@ -1944,6 +1962,193 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     call. = FALSE
   )
   invisible(NULL)
+}
+
+.litxr_parse_optional_date <- function(x, arg_name) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  out <- as.Date(x[[1]])
+  if (is.na(out)) {
+    stop(arg_name, " must be coercible by `as.Date()`.", call. = FALSE)
+  }
+  out
+}
+
+.litxr_select_score_ref_ids <- function(collection_id, cfg, ref_ids = NULL, date_from = NULL, date_to = NULL) {
+  records <- litxr_read_collection(collection_id, cfg)
+  if (!nrow(records)) {
+    return(character())
+  }
+  out <- data.table::as.data.table(records)
+  out <- out[!is.na(out$ref_id) & nzchar(out$ref_id), ]
+  if (!nrow(out)) {
+    return(character())
+  }
+  if (!is.null(ref_ids)) {
+    out <- out[out$ref_id %in% as.character(ref_ids), ]
+  }
+  date_from <- .litxr_parse_optional_date(date_from, "`date_from`")
+  date_to <- .litxr_parse_optional_date(date_to, "`date_to`")
+  if (!is.null(date_from) && !is.null(date_to) && date_to < date_from) {
+    stop("`date_to` must be on or after `date_from`.", call. = FALSE)
+  }
+  if (!is.null(date_from) || !is.null(date_to)) {
+    pub_dates <- as.Date(out$pub_date)
+    keep <- !is.na(pub_dates)
+    if (!is.null(date_from)) keep <- keep & pub_dates >= date_from
+    if (!is.null(date_to)) keep <- keep & pub_dates <= date_to
+    out <- out[keep, ]
+  }
+  unique(as.character(out$ref_id))
+}
+
+.litxr_read_embedding_shard_part <- function(paths, shard_key, read_matrix = TRUE) {
+  shard_paths <- .litxr_embedding_shard_paths(paths, shard_key)
+  shard_manifest <- if (file.exists(shard_paths$manifest)) jsonlite::fromJSON(shard_paths$manifest, simplifyVector = FALSE) else list()
+  top_manifest <- if (file.exists(paths$manifest)) jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE) else list()
+  metadata <- if (file.exists(shard_paths$metadata)) {
+    .litxr_normalize_embedding_metadata(fst::read_fst(shard_paths$metadata, as.data.table = TRUE))
+  } else {
+    .litxr_empty_embedding_metadata()
+  }
+  matrix_data <- if (!isTRUE(read_matrix)) {
+    NULL
+  } else if (file.exists(shard_paths$matrix_f32)) {
+    .litxr_read_float32_matrix(
+      path = shard_paths$matrix_f32,
+      nrow = nrow(metadata),
+      ncol = as.integer(shard_manifest$dimension %||% top_manifest$dimension %||% 0L),
+      context = shard_paths$dir
+    )
+  } else {
+    matrix(numeric(), nrow = 0L, ncol = as.integer(shard_manifest$dimension %||% top_manifest$dimension %||% 0L))
+  }
+  list(metadata = metadata, matrix = matrix_data, manifest = shard_manifest)
+}
+
+.litxr_score_corpus_chunk <- function(corpus_meta, corpus_matrix, query_meta, query_matrix, aggregations, top_k, include_query_scores) {
+  if (!nrow(corpus_meta) || !nrow(corpus_matrix)) {
+    return(list(category_scores = data.table::data.table(), query_scores = data.table::data.table()))
+  }
+  if (ncol(corpus_matrix) != ncol(query_matrix)) {
+    stop("Collection and query embedding dimensions do not match.", call. = FALSE)
+  }
+  score_matrix <- .litxr_cosine_similarity_matrix(corpus_matrix, query_matrix)
+  query_score_dt <- if (isTRUE(include_query_scores)) {
+    .litxr_query_score_table(corpus_meta, query_meta, score_matrix)
+  } else {
+    data.table::data.table()
+  }
+  category_scores <- .litxr_aggregate_category_scores_from_matrix(
+    corpus_meta = corpus_meta,
+    query_meta = query_meta,
+    score_matrix = score_matrix,
+    aggregations = aggregations,
+    top_k = top_k
+  )
+  list(category_scores = category_scores, query_scores = query_score_dt)
+}
+
+.litxr_aggregate_category_scores_from_matrix <- function(corpus_meta, query_meta, score_matrix, aggregations = c("max", "mean"), top_k = 3L) {
+  if (!nrow(corpus_meta) || !nrow(score_matrix) || !nrow(query_meta)) {
+    return(data.table::data.table())
+  }
+  categories <- unique(as.character(query_meta$category_id))
+  rows <- vector("list", length(categories))
+  for (i in seq_along(categories)) {
+    category_id <- categories[[i]]
+    idx <- which(as.character(query_meta$category_id) == category_id)
+    category_scores <- score_matrix[, idx, drop = FALSE]
+    values <- list(
+      ref_id = as.character(corpus_meta$ref_id),
+      category_id = rep(category_id, nrow(corpus_meta)),
+      query_n = length(idx)
+    )
+    if ("title" %in% names(corpus_meta)) values[["title"]] <- as.character(corpus_meta$title)
+    if ("year" %in% names(corpus_meta)) values[["year"]] <- as.integer(corpus_meta$year)
+    if ("max" %in% aggregations) values[["score_max"]] <- apply(category_scores, 1L, max)
+    if ("mean" %in% aggregations) values[["score_mean"]] <- rowMeans(category_scores)
+    if ("top_k_mean" %in% aggregations) {
+      values[["score_top_k_mean"]] <- apply(category_scores, 1L, function(x) mean(utils::head(sort(x, decreasing = TRUE), top_k)))
+    }
+    rows[[i]] <- data.table::as.data.table(values)
+  }
+  data.table::rbindlist(rows, fill = TRUE)
+}
+
+.litxr_collect_embedding_score_parts <- function(collection_id, cfg, field, model, target_ref_ids, query_meta, query_matrix, aggregations, top_k, chunk_size, include_query_scores) {
+  paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
+  target_ref_ids <- unique(as.character(target_ref_ids))
+  if (!length(target_ref_ids)) {
+    out <- data.table::data.table()
+    return(list(category_scores = out, query_scores = out))
+  }
+
+  category_parts <- list()
+  query_parts <- list()
+
+  append_part <- function(part) {
+    if (nrow(part$category_scores)) {
+      category_parts[[length(category_parts) + 1L]] <<- part$category_scores
+    }
+    if (isTRUE(include_query_scores) && nrow(part$query_scores)) {
+      query_parts[[length(query_parts) + 1L]] <<- part$query_scores
+    }
+  }
+
+  if (.litxr_embedding_has_shards(paths)) {
+    records <- data.table::as.data.table(litxr_read_collection(collection_id, cfg))
+    shard_keys <- unique(.litxr_embedding_shard_key(
+      records$year[match(target_ref_ids, records$ref_id)]
+    ))
+    shard_keys <- shard_keys[nzchar(shard_keys)]
+    shard_keys <- intersect(shard_keys, .litxr_embedding_shard_keys(paths))
+    for (key in shard_keys) {
+      shard <- .litxr_read_embedding_shard_part(paths, key, read_matrix = TRUE)
+      if (!nrow(shard$metadata) || !nrow(shard$matrix)) next
+      keep <- shard$metadata$ref_id %in% target_ref_ids
+      if (!any(keep)) next
+      shard_meta <- shard$metadata[keep, ]
+      shard_matrix <- shard$matrix[keep, , drop = FALSE]
+      for (start in seq(1L, nrow(shard_meta), by = chunk_size)) {
+        end <- min(start + chunk_size - 1L, nrow(shard_meta))
+        append_part(.litxr_score_corpus_chunk(
+          corpus_meta = shard_meta[start:end, ],
+          corpus_matrix = shard_matrix[start:end, , drop = FALSE],
+          query_meta = query_meta,
+          query_matrix = query_matrix,
+          aggregations = aggregations,
+          top_k = top_k,
+          include_query_scores = include_query_scores
+        ))
+      }
+    }
+  } else {
+    corpus <- litxr_read_embedding_index(collection_id, cfg, field = field, model = model)
+    if (nrow(corpus$metadata) && nrow(corpus$matrix)) {
+      keep <- corpus$metadata$ref_id %in% target_ref_ids
+      corpus_meta <- corpus$metadata[keep, ]
+      corpus_matrix <- corpus$matrix[keep, , drop = FALSE]
+      for (start in seq(1L, nrow(corpus_meta), by = chunk_size)) {
+        end <- min(start + chunk_size - 1L, nrow(corpus_meta))
+        append_part(.litxr_score_corpus_chunk(
+          corpus_meta = corpus_meta[start:end, ],
+          corpus_matrix = corpus_matrix[start:end, , drop = FALSE],
+          query_meta = query_meta,
+          query_matrix = query_matrix,
+          aggregations = aggregations,
+          top_k = top_k,
+          include_query_scores = include_query_scores
+        ))
+      }
+    }
+  }
+
+  list(
+    category_scores = if (length(category_parts)) data.table::rbindlist(category_parts, fill = TRUE) else data.table::data.table(),
+    query_scores = if (isTRUE(include_query_scores) && length(query_parts)) data.table::rbindlist(query_parts, fill = TRUE) else data.table::data.table()
+  )
 }
 
 .litxr_label_query_existing_dimension <- function(parts) {

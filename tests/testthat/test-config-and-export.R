@@ -302,6 +302,19 @@ category_scores <- litxr::litxr_score_collection_categories(
   top_k = 2L
 )
 stopifnot(nrow(category_scores) == 4L)
+category_scores_date <- litxr::litxr_score_collection_categories(
+  arxiv_collection$collection_id,
+  query_set_id = "mock-categories",
+  config = cfg_export,
+  field = "abstract",
+  model = "mock-embedding-v1",
+  aggregations = c("max", "mean"),
+  date_from = "2025-01-03",
+  date_to = "2025-01-03",
+  chunk_size = 1L
+)
+stopifnot(nrow(category_scores_date) == 4L)
+stopifnot(all(category_scores_date$year == 2025L))
 labels_single <- litxr::litxr_label_collection_by_category(
   category_scores,
   score_col = "score_max",
