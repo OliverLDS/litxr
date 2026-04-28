@@ -1,3 +1,18 @@
+# litxr 0.0.7
+
+- Added controlled paper-type helpers:
+  `litxr_paper_type_levels()`,
+  `litxr_validate_paper_type()`, and
+  `litxr_normalize_paper_type()`.
+- Extended the LLM digest layer with a schema-versioned v2 template while
+  keeping legacy digest files readable and valid.
+- Added project-level research-analysis tables under `project.data_root/findings/`:
+  standardized findings and descriptive statistics, each with template,
+  validation, read, write, find, and compact helpers.
+- Added `docs/research-schema.md` and updated README plus enrichment/storage
+  docs for the new research-analysis layers.
+- Removed outdated remaining docs references to `scripts/repair_arxiv.R`.
+
 # litxr 0.0.6.5
 
 - Added `scripts/compact_arxiv_embedding_delta.R` as a small CLI wrapper for

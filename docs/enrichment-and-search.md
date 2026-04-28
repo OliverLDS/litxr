@@ -141,16 +141,32 @@ before digest generation.
 
 Each digest is one JSON file under `project.data_root/llm/`.
 
-Core fields:
+Current template default: schema `v2`.
 
+Legacy `v1` digests without `schema_version` still read and validate
+successfully.
+
+Core v2 fields:
+
+- `schema_version`
 - `ref_id`
+- `paper_type`
 - `summary`
 - `motivation`
 - `research_questions`
+- `paper_structure`
 - `methods`
-- `sample`
+- `research_data`
+- `identification_strategy`
+- `main_variables`
 - `key_findings`
 - `limitations`
+- `theoretical_mechanism`
+- `empirical_setting`
+- `descriptive_statistics_summary`
+- `standardized_findings_summary`
+- `contribution_type`
+- `evidence_strength`
 - `keywords`
 - `notes`
 - `generated_at`
@@ -163,6 +179,9 @@ Helpers:
 - `litxr_read_llm_digest()`
 - `litxr_read_llm_digests()`
 - `litxr_find_llm()`
+
+The `paper_type` field uses the canonical vocabulary returned by
+`litxr_paper_type_levels()`.
 
 ## Building Digests
 

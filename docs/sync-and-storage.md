@@ -84,7 +84,6 @@ Helpers:
 
 - `litxr_repair_collection(..., submitted_from = ..., submitted_to = ...)`
 - `litxr_next_arxiv_repair_range()`
-- `scripts/repair_arxiv.R`
 - `scripts/repair_arxiv_range.R`
 - `scripts/repair_arxiv_latest.R`
 

@@ -16,6 +16,7 @@ Focused guides live under [`docs/`](docs):
 - [Configuration](docs/configuration.md)
 - [Sync And Storage](docs/sync-and-storage.md)
 - [Enrichment And Search](docs/enrichment-and-search.md)
+- [Research Schema](docs/research-schema.md)
 
 ## Quick Start
 
@@ -110,7 +111,6 @@ Project-level canonical data lives under `project.data_root/`, including:
 
 Included shell helpers:
 
-- `scripts/repair_arxiv.R`
 - `scripts/repair_arxiv_range.R`
 - `scripts/repair_arxiv_latest.R`
 - `scripts/build_llm_digests.R`
@@ -132,6 +132,21 @@ Implemented today:
 - canonical project-level indexes
 - BibTeX export
 - markdown and structured digest storage
+
+## Research Analysis Schemas
+
+`litxr` now includes local research-analysis layers keyed by canonical `ref_id`:
+
+- a controlled `paper_type` vocabulary
+- schema-versioned LLM digests
+- project-level standardized findings tables
+- project-level descriptive statistics tables
+
+These layers stay within the existing local-data architecture: JSON digests
+under `project.data_root/llm/` and `fst` main-plus-delta tables under
+`project.data_root/findings/`. External AI agents can read and write these
+stores, but `litxr` does not host essay-writing or meta-analysis agents inside
+the package.
 
 Still future work:
 

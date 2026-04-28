@@ -2256,23 +2256,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 #' @return Named list representing the default digest schema.
 #' @export
 litxr_llm_digest_template <- function(ref_id) {
-  list(
-    ref_id = as.character(ref_id),
-    summary = NA_character_,
-    motivation = NA_character_,
-    research_questions = character(),
-    methods = character(),
-    sample = list(
-      description = NA_character_,
-      size = NA_character_,
-      period = NA_character_
-    ),
-    key_findings = character(),
-    limitations = character(),
-    keywords = character(),
-    notes = NA_character_,
-    generated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
-  )
+  .litxr_llm_digest_template_v2(ref_id)
 }
 
 #' Write one LLM digest for a reference
@@ -2296,17 +2280,12 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL) {
     warning("Reference id not found in canonical store: ", ref_id, call. = FALSE)
   }
 
-  payload <- litxr_llm_digest_template(ref_id)
-  for (name in intersect(names(payload), names(digest))) {
-    payload[[name]] <- digest[[name]]
-  }
-  payload$ref_id <- as.character(ref_id)
-  payload$generated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  payload <- .litxr_normalize_llm_digest_for_write(digest, ref_id = ref_id)
   litxr_validate_llm_digest(payload)
 
   path <- .litxr_llm_digest_path(cfg, ref_id)
   .litxr_ensure_project_llm_dir(cfg)
-  jsonlite::write_json(payload, path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  .litxr_write_json_atomic(payload, path)
   .litxr_write_enrichment_status_index(cfg)
   invisible(path)
 }
@@ -2357,12 +2336,7 @@ litxr_build_llm_digest <- function(ref_id, builder, config = NULL, overwrite = F
     stop("`builder` must return a named list of digest fields.", call. = FALSE)
   }
 
-  payload <- template
-  for (name in intersect(names(payload), names(built))) {
-    payload[[name]] <- built[[name]]
-  }
-  payload$ref_id <- as.character(ref_id)
-  payload$generated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  payload <- .litxr_normalize_llm_digest_for_write(built, ref_id = ref_id)
   litxr_validate_llm_digest(payload)
 
   if (isTRUE(write)) {
@@ -2434,7 +2408,9 @@ litxr_read_llm_digest <- function(ref_id, config = NULL) {
   if (!file.exists(path)) {
     return(NULL)
   }
-  jsonlite::fromJSON(path, simplifyVector = FALSE)
+  digest <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+  litxr_validate_llm_digest(digest)
+  .litxr_postprocess_llm_digest_read(digest)
 }
 
 #' Read all project-level LLM digests
@@ -2459,15 +2435,27 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
   }
 
   rows <- lapply(files, function(path) {
-    x <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+    x <- .litxr_postprocess_llm_digest_read(jsonlite::fromJSON(path, simplifyVector = FALSE))
     data.table::data.table(
+      schema_version = x$schema_version %||% "v1",
       ref_id = x$ref_id %||% NA_character_,
+      paper_type = x$paper_type %||% NA_character_,
       summary = x$summary %||% NA_character_,
       motivation = x$motivation %||% NA_character_,
       research_questions = list(unlist(x$research_questions %||% character(), use.names = FALSE)),
+      paper_structure = list(unlist(x$paper_structure %||% character(), use.names = FALSE)),
       methods = list(unlist(x$methods %||% character(), use.names = FALSE)),
+      research_data = list(x$research_data %||% NULL),
+      identification_strategy = x$identification_strategy %||% NA_character_,
+      main_variables = list(x$main_variables %||% NULL),
       key_findings = list(unlist(x$key_findings %||% character(), use.names = FALSE)),
       limitations = list(unlist(x$limitations %||% character(), use.names = FALSE)),
+      theoretical_mechanism = x$theoretical_mechanism %||% NA_character_,
+      empirical_setting = x$empirical_setting %||% NA_character_,
+      descriptive_statistics_summary = x$descriptive_statistics_summary %||% NA_character_,
+      standardized_findings_summary = x$standardized_findings_summary %||% NA_character_,
+      contribution_type = list(unlist(x$contribution_type %||% character(), use.names = FALSE)),
+      evidence_strength = x$evidence_strength %||% NA_character_,
       keywords = list(unlist(x$keywords %||% character(), use.names = FALSE)),
       notes = x$notes %||% NA_character_,
       generated_at = x$generated_at %||% NA_character_
@@ -2522,9 +2510,19 @@ litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, co
           flatten_cell(row$motivation[[1]]),
           flatten_cell(row$notes[[1]]),
           flatten_cell(row$research_questions[[1]]),
+          flatten_cell(row$paper_structure[[1]]),
           flatten_cell(row$methods[[1]]),
+          flatten_cell(row$research_data[[1]]),
+          flatten_cell(row$identification_strategy[[1]]),
+          flatten_cell(row$main_variables[[1]]),
           flatten_cell(row$key_findings[[1]]),
           flatten_cell(row$limitations[[1]]),
+          flatten_cell(row$theoretical_mechanism[[1]]),
+          flatten_cell(row$empirical_setting[[1]]),
+          flatten_cell(row$descriptive_statistics_summary[[1]]),
+          flatten_cell(row$standardized_findings_summary[[1]]),
+          flatten_cell(row$contribution_type[[1]]),
+          flatten_cell(row$evidence_strength[[1]]),
           flatten_cell(row$keywords[[1]])
         ),
         collapse = " "
@@ -2584,26 +2582,49 @@ litxr_read_md <- function(ref_id, config = NULL) {
 #' @return Invisibly returns `TRUE` on success, otherwise errors.
 #' @export
 litxr_validate_llm_digest <- function(digest) {
-  required <- c(
-    "ref_id", "summary", "motivation", "research_questions", "methods",
-    "sample", "key_findings", "limitations", "keywords", "notes", "generated_at"
-  )
+  schema_version <- .litxr_llm_digest_schema_version(digest)
+  required <- .litxr_llm_digest_required_fields(schema_version)
   missing <- setdiff(required, names(digest))
   if (length(missing)) {
     stop("LLM digest is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
   }
 
-  if (!is.list(digest$sample)) {
-    stop("LLM digest field `sample` must be a named list.", call. = FALSE)
-  }
-  for (field in c("research_questions", "methods", "key_findings", "limitations", "keywords")) {
-    value <- digest[[field]]
-    if (is.list(value)) {
-      value <- unlist(value, use.names = FALSE)
+  if (identical(schema_version, "v2")) {
+    litxr_validate_paper_type(digest$paper_type)
+    .litxr_validate_list_fields(
+      digest,
+      c(
+        "research_questions", "paper_structure", "methods", "key_findings",
+        "limitations", "contribution_type", "keywords"
+      )
+    )
+    .litxr_validate_named_list_fields(
+      digest$research_data,
+      required_fields = c("data_sources", "sample_period", "sample_region", "unit_of_observation", "sample_size"),
+      field_name = "research_data",
+      character_vector_fields = "data_sources",
+      numeric_scalar_fields = "sample_size"
+    )
+    .litxr_validate_named_list_fields(
+      digest$main_variables,
+      required_fields = c(
+        "dependent_variables", "independent_variables",
+        "control_variables", "mechanism_variables"
+      ),
+      field_name = "main_variables",
+      character_vector_fields = c(
+        "dependent_variables", "independent_variables",
+        "control_variables", "mechanism_variables"
+      )
+    )
+  } else {
+    if (!is.list(digest$sample)) {
+      stop("LLM digest field `sample` must be a named list.", call. = FALSE)
     }
-    if (!(is.character(value) || is.null(value))) {
-      stop("LLM digest field `", field, "` must be a character vector.", call. = FALSE)
-    }
+    .litxr_validate_list_fields(
+      digest,
+      c("research_questions", "methods", "key_findings", "limitations", "keywords")
+    )
   }
   invisible(TRUE)
 }
