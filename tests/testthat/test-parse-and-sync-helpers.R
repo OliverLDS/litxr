@@ -180,7 +180,7 @@ journal_arxiv <- list(
   remote_channel = "arxiv"
 )
 litxr:::.litxr_write_journal_records(arxiv_row, td_arxiv, journal_arxiv)
-stopifnot(length(list.files(file.path(td_arxiv, "json"), pattern = "\\.json$")) == 1L)
+stopifnot(length(list.files(file.path(td_arxiv, "ref_json"), pattern = "\\.json$")) == 1L)
 
 body_text <- paste(deparse(body(get("fetch_arxiv_xml", envir = asNamespace("litxr")))), collapse = "\n")
 stopifnot(grepl("start = as.integer\\(start\\)", body_text))

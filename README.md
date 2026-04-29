@@ -91,11 +91,10 @@ Enrichment:
 
 Collection-local storage uses:
 
-- `json/`
+- `ref_json/`
 - `index/`
-- `pdf/`
-- `md/`
-- `llm/`
+- `fulltxt_md/`
+- `llm_json/`
 
 Project-level canonical data lives under `project.data_root/`, including:
 

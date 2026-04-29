@@ -3404,11 +3404,24 @@ litxr_add_refs <- function(
   list(
     root = local_path,
     index = file.path(local_path, "index"),
-    json = file.path(local_path, "json"),
-    pdf = file.path(local_path, "pdf"),
-    md = file.path(local_path, "md"),
-    llm = file.path(local_path, "llm")
+    json = file.path(local_path, "ref_json"),
+    md = file.path(local_path, "fulltxt_md"),
+    llm = file.path(local_path, "llm_json"),
+    legacy_json = file.path(local_path, "json"),
+    legacy_md = file.path(local_path, "md"),
+    legacy_llm = file.path(local_path, "llm"),
+    legacy_pdf = file.path(local_path, "pdf")
   )
+}
+
+.litxr_existing_collection_dir <- function(primary_path, legacy_path = NULL) {
+  if (!is.null(primary_path) && dir.exists(primary_path)) {
+    return(primary_path)
+  }
+  if (!is.null(legacy_path) && dir.exists(legacy_path)) {
+    return(legacy_path)
+  }
+  primary_path
 }
 
 .litxr_is_absolute_path <- function(path) {
@@ -3492,7 +3505,7 @@ litxr_add_refs <- function(
 
 .litxr_ensure_journal_dirs <- function(local_path) {
   paths <- .litxr_journal_paths(local_path)
-  for (path in unname(paths)) {
+  for (path in unname(paths[c("root", "index", "json", "md", "llm")])) {
     if (!dir.exists(path)) {
       dir.create(path, recursive = TRUE, showWarnings = FALSE)
     }
@@ -3746,7 +3759,7 @@ litxr_add_refs <- function(
     if (is.null(local_path)) {
       stop("Either `local_path` or `conflict_path` must be supplied.", call. = FALSE)
     }
-    conflict_path <- file.path(local_path, "json", "_upsert_conflicts.jsonl")
+    conflict_path <- file.path(.litxr_journal_paths(local_path)$json, "_upsert_conflicts.jsonl")
   }
   lines <- vapply(conflicts$rows, function(row) {
     jsonlite::toJSON(as.list(row), auto_unbox = TRUE, null = "null")
@@ -3791,7 +3804,7 @@ litxr_add_refs <- function(
   .litxr_upsert_records(
     existing,
     incoming,
-    conflict_path = file.path(local_path, "json", "_upsert_conflicts.jsonl")
+    conflict_path = file.path(.litxr_journal_paths(local_path)$json, "_upsert_conflicts.jsonl")
   )
 }
 
@@ -3853,11 +3866,12 @@ litxr_add_refs <- function(
 
 .litxr_read_journal_records_from_json <- function(local_path) {
   paths <- .litxr_journal_paths(local_path)
-  if (!dir.exists(paths$json)) {
+  json_dir <- .litxr_existing_collection_dir(paths$json, paths$legacy_json)
+  if (!dir.exists(json_dir)) {
     return(data.table::data.table())
   }
 
-  files <- sort(list.files(paths$json, pattern = "\\.json$", full.names = TRUE))
+  files <- sort(list.files(json_dir, pattern = "\\.json$", full.names = TRUE))
   if (!length(files)) {
     return(data.table::data.table())
   }
@@ -4908,8 +4922,9 @@ litxr_add_refs <- function(
     index_dt <- tryCatch(.litxr_read_journal_index(local_path), error = function(e) NULL)
     record_count <- if (is.null(index_dt)) 0L else nrow(index_dt)
     notes <- c(notes, "inferred_from=collection_index")
-  } else if (dir.exists(paths$json)) {
-    json_files <- sort(list.files(paths$json, pattern = "\\.json$", full.names = TRUE))
+  } else if (dir.exists(paths$json) || dir.exists(paths$legacy_json)) {
+    json_dir <- .litxr_existing_collection_dir(paths$json, paths$legacy_json)
+    json_files <- sort(list.files(json_dir, pattern = "\\.json$", full.names = TRUE))
     json_files <- json_files[basename(json_files) != "_upsert_conflicts.jsonl"]
     if (length(json_files)) {
       info <- file.info(json_files)

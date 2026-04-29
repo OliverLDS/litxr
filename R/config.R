@@ -50,7 +50,7 @@ litxr_init <- function() {
     "Wrote default config to ", config_path, ". ",
     "Edit `project.data_root` and each collection `local_path` before syncing. ",
     "`project.data_root` is the root folder for your literature data store. ",
-    "Each collection `local_path` is the folder where that collection's json/pdf/md/llm files will be stored."
+    "Each collection `local_path` is the folder where that collection's ref_json/fulltxt_md/llm_json files and index will be stored."
   )
   invisible(config_path)
 }

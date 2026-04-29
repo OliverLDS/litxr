@@ -6,14 +6,14 @@
 
 Each collection uses its `local_path` with these folders:
 
-- `json/`: one normalized metadata JSON per reference
+- `ref_json/`: one normalized metadata JSON per reference from the reference source
 - `index/`: fast collection-level `fst` indexes
-- `pdf/`: reserved for downloaded PDFs
-- `md/`: reserved for collection-local markdown derivatives
-- `llm/`: reserved for collection-local LLM outputs when needed
+- `fulltxt_md/`: full article text converted to markdown
+- `llm_json/`: collection-local LLM JSON outputs when needed
 
-Today, `json/` and `index/` are active. `pdf/` download and HTML-to-Markdown
-conversion are still future work.
+Today, `ref_json/` and `index/` are the core local-storage layers. Full-text
+markdown can live under `fulltxt_md/`. Raw PDF or HTML files are not treated as
+durable collection-local storage.
 
 ## Project-Level Storage
 

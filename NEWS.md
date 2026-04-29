@@ -1,3 +1,12 @@
+# litxr 0.0.7.1
+
+- Changed collection-local folder naming to `ref_json/`, `fulltxt_md/`, and
+  `llm_json/`, with backward-compatible fallback reads from legacy `json/`.
+- Updated config messaging, tests, and storage docs to reflect the renamed
+  collection-local folders and the non-durable role of raw PDF / HTML files.
+- Applied the on-disk folder rename to the existing local data root.
+- Kept project-level `index/`, `md/`, and `llm/` paths unchanged.
+
 # litxr 0.0.7
 
 - Added controlled paper-type helpers:

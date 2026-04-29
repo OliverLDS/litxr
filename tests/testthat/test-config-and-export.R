@@ -98,7 +98,7 @@ record <- data.table::data.table(
 
 litxr:::.litxr_write_journal_records(record, local_path, journal, cfg = cfg_export)
 stopifnot(file.exists(file.path(local_path, "index", "references.fst")))
-stopifnot(dir.exists(file.path(local_path, "llm")))
+stopifnot(dir.exists(file.path(local_path, "llm_json")))
 stopifnot(file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "references.fst")))
 stopifnot(file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "reference_collections.fst")))
 
@@ -714,7 +714,7 @@ stopifnot(file.exists(compacted_path))
 stopifnot(!file.exists(delta_path))
 compacted_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
 stopifnot(any(compacted_records$doi == "10.1000/delta"))
-stopifnot(file.exists(file.path(local_path, "json", paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
+stopifnot(file.exists(file.path(local_path, "ref_json", paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
 
 out <- file.path(td_export, "references.bib")
 litxr::litxr_export_bib(out, journal_ids = journal$journal_id, config = cfg_export)
@@ -756,7 +756,7 @@ merged <- litxr:::.litxr_upsert_journal_records(existing, incoming, local_path)
 stopifnot(nrow(merged) == 1L)
 stopifnot(identical(merged$title[[1]], "New Title"))
 stopifnot(identical(merged$note[[1]], "keep me"))
-stopifnot(file.exists(file.path(local_path, "json", "_upsert_conflicts.jsonl")))
+stopifnot(file.exists(file.path(local_path, "ref_json", "_upsert_conflicts.jsonl")))
 
 legacy_truncated <- data.table::copy(record)
 legacy_truncated[["doi"]] <- NA_character_
@@ -777,6 +777,7 @@ legacy_truncated[["day"]] <- NA_integer_
 legacy_truncated[["url_landing"]] <- NA_character_
 legacy_truncated[["url_pdf"]] <- NA_character_
 
+dir.create(file.path(local_path, "json"), recursive = TRUE, showWarnings = FALSE)
 legacy_path <- file.path(local_path, "json", "doi_10_1000_example.json")
 full_path <- file.path(local_path, "json", "10_1000_example.json")
 jsonlite::write_json(litxr:::.litxr_row_to_storage_payload(legacy_truncated, journal), legacy_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
