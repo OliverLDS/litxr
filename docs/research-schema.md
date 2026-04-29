@@ -95,6 +95,7 @@ Helpers:
 - `litxr_read_standardized_findings()`
 - `litxr_find_standardized_findings()`
 - `litxr_compact_standardized_findings()`
+- `litxr_rebuild_standardized_findings()`
 
 Design:
 
@@ -117,6 +118,7 @@ Helpers:
 - `litxr_read_descriptive_stats()`
 - `litxr_find_descriptive_stats()`
 - `litxr_compact_descriptive_stats()`
+- `litxr_rebuild_descriptive_stats()`
 
 Design:
 
@@ -135,6 +137,22 @@ pattern:
 
 This keeps iterative extraction cheap and avoids repeatedly rewriting the full
 project-level main table for every small update.
+
+## Coverage And Maintenance
+
+Use:
+
+- `litxr_read_research_schema_status()`
+- `litxr_find_refs_missing_llm_digest()`
+- `litxr_find_refs_missing_standardized_findings()`
+- `litxr_find_refs_missing_descriptive_stats()`
+
+For digest maintenance, use:
+
+- `litxr_upgrade_llm_digests()`
+
+This rewrites legacy digest JSON through the current v2 write path so old
+project-level digests become explicit schema-v2 payloads.
 
 ## External AI Agents
 

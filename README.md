@@ -140,6 +140,7 @@ Implemented today:
 - schema-versioned LLM digests
 - project-level standardized findings tables
 - project-level descriptive statistics tables
+- project-level coverage helpers for missing digests, findings, and descriptive statistics
 
 These layers stay within the existing local-data architecture: JSON digests
 under `project.data_root/llm/` and `fst` main-plus-delta tables under

@@ -1,3 +1,16 @@
+# litxr 0.0.7.2
+
+- Added project-level research-schema coverage helpers:
+  `litxr_read_research_schema_status()`,
+  `litxr_find_refs_missing_llm_digest()`,
+  `litxr_find_refs_missing_standardized_findings()`, and
+  `litxr_find_refs_missing_descriptive_stats()`.
+- Added explicit rebuild helpers for the project-level research tables:
+  `litxr_rebuild_standardized_findings()` and
+  `litxr_rebuild_descriptive_stats()`.
+- Added `litxr_upgrade_llm_digests()` to rewrite legacy digest JSON through the
+  current schema-v2 write path.
+
 # litxr 0.0.7.1
 
 - Changed collection-local folder naming to `ref_json/`, `fulltxt_md/`, and

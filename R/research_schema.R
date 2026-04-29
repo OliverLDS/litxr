@@ -219,6 +219,10 @@ litxr_validate_paper_type <- function(x) {
   digest
 }
 
+.litxr_llm_digest_is_v2 <- function(digest) {
+  identical(.litxr_llm_digest_schema_version(digest), "v2")
+}
+
 .litxr_llm_digest_required_fields <- function(schema_version) {
   if (identical(schema_version, "v2")) {
     return(c(
@@ -793,4 +797,257 @@ litxr_compact_descriptive_stats <- function(config = NULL) {
     unlink(paths$delta)
   }
   invisible(paths$main)
+}
+
+#' Rebuild standardized findings main store from current local tables
+#'
+#' Reads the current main and delta tables, normalizes and deduplicates them,
+#' rewrites the main fst, and clears the delta fst.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the rebuilt main fst path.
+#' @export
+litxr_rebuild_standardized_findings <- function(config = NULL) {
+  litxr_compact_standardized_findings(config = config)
+}
+
+#' Rebuild descriptive statistics main store from current local tables
+#'
+#' Reads the current main and delta tables, normalizes and deduplicates them,
+#' rewrites the main fst, and clears the delta fst.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the rebuilt main fst path.
+#' @export
+litxr_rebuild_descriptive_stats <- function(config = NULL) {
+  litxr_compact_descriptive_stats(config = config)
+}
+
+#' Read project-level research schema coverage
+#'
+#' Summarizes markdown, LLM digest, standardized findings, and descriptive
+#' statistics coverage for canonical references.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return `data.table` with one row per reference and research-schema coverage
+#'   flags and counts.
+#' @export
+litxr_read_research_schema_status <- function(config = NULL, collection_id = NULL, ref_ids = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  refs <- litxr_read_references(cfg)
+  if (!nrow(refs)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      title = character(),
+      entry_type = character(),
+      collection_ids = character(),
+      has_md = logical(),
+      has_llm_digest = logical(),
+      llm_schema_version = character(),
+      llm_paper_type = character(),
+      has_standardized_findings = logical(),
+      n_standardized_findings = integer(),
+      has_descriptive_stats = logical(),
+      n_descriptive_stats = integer()
+    ))
+  }
+
+  links <- litxr_read_reference_collections(cfg)
+  status <- litxr_read_enrichment_status(cfg)
+  digests <- litxr_read_llm_digests(cfg)
+  findings <- litxr_read_standardized_findings(cfg)
+  desc_stats <- litxr_read_descriptive_stats(cfg)
+
+  collection_map <- if (nrow(links)) {
+    split_ids <- split(as.character(links$collection_id), as.character(links$ref_id))
+    data.table::data.table(
+      ref_id = names(split_ids),
+      collection_ids = vapply(split_ids, function(x) paste(sort(unique(x)), collapse = ","), character(1))
+    )
+  } else {
+    data.table::data.table(ref_id = character(), collection_ids = character())
+  }
+
+  finding_counts <- if (nrow(findings)) {
+    counts <- table(as.character(findings$ref_id))
+    data.table::data.table(
+      ref_id = names(counts),
+      n_standardized_findings = as.integer(counts)
+    )
+  } else {
+    data.table::data.table(ref_id = character(), n_standardized_findings = integer())
+  }
+  desc_counts <- if (nrow(desc_stats)) {
+    counts <- table(as.character(desc_stats$ref_id))
+    data.table::data.table(
+      ref_id = names(counts),
+      n_descriptive_stats = as.integer(counts)
+    )
+  } else {
+    data.table::data.table(ref_id = character(), n_descriptive_stats = integer())
+  }
+
+  out <- data.table::data.table(
+    ref_id = as.character(refs$ref_id),
+    title = if ("title" %in% names(refs)) as.character(refs$title) else NA_character_,
+    entry_type = if ("entry_type" %in% names(refs)) as.character(refs$entry_type) else NA_character_
+  )
+  out <- merge(out, collection_map, by = "ref_id", all.x = TRUE)
+  out <- merge(
+    out,
+    data.table::data.table(
+      ref_id = as.character(status$ref_id),
+      has_md = as.logical(status$has_md),
+      has_llm_digest = as.logical(status$has_llm_digest)
+    ),
+    by = "ref_id",
+    all.x = TRUE
+  )
+  if (nrow(digests)) {
+    out <- merge(
+      out,
+      data.table::data.table(
+        ref_id = as.character(digests$ref_id),
+        llm_schema_version = as.character(digests$schema_version),
+        llm_paper_type = as.character(digests$paper_type)
+      ),
+      by = "ref_id",
+      all.x = TRUE
+    )
+  } else {
+    out$llm_schema_version <- NA_character_
+    out$llm_paper_type <- NA_character_
+  }
+  out <- merge(out, finding_counts, by = "ref_id", all.x = TRUE)
+  out <- merge(out, desc_counts, by = "ref_id", all.x = TRUE)
+
+  out$collection_ids[is.na(out$collection_ids)] <- ""
+  out$has_md[is.na(out$has_md)] <- FALSE
+  out$has_llm_digest[is.na(out$has_llm_digest)] <- FALSE
+  out$n_standardized_findings[is.na(out$n_standardized_findings)] <- 0L
+  out$n_descriptive_stats[is.na(out$n_descriptive_stats)] <- 0L
+  out$has_standardized_findings <- out$n_standardized_findings > 0L
+  out$has_descriptive_stats <- out$n_descriptive_stats > 0L
+
+  if (!is.null(collection_id) && nzchar(as.character(collection_id[[1]]))) {
+    keep_id <- as.character(collection_id[[1]])
+    out <- out[vapply(strsplit(out$collection_ids, ",", fixed = TRUE), function(x) keep_id %in% x, logical(1)), ]
+  }
+  if (!is.null(ref_ids) && length(ref_ids)) {
+    out <- out[out$ref_id %in% as.character(ref_ids), ]
+  }
+
+  out[, c(
+    "ref_id", "title", "entry_type", "collection_ids",
+    "has_md", "has_llm_digest", "llm_schema_version", "llm_paper_type",
+    "has_standardized_findings", "n_standardized_findings",
+    "has_descriptive_stats", "n_descriptive_stats"
+  ), with = FALSE]
+}
+
+.litxr_filter_missing_research_status <- function(status_dt, missing_type) {
+  switch(
+    missing_type,
+    llm_digest = status_dt[!status_dt$has_llm_digest, ],
+    standardized_findings = status_dt[!status_dt$has_standardized_findings, ],
+    descriptive_stats = status_dt[!status_dt$has_descriptive_stats, ],
+    stop("Unsupported missing type: ", missing_type, call. = FALSE)
+  )
+}
+
+#' Find references missing LLM digests
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return Filtered `data.table` from `litxr_read_research_schema_status()`.
+#' @export
+litxr_find_refs_missing_llm_digest <- function(config = NULL, collection_id = NULL, ref_ids = NULL) {
+  .litxr_filter_missing_research_status(
+    litxr_read_research_schema_status(config = config, collection_id = collection_id, ref_ids = ref_ids),
+    "llm_digest"
+  )
+}
+
+#' Find references missing standardized findings
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return Filtered `data.table` from `litxr_read_research_schema_status()`.
+#' @export
+litxr_find_refs_missing_standardized_findings <- function(config = NULL, collection_id = NULL, ref_ids = NULL) {
+  .litxr_filter_missing_research_status(
+    litxr_read_research_schema_status(config = config, collection_id = collection_id, ref_ids = ref_ids),
+    "standardized_findings"
+  )
+}
+
+#' Find references missing descriptive statistics
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return Filtered `data.table` from `litxr_read_research_schema_status()`.
+#' @export
+litxr_find_refs_missing_descriptive_stats <- function(config = NULL, collection_id = NULL, ref_ids = NULL) {
+  .litxr_filter_missing_research_status(
+    litxr_read_research_schema_status(config = config, collection_id = collection_id, ref_ids = ref_ids),
+    "descriptive_stats"
+  )
+}
+
+#' Upgrade one or more LLM digests to the current v2 schema
+#'
+#' Reads existing digest JSON files and rewrites them through the current digest
+#' write path so legacy v1 digests become explicit schema-v2 payloads.
+#'
+#' @param ref_ids Character vector of reference ids to upgrade. When omitted,
+#'   all existing project-level digests are upgraded.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the upgraded ref ids.
+#' @export
+litxr_upgrade_llm_digests <- function(ref_ids = NULL, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  targets <- if (!is.null(ref_ids) && length(ref_ids)) {
+    unique(as.character(ref_ids))
+  } else {
+    digests <- litxr_read_llm_digests(cfg)
+    unique(as.character(digests$ref_id))
+  }
+  targets <- targets[!is.na(targets) & nzchar(targets)]
+  if (!length(targets)) {
+    return(invisible(character()))
+  }
+
+  for (ref_id in targets) {
+    digest <- litxr_read_llm_digest(ref_id, cfg)
+    if (is.null(digest)) next
+    if (!.litxr_llm_digest_is_v2(digest)) {
+      digest$schema_version <- "v2"
+      litxr_write_llm_digest(ref_id, digest, cfg)
+    }
+  }
+
+  invisible(targets)
 }

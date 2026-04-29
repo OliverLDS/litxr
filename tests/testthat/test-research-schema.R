@@ -75,6 +75,10 @@ jsonlite::write_json(legacy_digest, legacy_path, auto_unbox = TRUE, pretty = TRU
 legacy_read <- litxr::litxr_read_llm_digest("doi:10.1000/legacy", cfg)
 stopifnot(identical(legacy_read$schema_version, "v1"))
 stopifnot(identical(legacy_read$summary, "Legacy summary"))
+litxr::litxr_upgrade_llm_digests(ref_ids = "doi:10.1000/legacy", config = cfg)
+legacy_upgraded <- litxr::litxr_read_llm_digest("doi:10.1000/legacy", cfg)
+stopifnot(identical(legacy_upgraded$schema_version, "v2"))
+stopifnot(identical(legacy_upgraded$paper_type, "unknown"))
 
 empty_findings <- litxr::litxr_read_standardized_findings(cfg)
 stopifnot(inherits(empty_findings, "data.table"))
@@ -157,3 +161,51 @@ compacted_stats <- litxr::litxr_read_descriptive_stats(cfg)
 stopifnot(nrow(compacted_stats) == 2L)
 stopifnot(!file.exists(file.path(litxr:::.litxr_project_findings_dir(cfg), "descriptive_statistics_delta.fst")))
 stopifnot(inherits(try(litxr::litxr_validate_descriptive_stats(data.table::data.table(ref_id = "doi:1", table_id = "", variable = "x")), silent = TRUE), "try-error"))
+
+litxr::litxr_add_refs(
+  data.frame(
+    source = c("manual", "manual", "manual"),
+    source_id = c("doi:10.1000/a", "doi:10.1000/legacy", "doi:10.1000/nodigest"),
+    ref_id = c("doi:10.1000/a", "doi:10.1000/legacy", "doi:10.1000/nodigest"),
+    entry_type = c("article", "article", "article"),
+    title = c("Paper A", "Paper Legacy", "Paper No Digest"),
+    authors = c("A Author", "B Author", "C Author"),
+    year = c(2024L, 2023L, 2022L),
+    stringsAsFactors = FALSE
+  ),
+  collection_id = "manual_research",
+  config = cfg
+)
+
+litxr::litxr_write_md("doi:10.1000/a", "Example markdown", cfg)
+litxr::litxr_write_llm_digest(
+  "doi:10.1000/a",
+  list(
+    summary = "Summary",
+    motivation = "Motivation"
+  ),
+  cfg
+)
+schema_status <- litxr::litxr_read_research_schema_status(cfg)
+row_a <- schema_status[schema_status$ref_id == "doi:10.1000/a", ]
+stopifnot(nrow(row_a) == 1L)
+stopifnot(isTRUE(row_a$has_md[[1]]))
+stopifnot(isTRUE(row_a$has_llm_digest[[1]]))
+stopifnot(identical(row_a$llm_schema_version[[1]], "v2"))
+stopifnot(identical(row_a$llm_paper_type[[1]], "unknown"))
+stopifnot(isTRUE(row_a$has_standardized_findings[[1]]))
+stopifnot(identical(row_a$n_standardized_findings[[1]], 2L))
+stopifnot(isTRUE(row_a$has_descriptive_stats[[1]]))
+stopifnot(identical(row_a$n_descriptive_stats[[1]], 2L))
+
+missing_llm <- litxr::litxr_find_refs_missing_llm_digest(cfg)
+stopifnot(any(missing_llm$ref_id == "doi:10.1000/nodigest"))
+missing_findings <- litxr::litxr_find_refs_missing_standardized_findings(cfg)
+stopifnot(any(missing_findings$ref_id == "doi:10.1000/legacy"))
+missing_desc <- litxr::litxr_find_refs_missing_descriptive_stats(cfg)
+stopifnot(any(missing_desc$ref_id == "doi:10.1000/legacy"))
+
+litxr::litxr_rebuild_standardized_findings(cfg)
+litxr::litxr_rebuild_descriptive_stats(cfg)
+stopifnot(file.exists(file.path(litxr:::.litxr_project_findings_dir(cfg), "standardized_findings.fst")))
+stopifnot(file.exists(file.path(litxr:::.litxr_project_findings_dir(cfg), "descriptive_statistics.fst")))
