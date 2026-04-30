@@ -5,6 +5,7 @@ args <- commandArgs(trailingOnly = TRUE)
 parse_args <- function(args) {
   out <- list()
   i <- 1L
+  valid_value_args <- c("collection-id", "journal-id", "basis", "date-to", "page-size", "sleep-seconds", "search-query")
 
   while (i <= length(args)) {
     key <- args[[i]]
@@ -13,7 +14,7 @@ parse_args <- function(args) {
     }
 
     name <- sub("^--", "", key)
-    if (identical(name, "help")) {
+    if (name %in% c("help", "h")) {
       out$help <- TRUE
       i <- i + 1L
       next
@@ -32,6 +33,9 @@ parse_args <- function(args) {
       out[["refresh-project-index"]] <- TRUE
       i <- i + 1L
       next
+    }
+    if (!name %in% valid_value_args) {
+      stop("Unknown argument: ", key, call. = FALSE)
     }
 
     if (i == length(args)) {

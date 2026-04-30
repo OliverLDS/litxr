@@ -1,0 +1,11 @@
+foundation_model_architecture_pretraining:
+  - "This paper proposes or analyzes a new architecture for large language models, foundation models, transformers, attention mechanisms, or neural sequence models."
+  - "This paper studies pretraining methods, training objectives, scaling laws, model capacity, or data-compute tradeoffs for foundation models."
+
+retrieval_memory_knowledge_grounding:
+  - "This paper studies retrieval-augmented generation, external knowledge grounding, document retrieval, evidence selection, or knowledge base question answering."
+  - "This paper improves dense retrieval, vector search, reranking, semantic search, hybrid search, or retrieval pipelines for AI systems."
+
+business_social_applications_human_ai_workflows:
+  - "This paper studies enterprise AI, business process automation, workplace productivity, decision support, or AI-assisted organizational workflows."
+  - "This paper analyzes how AI changes workflows, labor, organizations, decision-making, creativity, or human-machine interaction."

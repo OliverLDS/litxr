@@ -5,6 +5,7 @@ args <- commandArgs(trailingOnly = TRUE)
 parse_args <- function(args) {
   out <- list()
   i <- 1L
+  valid_value_args <- c("builder-file", "ref-ids", "collection-id", "limit")
 
   while (i <= length(args)) {
     key <- args[[i]]
@@ -13,7 +14,7 @@ parse_args <- function(args) {
     }
 
     name <- sub("^--", "", key)
-    if (identical(name, "help")) {
+    if (name %in% c("help", "h")) {
       out$help <- TRUE
       i <- i + 1L
       next
@@ -23,6 +24,9 @@ parse_args <- function(args) {
       out[[name]] <- TRUE
       i <- i + 1L
       next
+    }
+    if (!name %in% valid_value_args) {
+      stop("Unknown argument: ", key, call. = FALSE)
     }
 
     if (i == length(args)) {

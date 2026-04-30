@@ -2,21 +2,75 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 
-read_flag <- function(flag, default = NULL) {
-  idx <- match(flag, args)
-  if (is.na(idx)) {
-    return(default)
+parse_args <- function(args) {
+  out <- list(
+    show_help = FALSE,
+    collection_id = "arxiv_cs_ai",
+    field = "abstract",
+    model = "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+    provider = "openrouter"
+  )
+  i <- 1L
+
+  while (i <= length(args)) {
+    key <- args[[i]]
+    if (!startsWith(key, "--") && !identical(key, "-h")) {
+      stop("Unexpected positional argument: ", key, call. = FALSE)
+    }
+    if (identical(key, "-h") || identical(key, "--help")) {
+      out$show_help <- TRUE
+      i <- i + 1L
+      next
+    }
+    if (i == length(args)) {
+      stop("Missing value for ", key, call. = FALSE)
+    }
+    value <- args[[i + 1L]]
+    if (identical(key, "--collection-id")) {
+      out$collection_id <- value
+    } else if (identical(key, "--field")) {
+      out$field <- value
+    } else if (identical(key, "--model")) {
+      out$model <- value
+    } else if (identical(key, "--provider")) {
+      out$provider <- value
+    } else {
+      stop("Unknown argument: ", key, call. = FALSE)
+    }
+    i <- i + 2L
   }
-  if (idx == length(args)) {
-    stop("Missing value for ", flag, call. = FALSE)
-  }
-  args[[idx + 1L]]
+
+  out
 }
 
-collection_id <- read_flag("--collection-id", "arxiv_cs_ai")
-field <- read_flag("--field", "abstract")
-embed_model <- read_flag("--model", "nvidia/llama-nemotron-embed-vl-1b-v2:free")
-provider <- read_flag("--provider", "openrouter")
+usage <- function() {
+  cat(
+    paste(
+      "Usage:",
+      "  Rscript scripts/compact_arxiv_embedding_delta.R [--collection-id arxiv_cs_ai] [--field abstract] [--model MODEL] [--provider openrouter]",
+      "",
+      "Options:",
+      "  --collection-id ID   Collection id to compact. Default: arxiv_cs_ai.",
+      "  --field FIELD        Embedded field to compact. Default: abstract.",
+      "  --model MODEL        Embedding model name.",
+      "  --provider NAME      Embedding provider label stored in the manifest.",
+      "  -h, --help           Show this help message.",
+      sep = "\n"
+    )
+  )
+}
+
+parsed <- parse_args(args)
+
+if (isTRUE(parsed$show_help)) {
+  usage()
+  quit(save = "no", status = 0L)
+}
+
+collection_id <- parsed$collection_id
+field <- parsed$field
+embed_model <- parsed$model
+provider <- parsed$provider
 
 cfg <- litxr::litxr_read_config()
 

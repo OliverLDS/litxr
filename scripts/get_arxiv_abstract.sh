@@ -2,8 +2,29 @@
 
 set -eu
 
+if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
+  cat <<'EOF'
+Usage:
+  scripts/get_arxiv_abstract.sh <arxiv-id>
+
+Options:
+  -h, --help    Show this help message.
+
+Notes:
+  - Accepts either a bare arXiv id like 2405.03710 or a canonical id like
+    arxiv:2405.03710.
+  - The script expects exactly one matching local reference.
+EOF
+  exit 0
+fi
+
 if [[ $# -ne 1 ]]; then
   print -u2 "usage: $0 <arxiv-id>"
+  exit 1
+fi
+
+if [[ "$1" == --* || "$1" == -?* ]]; then
+  print -u2 "Unknown argument: $1"
   exit 1
 fi
 

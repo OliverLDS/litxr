@@ -1,3 +1,18 @@
+# litxr 0.0.7.3
+
+- Renamed the category-label reporting script to
+  `scripts/report_arxiv_category_labels.R` and fixed its per-category filtering
+  and reporting order.
+- Made the category-label reporting script reject unknown CLI flags, use cached
+  local inquiry embeddings by default, and support `--local-inq` plus
+  one-off YAML inquiry files via `--inquiry`.
+- Made corpus embedding repair in the category-label reporting workflow opt-in
+  through `--embed-missing` instead of always running first.
+- Added `inst/extdata/example_category_inquiry.yaml` as a minimal YAML example
+  for one-off category inquiry input.
+- Tightened other script CLIs so unsupported flags now fail explicitly instead
+  of being ignored.
+
 # litxr 0.0.7.2
 
 - Added project-level research-schema coverage helpers:

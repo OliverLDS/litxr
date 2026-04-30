@@ -2,21 +2,79 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 
-read_flag <- function(flag, default = NULL) {
-  idx <- match(flag, args)
-  if (is.na(idx)) {
-    return(default)
+parse_args <- function(args) {
+  out <- list(
+    show_help = FALSE,
+    collection_id = "arxiv_cs_ai",
+    model = "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+    batch_size = "64",
+    limit = "640"
+  )
+  i <- 1L
+
+  while (i <= length(args)) {
+    key <- args[[i]]
+    if (!startsWith(key, "--") && !identical(key, "-h")) {
+      stop("Unexpected positional argument: ", key, call. = FALSE)
+    }
+    if (identical(key, "-h") || identical(key, "--help")) {
+      out$show_help <- TRUE
+      i <- i + 1L
+      next
+    }
+    if (i == length(args)) {
+      stop("Missing value for ", key, call. = FALSE)
+    }
+    value <- args[[i + 1L]]
+    if (identical(key, "--collection-id")) {
+      out$collection_id <- value
+    } else if (identical(key, "--model")) {
+      out$model <- value
+    } else if (identical(key, "--batch-size")) {
+      out$batch_size <- value
+    } else if (identical(key, "--limit")) {
+      out$limit <- value
+    } else {
+      stop("Unknown argument: ", key, call. = FALSE)
+    }
+    i <- i + 2L
   }
-  if (idx == length(args)) {
-    stop("Missing value for ", flag, call. = FALSE)
-  }
-  args[[idx + 1L]]
+
+  out
 }
 
-collection_id <- read_flag("--collection-id", "arxiv_cs_ai")
-embed_model <- read_flag("--model", "nvidia/llama-nemotron-embed-vl-1b-v2:free")
-batch_size <- as.integer(read_flag("--batch-size", "64"))
-limit <- as.integer(read_flag("--limit", "640"))
+usage <- function() {
+  cat(
+    paste(
+      "Usage:",
+      "  Rscript scripts/repair_arxiv_embedding.R [--collection-id arxiv_cs_ai] [--model MODEL] [--batch-size 64] [--limit 640]",
+      "",
+      "Options:",
+      "  --collection-id ID   Collection id to embed. Default: arxiv_cs_ai.",
+      "  --model MODEL        Embedding model name.",
+      "  --batch-size N       Batch size passed to the embedding function.",
+      "  --limit N            Maximum number of missing refs to embed into delta.",
+      "  -h, --help           Show this help message.",
+      "",
+      "Notes:",
+      "  - This script uses `litxr_embed_collection_delta()` rather than full compaction.",
+      "  - It prints before/after embedding coverage from `litxr_read_embedding_state()`.",
+      sep = "\n"
+    )
+  )
+}
+
+parsed <- parse_args(args)
+
+if (isTRUE(parsed$show_help)) {
+  usage()
+  quit(save = "no", status = 0L)
+}
+
+collection_id <- parsed$collection_id
+embed_model <- parsed$model
+batch_size <- as.integer(parsed$batch_size)
+limit <- as.integer(parsed$limit)
 
 if (is.na(batch_size) || batch_size <= 0L) {
   stop("`--batch-size` must be a positive integer.", call. = FALSE)
