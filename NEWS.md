@@ -1,3 +1,21 @@
+# litxr 0.0.7.4
+
+- Replaced the old builder-file digest workflow scripts with a single
+  interactive CLI, `scripts/build_llm_digest_interactive.R`, for schema-v2
+  ChatGPT handoff and local JSON ingestion.
+- Added `scripts/get_ref_summary.sh` to print a local abstract plus any
+  existing research schema in markdown-style form.
+- Added `scripts/cache_category_inquiries.R` to build persistent local inquiry
+  embedding caches from YAML files.
+- Added `scripts/write_bib_by_ref_ids.R` for ref-id-based BibTeX file creation
+  and append/overwrite workflows.
+- Removed the obsolete scripts `scripts/build_llm_digests.R`,
+  `scripts/example_digest_builder.R`, and `scripts/get_arxiv_abstract.sh`.
+- Made single-record markdown and digest writes faster by avoiding a full
+  canonical-reference read and using an incremental enrichment-status update.
+- Fixed the interactive digest CLI to copy the prompt with `pbcopy`, verify the
+  downloaded JSON `ref_id`, and use a proper stdin read path.
+
 # litxr 0.0.7.3
 
 - Renamed the category-label reporting script to

@@ -112,8 +112,11 @@ Included shell helpers:
 
 - `scripts/repair_arxiv_range.R`
 - `scripts/repair_arxiv_latest.R`
-- `scripts/build_llm_digests.R`
-- `scripts/example_digest_builder.R`
+- `scripts/build_llm_digest_interactive.R`
+- `scripts/get_ref_summary.sh`
+- `scripts/report_arxiv_category_labels.R`
+- `scripts/cache_category_inquiries.R`
+- `scripts/write_bib_by_ref_ids.R`
 
 The arXiv repair scripts now prefer `--collection-id`; `--journal-id` still
 works as a compatibility alias.

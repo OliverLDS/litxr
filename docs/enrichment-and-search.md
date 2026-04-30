@@ -202,15 +202,6 @@ builder_fun <- function(ref, markdown, template) {
 litxr_build_llm_digest(ref_id, builder = builder_fun, config = cfg)
 ```
 
-Batch build:
-
-```r
-litxr_build_llm_digests(builder = builder_fun, config = cfg, limit = 20)
-```
-
-By default, batch build targets references with markdown and without an existing
-digest.
-
 ## Candidate Inspection
 
 Use `litxr_list_enrichment_candidates()` to see what is ready and why other
@@ -235,21 +226,19 @@ Current reasons:
 - `missing_md`
 - `digest_exists`
 
-## Shell Workflow
+## Interactive Digest Workflow
 
-The package includes:
+For manual schema-v2 extraction with ChatGPT, use:
 
-- `scripts/build_llm_digests.R`
-- `scripts/example_digest_builder.R`
+- `scripts/build_llm_digest_interactive.R`
 
 Example:
 
 ```sh
-Rscript scripts/build_llm_digests.R \
-  --builder-file scripts/example_digest_builder.R \
-  --collection-id journal_of_finance \
-  --limit 20
+Rscript scripts/build_llm_digest_interactive.R \
+  --ref-id arxiv:2505.07087
 ```
 
-Use the example builder as a scaffold and replace its placeholder logic with
-your actual local LLM or rule-based extractor.
+The script prints a ready-to-copy prompt, waits for you to download
+`litxr_schema.json`, then validates and writes the digest locally after you
+confirm.

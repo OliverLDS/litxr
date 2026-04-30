@@ -2275,7 +2275,7 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
-  refs <- litxr_read_references(cfg)
+  refs <- .litxr_read_project_references_by_keys(cfg, .litxr_expand_reference_keys(ref_id))
   if (nrow(refs) && !(ref_id %in% refs$ref_id)) {
     warning("Reference id not found in canonical store: ", ref_id, call. = FALSE)
   }
@@ -2286,7 +2286,7 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL) {
   path <- .litxr_llm_digest_path(cfg, ref_id)
   .litxr_ensure_project_llm_dir(cfg)
   .litxr_write_json_atomic(payload, path)
-  .litxr_write_enrichment_status_index(cfg)
+  .litxr_update_enrichment_status_ref(cfg, ref_id)
   invisible(path)
 }
 
@@ -2553,7 +2553,7 @@ litxr_write_md <- function(ref_id, text, config = NULL) {
   .litxr_ensure_project_md_dir(cfg)
   path <- .litxr_md_path(cfg, ref_id)
   writeLines(as.character(text), path, useBytes = TRUE)
-  .litxr_write_enrichment_status_index(cfg)
+  .litxr_update_enrichment_status_ref(cfg, ref_id)
   invisible(path)
 }
 
@@ -5053,6 +5053,37 @@ litxr_add_refs <- function(
   status <- .litxr_build_enrichment_status_index(cfg)
   fst::write_fst(as.data.frame(status), .litxr_enrichment_status_index_path(cfg))
   invisible(.litxr_enrichment_status_index_path(cfg))
+}
+
+.litxr_update_enrichment_status_ref <- function(cfg, ref_id) {
+  path <- .litxr_enrichment_status_index_path(cfg)
+  if (!file.exists(path)) {
+    return(.litxr_write_enrichment_status_index(cfg))
+  }
+
+  status <- fst::read_fst(path, as.data.table = TRUE)
+  if (!nrow(status)) {
+    return(.litxr_write_enrichment_status_index(cfg))
+  }
+
+  row <- data.table::data.table(
+    ref_id = as.character(ref_id),
+    has_md = file.exists(.litxr_md_path(cfg, ref_id)),
+    has_llm_digest = file.exists(.litxr_llm_digest_path(cfg, ref_id)),
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+
+  hit <- match(row$ref_id[[1]], status$ref_id)
+  if (is.na(hit)) {
+    status <- data.table::rbindlist(list(status, row), fill = TRUE)
+  } else {
+    data.table::set(status, i = hit, j = "has_md", value = row$has_md[[1]])
+    data.table::set(status, i = hit, j = "has_llm_digest", value = row$has_llm_digest[[1]])
+    data.table::set(status, i = hit, j = "updated_at", value = row$updated_at[[1]])
+  }
+
+  fst::write_fst(as.data.frame(status), path)
+  invisible(path)
 }
 
 .litxr_read_enrichment_status_index <- function(cfg) {
