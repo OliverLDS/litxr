@@ -220,5 +220,5 @@ bib_book <- litxr::row_to_bibtex(data.table::data.table(
   url_landing = NA_character_,
   url_pdf = NA_character_
 ))
-stopifnot(identical(bib_book[[1]], "@book{booktest,"))
+stopifnot(identical(bib_book[[1]], "@book{booktest, title = {Example Book},"))
 stopifnot(any(grepl("isbn = \\{9780262046305\\}", bib_book)))

@@ -148,6 +148,12 @@ refs <- data.frame(
 litxr_add_refs(refs, collection_id = "manual_books", config = cfg)
 ```
 
+Known limitation:
+
+- arXiv sync stores DOI strings when present, but it does not yet run a
+  second DOI-enrichment pass to fetch richer publication metadata. See
+  [doi-enrichment-design.md](./doi-enrichment-design.md).
+
 ## BibTeX Export
 
 Use:

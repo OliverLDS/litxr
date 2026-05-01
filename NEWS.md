@@ -1,3 +1,16 @@
+# litxr 0.0.7.5
+
+- Changed BibTeX formatting so the `title` field is written on the same first
+  line as the BibTeX entry key, which makes outline-style browsing easier in
+  editors such as TextMate.
+- Fixed `litxr_find_refs(ref_id = ...)` to handle vector `ref_id` inputs
+  without scalar-coercion warnings.
+- Tightened `scripts/write_bib_by_ref_ids.R` so it keeps CLI startup light,
+  validates multi-id local lookups cleanly, and only prefers DOI-backed local
+  metadata over arXiv records when the DOI-backed record is actually richer.
+- Added `docs/doi-enrichment-design.md` to document the current DOI-enrichment
+  limitation and a future package-level design for linked arXiv / DOI records.
+
 # litxr 0.0.7.4
 
 - Replaced the old builder-file digest workflow scripts with a single

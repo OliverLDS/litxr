@@ -931,7 +931,7 @@ litxr_find_refs <- function(
 ) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  ref_keys <- if (!is.null(ref_id) && nzchar(as.character(ref_id))) {
+  ref_keys <- if (!is.null(ref_id) && any(nzchar(as.character(ref_id)))) {
     .litxr_expand_reference_keys(ref_id)
   } else {
     character()
@@ -975,7 +975,7 @@ litxr_find_refs <- function(
   if (!is.null(doi) && nzchar(as.character(doi))) {
     refs <- refs[refs$doi %in% doi, ]
   }
-  if (!is.null(ref_id) && nzchar(as.character(ref_id))) {
+  if (!is.null(ref_id) && any(nzchar(as.character(ref_id)))) {
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     refs <- refs[refs$ref_id %in% ref_keys | source_id %in% ref_keys, ]
     if (!nrow(refs)) {

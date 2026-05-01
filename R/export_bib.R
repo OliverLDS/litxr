@@ -216,8 +216,13 @@ row_to_bibtex <- function(row) {
 
   fields <- fields[!is.na(fields) & nzchar(fields)]
 
-  lines <- c(sprintf("@%s{%s,", entry_type, key),
-             sprintf("  %s = {%s},", names(fields), fields))
+  lines <- sprintf("  %s = {%s},", names(fields), fields)
+  title_idx <- match("title", names(fields))
+  if (!is.na(title_idx)) {
+    lines[[title_idx]] <- sprintf("@%s{%s, title = {%s},", entry_type, key, fields[["title"]])
+  } else {
+    lines <- c(sprintf("@%s{%s,", entry_type, key), lines)
+  }
 
   lines[length(lines)] <- sub(",$","",lines[length(lines)])
 

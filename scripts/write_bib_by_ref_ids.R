@@ -2,7 +2,6 @@
 
 suppressPackageStartupMessages({
   library(data.table)
-  library(litxr)
 })
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -172,16 +171,70 @@ find_rows_by_ref_ids <- function(ref_ids, cfg) {
 
   rows <- rows[ordered_idx, ]
   rows[, source_id_chr__ := NULL]
+  rows <- prefer_published_rows(rows, cfg)
   rows
 }
 
+has_value <- function(x) {
+  !is.null(x) && length(x) == 1L && !is.na(x) && nzchar(as.character(x))
+}
+
+published_metadata_score <- function(row) {
+  fields <- c("journal", "container_title", "publisher", "volume", "issue", "pages")
+  sum(vapply(fields, function(name) has_value(row[[name]]), logical(1)))
+}
+
+prefer_published_rows <- function(rows, cfg) {
+  if (!nrow(rows) || !"source" %in% names(rows) || !"doi" %in% names(rows)) {
+    rows[, prefer_doi_key__ := TRUE]
+    return(rows)
+  }
+
+  replace_row <- function(row) {
+    doi_value <- as.character(row[["doi"]])
+    if (!identical(as.character(row[["source"]]), "arxiv") || is.na(doi_value) || !nzchar(doi_value)) {
+      row[["prefer_doi_key__"]] <- TRUE
+      return(row)
+    }
+
+    published <- as.data.table(litxr::litxr_find_refs(ref_id = paste0("doi:", doi_value), config = cfg))
+    if (!nrow(published)) {
+      published <- as.data.table(litxr::litxr_find_refs(doi = doi_value, config = cfg))
+      if (nrow(published) && "source" %in% names(published)) {
+        published <- published[published$source != "arxiv", ]
+      }
+    }
+    if (!nrow(published)) {
+      row[["prefer_doi_key__"]] <- FALSE
+      return(row)
+    }
+
+    scores <- vapply(seq_len(nrow(published)), function(i) published_metadata_score(published[i, ]), integer(1))
+    published <- published[order(-scores)]
+    best <- published[1, ]
+    if (published_metadata_score(best) <= 0L) {
+      row[["prefer_doi_key__"]] <- FALSE
+      return(row)
+    }
+
+    best[["prefer_doi_key__"]] <- TRUE
+    best
+  }
+
+  rbindlist(lapply(seq_len(nrow(rows)), function(i) replace_row(rows[i, ])), fill = TRUE, use.names = TRUE)
+}
+
 make_bib_entry <- function(row) {
-  paste(litxr::row_to_bibtex(row), collapse = "\n")
+  key <- make_citekey(row)
+  lines <- litxr::row_to_bibtex(row)
+  lines[[1]] <- sub("^(@[^\\{]+\\{)[^,]+,", paste0("\\1", key, ","), lines[[1]])
+  paste(lines, collapse = "\n")
 }
 
 make_citekey <- function(row) {
+  prefer_doi_key <- if ("prefer_doi_key__" %in% names(row)) isTRUE(row[["prefer_doi_key__"]]) else TRUE
   litxr:::.make_citekey(
-    doi = row[["doi"]],
+    doi = if (prefer_doi_key) row[["doi"]] else NA_character_,
     source_id = row[["source_id"]],
     ref_id = row[["ref_id"]]
   )
