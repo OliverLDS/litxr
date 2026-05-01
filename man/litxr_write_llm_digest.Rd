@@ -4,7 +4,13 @@
 \alias{litxr_write_llm_digest}
 \title{Write one LLM digest for a reference}
 \usage{
-litxr_write_llm_digest(ref_id, digest, config = NULL)
+litxr_write_llm_digest(
+  ref_id,
+  digest,
+  config = NULL,
+  keep_history = TRUE,
+  bump_revision = TRUE
+)
 }
 \arguments{
 \item{ref_id}{Reference identifier.}
@@ -13,6 +19,12 @@ litxr_write_llm_digest(ref_id, digest, config = NULL)
 
 \item{config}{Optional parsed config list or a direct config path. When
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+
+\item{keep_history}{Whether to archive the previous current digest into
+\verb{project.data_root/llm_history/} before replacing it.}
+
+\item{bump_revision}{Whether to increment the digest revision when an
+existing current digest is replaced.}
 }
 \value{
 Invisibly returns the written JSON path.

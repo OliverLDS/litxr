@@ -178,6 +178,8 @@ Helpers:
 - `litxr_write_llm_digest()`
 - `litxr_read_llm_digest()`
 - `litxr_read_llm_digests()`
+- `litxr_list_llm_digest_revisions()`
+- `litxr_read_llm_digest_history()`
 - `litxr_find_llm()`
 
 The `paper_type` field uses the canonical vocabulary returned by
@@ -236,7 +238,8 @@ Example:
 
 ```sh
 Rscript scripts/build_llm_digest_interactive.R \
-  --ref-id arxiv:2505.07087
+  --ref-id arxiv:2505.07087 \
+  --mode create
 ```
 
 The script prints a ready-to-copy prompt, waits for you to download
@@ -244,6 +247,10 @@ The script prints a ready-to-copy prompt, waits for you to download
 confirm. On macOS, the prompt is copied to the clipboard with `pbcopy` instead
 of being dumped directly to the terminal.
 
-For a future revision-aware digest workflow that can improve the same paper
-multiple times over time, see
+Use `--mode revise` when a local digest already exists and you want ChatGPT to
+improve that digest rather than start from scratch. Revised digests bump
+`digest_revision` and archive the prior current digest under
+`project.data_root/llm_history/`.
+
+For the revision-aware digest design and future extension points, see
 [llm-digest-revision-design.md](./llm-digest-revision-design.md).

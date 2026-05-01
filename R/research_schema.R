@@ -146,6 +146,11 @@ litxr_validate_paper_type <- function(x) {
   list(
     schema_version = "v2",
     ref_id = as.character(ref_id),
+    digest_revision = 1L,
+    derived_from_revision = NULL,
+    extraction_mode = "unknown",
+    prompt_version = NA_character_,
+    model_hint = NA_character_,
     paper_type = "unknown",
     summary = NA_character_,
     motivation = NA_character_,
@@ -176,7 +181,8 @@ litxr_validate_paper_type <- function(x) {
     evidence_strength = NA_character_,
     keywords = character(),
     notes = NA_character_,
-    generated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+    generated_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
   )
 }
 
@@ -191,7 +197,11 @@ litxr_validate_paper_type <- function(x) {
 }
 
 .litxr_normalize_llm_digest_for_write <- function(digest, ref_id = NULL) {
-  version <- .litxr_llm_digest_schema_version(digest)
+  version <- if (is.null(digest[["schema_version"]]) || !length(digest[["schema_version"]])) {
+    "v2"
+  } else {
+    .litxr_llm_digest_schema_version(digest)
+  }
   payload <- .litxr_llm_digest_template_v2(.litxr_first_nonnull(ref_id, digest$ref_id, ""))
   if (!identical(version, "v2") && !is.null(digest[["schema_version"]]) && length(digest[["schema_version"]])) {
     payload[["schema_version"]] <- as.character(digest[["schema_version"]][[1]])
@@ -202,7 +212,29 @@ litxr_validate_paper_type <- function(x) {
   }
   payload$ref_id <- as.character(.litxr_first_nonnull(ref_id, payload$ref_id, ""))
   payload$paper_type <- litxr_normalize_paper_type(.litxr_first_nonnull(payload$paper_type, NA_character_))
-  payload$generated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  if (!identical(version, "v2")) {
+    payload$digest_revision <- 1L
+    payload$derived_from_revision <- NULL
+    payload$extraction_mode <- "legacy"
+    payload$prompt_version <- NA_character_
+    payload$model_hint <- NA_character_
+    payload$updated_at <- payload$generated_at %||% format(Sys.time(), tz = "UTC", usetz = TRUE)
+  } else {
+    payload$digest_revision <- suppressWarnings(as.integer(.litxr_first_nonnull(payload$digest_revision, 1L)))
+    if (is.na(payload$digest_revision) || payload$digest_revision < 1L) payload$digest_revision <- 1L
+    derived <- .litxr_first_nonnull(payload$derived_from_revision, NULL)
+    if (!is.null(derived)) {
+      derived <- suppressWarnings(as.integer(derived[[1]]))
+      if (is.na(derived) || derived < 1L) derived <- NULL
+    }
+    payload$derived_from_revision <- derived
+    payload$extraction_mode <- as.character(.litxr_first_nonnull(payload$extraction_mode, "unknown"))
+    if (!nzchar(payload$extraction_mode[[1]])) payload$extraction_mode <- "unknown"
+    payload$prompt_version <- as.character(.litxr_first_nonnull(payload$prompt_version, NA_character_))
+    payload$model_hint <- as.character(.litxr_first_nonnull(payload$model_hint, NA_character_))
+    payload$generated_at <- as.character(.litxr_first_nonnull(payload$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
+    payload$updated_at <- as.character(.litxr_first_nonnull(payload$updated_at, payload$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
+  }
   payload
 }
 
@@ -212,6 +244,26 @@ litxr_validate_paper_type <- function(x) {
   }
   if (!("schema_version" %in% names(digest))) {
     digest$schema_version <- "v1"
+  }
+  if (identical(.litxr_llm_digest_schema_version(digest), "v2")) {
+    if (!("digest_revision" %in% names(digest)) || is.null(digest$digest_revision)) {
+      digest$digest_revision <- 1L
+    }
+    if (!("derived_from_revision" %in% names(digest))) {
+      digest$derived_from_revision <- NULL
+    }
+    if (!("extraction_mode" %in% names(digest)) || is.null(digest$extraction_mode) || !length(digest$extraction_mode)) {
+      digest$extraction_mode <- "legacy"
+    }
+    if (!("prompt_version" %in% names(digest))) {
+      digest$prompt_version <- NA_character_
+    }
+    if (!("model_hint" %in% names(digest))) {
+      digest$model_hint <- NA_character_
+    }
+    if (!("updated_at" %in% names(digest))) {
+      digest$updated_at <- digest$generated_at %||% NA_character_
+    }
   }
   if ("paper_type" %in% names(digest)) {
     digest$paper_type <- litxr_normalize_paper_type(digest$paper_type)
@@ -226,13 +278,14 @@ litxr_validate_paper_type <- function(x) {
 .litxr_llm_digest_required_fields <- function(schema_version) {
   if (identical(schema_version, "v2")) {
     return(c(
-      "schema_version", "ref_id", "paper_type", "summary", "motivation",
+      "schema_version", "ref_id", "digest_revision",
+      "extraction_mode", "prompt_version", "model_hint", "paper_type", "summary", "motivation",
       "research_questions", "paper_structure", "methods", "research_data",
       "identification_strategy", "main_variables", "key_findings",
       "limitations", "theoretical_mechanism", "empirical_setting",
       "descriptive_statistics_summary", "standardized_findings_summary",
       "contribution_type", "evidence_strength", "keywords", "notes",
-      "generated_at"
+      "generated_at", "updated_at"
     ))
   }
   c(
@@ -1045,7 +1098,8 @@ litxr_upgrade_llm_digests <- function(ref_ids = NULL, config = NULL) {
     if (is.null(digest)) next
     if (!.litxr_llm_digest_is_v2(digest)) {
       digest$schema_version <- "v2"
-      litxr_write_llm_digest(ref_id, digest, cfg)
+      digest$extraction_mode <- "legacy"
+      litxr_write_llm_digest(ref_id, digest, cfg, keep_history = FALSE, bump_revision = FALSE)
     }
   }
 

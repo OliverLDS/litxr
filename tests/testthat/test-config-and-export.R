@@ -879,6 +879,8 @@ stopifnot(file.exists(llm_path))
 llm_one <- litxr::litxr_read_llm_digest("isbn:9780262046305", cfg_manual)
 stopifnot(identical(llm_one$ref_id, "isbn:9780262046305"))
 stopifnot(identical(llm_one$motivation, "Understand manual reference ingestion."))
+stopifnot(identical(llm_one$digest_revision, 1L))
+stopifnot(identical(as.character(llm_one$extraction_mode[[1]]), "unknown"))
 
 llm_all <- litxr::litxr_read_llm_digests(cfg_manual)
 stopifnot(any(llm_all$ref_id == "isbn:9780262046305"))
@@ -950,6 +952,15 @@ built_one <- litxr::litxr_build_llm_digest(
   overwrite = TRUE
 )
 stopifnot(identical(built_one$motivation, "Test builder path."))
+rebuilt_digest <- litxr::litxr_read_llm_digest("isbn:9780262046305", cfg_manual)
+stopifnot(identical(rebuilt_digest$digest_revision, 2L))
+history_rows <- litxr::litxr_list_llm_digest_revisions("isbn:9780262046305", cfg_manual)
+stopifnot(nrow(history_rows) >= 2L)
+stopifnot(any(!history_rows$is_current))
+stopifnot(any(history_rows$digest_revision == 1L))
+history_payloads <- litxr::litxr_read_llm_digest_history("isbn:9780262046305", cfg_manual)
+stopifnot("digest" %in% names(history_payloads))
+stopifnot(any(vapply(history_payloads$digest, function(x) identical(x$digest_revision, 1L), logical(1))))
 
 built_batch <- litxr::litxr_build_llm_digests(
   builder = builder_fun,

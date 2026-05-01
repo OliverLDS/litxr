@@ -1,7 +1,6 @@
 #!/usr/bin/env Rscript
 
 suppressPackageStartupMessages({
-  library(litxr)
   library(jsonlite)
 })
 
@@ -11,7 +10,9 @@ parse_args <- function(args) {
   out <- list(
     show_help = FALSE,
     ref_id = NULL,
-    json_path = "~/Downloads/litxr_schema.json"
+    json_path = "~/Downloads/litxr_schema.json",
+    mode = "create",
+    prompt_version = "v2.1"
   )
   i <- 1L
 
@@ -33,6 +34,10 @@ parse_args <- function(args) {
       out$ref_id <- value
     } else if (identical(key, "--json-path")) {
       out$json_path <- value
+    } else if (identical(key, "--mode")) {
+      out$mode <- value
+    } else if (identical(key, "--prompt-version")) {
+      out$prompt_version <- value
     } else {
       stop("Unknown argument: ", key, call. = FALSE)
     }
@@ -46,12 +51,15 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/build_llm_digest_interactive.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json]",
+      "  Rscript scripts/build_llm_digest_interactive.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json] [--mode create|revise] [--prompt-version v2.1]",
       "",
       "Options:",
       "  --ref-id REF_ID     Canonical litxr ref_id to build a schema-v2 digest for.",
       "  --json-path PATH    Downloaded JSON path to ingest after ChatGPT returns the schema.",
       "                      Default: ~/Downloads/litxr_schema.json",
+      "  --mode MODE         Either `create` or `revise`. Default: create",
+      "  --prompt-version V  Prompt template version metadata to store on ingest.",
+      "                      Default: v2.1",
       "  -h, --help          Show this help message.",
       "",
       "Workflow:",
@@ -96,11 +104,23 @@ if (nrow(ref) > 1L) {
   stop("Expected exactly one reference row for ", ref_id, " but found ", nrow(ref), ".", call. = FALSE)
 }
 
+mode <- tolower(trimws(as.character(parsed$mode)))
+if (!(mode %in% c("create", "revise"))) {
+  stop("`--mode` must be either `create` or `revise`.", call. = FALSE)
+}
+
 title_value <- as_scalar_chr(ref$title, ref_id)
 doi_value <- as_scalar_chr(ref$doi)
 source_value <- as_scalar_chr(ref$source)
 source_id_value <- as_scalar_chr(ref$source_id)
 template <- litxr::litxr_llm_digest_template(ref_id)
+existing_digest <- litxr::litxr_read_llm_digest(ref_id, cfg)
+if (identical(mode, "create") && !is.null(existing_digest)) {
+  stop("A local digest already exists for this ref_id. Use `--mode revise` to improve it.", call. = FALSE)
+}
+if (identical(mode, "revise") && is.null(existing_digest)) {
+  stop("`--mode revise` requires an existing local digest for ref_id: ", ref_id, call. = FALSE)
+}
 template_json <- jsonlite::toJSON(
   template,
   auto_unbox = TRUE,
@@ -133,7 +153,13 @@ prompt_lines <- c(
   "7. Return a downloadable JSON file named litxr_schema.json.",
   "8. Do not add extra keys beyond this schema unless they already exist in the schema.",
   "9. Keep unknown fields explicit with null, empty string, or empty arrays as appropriate; do not guess.",
+  sprintf("10. This extraction is in `%s` mode with prompt_version `%s`.", mode, parsed$prompt_version),
   "",
+  if (identical(mode, "revise")) "Existing local digest to improve:" else NULL,
+  if (identical(mode, "revise")) jsonlite::toJSON(existing_digest, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null") else NULL,
+  if (identical(mode, "revise")) "" else NULL,
+  if (identical(mode, "revise")) "Revise the existing digest rather than rewriting blindly. Preserve correct fields, correct mistakes, and improve incomplete fields when the full text supports it." else NULL,
+  if (identical(mode, "revise")) "" else NULL,
   "Return JSON matching this schema exactly:",
   template_json
 )
@@ -177,7 +203,15 @@ if (is.na(json_ref_id) || !identical(json_ref_id, ref_id)) {
     call. = FALSE
   )
 }
+digest$extraction_mode <- "chatgpt_manual"
+digest$prompt_version <- as.character(parsed$prompt_version)
 litxr::litxr_validate_llm_digest(digest)
-litxr::litxr_write_llm_digest(ref_id, digest, cfg)
+litxr::litxr_write_llm_digest(
+  ref_id,
+  digest,
+  cfg,
+  keep_history = TRUE,
+  bump_revision = identical(mode, "revise")
+)
 
-cat(sprintf("digest_written=%s\n", ref_id))
+cat(sprintf("digest_written=%s mode=%s\n", ref_id, mode))

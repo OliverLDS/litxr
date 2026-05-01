@@ -1,3 +1,15 @@
+# litxr 0.0.8.1
+
+- Added revision-aware LLM digest writes with `digest_revision`,
+  `derived_from_revision`, `extraction_mode`, `prompt_version`, `model_hint`,
+  and `updated_at` metadata on schema-v2 digests.
+- Added append-only digest history storage under `project.data_root/llm_history/`
+  plus the helpers `litxr_list_llm_digest_revisions()` and
+  `litxr_read_llm_digest_history()`.
+- Updated `scripts/build_llm_digest_interactive.R` to support `create` versus
+  `revise` modes and to stamp ingested digests with manual ChatGPT extraction
+  metadata.
+
 # litxr 0.0.8
 
 - Tightened `scripts/write_bib_by_ref_ids.R` so create mode now stops if the

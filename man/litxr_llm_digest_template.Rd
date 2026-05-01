@@ -4,10 +4,13 @@
 \alias{litxr_llm_digest_template}
 \title{Create a default structured LLM digest template}
 \usage{
-litxr_llm_digest_template(ref_id)
+litxr_llm_digest_template(ref_id, schema_version = "v2")
 }
 \arguments{
 \item{ref_id}{Reference identifier.}
+
+\item{schema_version}{Digest schema version. Currently only \code{"v2"} is
+supported for new templates.}
 }
 \value{
 Named list representing the default digest schema.

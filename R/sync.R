@@ -2252,10 +2252,15 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 #' Create a default structured LLM digest template
 #'
 #' @param ref_id Reference identifier.
+#' @param schema_version Digest schema version. Currently only `"v2"` is
+#'   supported for new templates.
 #'
 #' @return Named list representing the default digest schema.
 #' @export
-litxr_llm_digest_template <- function(ref_id) {
+litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {
+  if (!identical(schema_version, "v2")) {
+    stop("Only `schema_version = \"v2\"` is supported for new templates in the current package version.", call. = FALSE)
+  }
   .litxr_llm_digest_template_v2(ref_id)
 }
 
@@ -2268,10 +2273,14 @@ litxr_llm_digest_template <- function(ref_id) {
 #' @param digest Named list containing digest fields.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param keep_history Whether to archive the previous current digest into
+#'   `project.data_root/llm_history/` before replacing it.
+#' @param bump_revision Whether to increment the digest revision when an
+#'   existing current digest is replaced.
 #'
 #' @return Invisibly returns the written JSON path.
 #' @export
-litxr_write_llm_digest <- function(ref_id, digest, config = NULL) {
+litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history = TRUE, bump_revision = TRUE) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
@@ -2280,11 +2289,47 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL) {
     warning("Reference id not found in canonical store: ", ref_id, call. = FALSE)
   }
 
+  existing <- litxr_read_llm_digest(ref_id, cfg)
   payload <- .litxr_normalize_llm_digest_for_write(digest, ref_id = ref_id)
+  if (identical(.litxr_llm_digest_schema_version(payload), "v2")) {
+    if (is.null(existing)) {
+      existing_revision <- 0L
+    } else if (!identical(.litxr_llm_digest_schema_version(existing), "v2")) {
+      existing_revision <- 1L
+    } else {
+      existing_revision <- suppressWarnings(as.integer(existing$digest_revision %||% 1L))
+      if (!length(existing_revision) || is.na(existing_revision[[1]]) || existing_revision[[1]] < 1L) {
+        existing_revision <- 1L
+      } else {
+        existing_revision <- existing_revision[[1]]
+      }
+    }
+    if (is.null(existing)) {
+      payload$digest_revision <- 1L
+      payload$derived_from_revision <- NULL
+      payload$generated_at <- as.character(.litxr_first_nonnull(payload$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
+    } else if (isTRUE(bump_revision)) {
+      payload$digest_revision <- existing_revision + 1L
+      payload$derived_from_revision <- existing_revision
+      payload$generated_at <- as.character(.litxr_first_nonnull(payload$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
+    } else {
+      payload$digest_revision <- existing_revision
+      payload$derived_from_revision <- existing$derived_from_revision %||% NULL
+      payload$generated_at <- as.character(.litxr_first_nonnull(payload$generated_at, existing$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
+    }
+    payload$updated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  }
   litxr_validate_llm_digest(payload)
 
   path <- .litxr_llm_digest_path(cfg, ref_id)
   .litxr_ensure_project_llm_dir(cfg)
+  if (!is.null(existing) && isTRUE(keep_history)) {
+    .litxr_ensure_project_llm_history_dir(cfg)
+    history_dir <- .litxr_llm_history_ref_dir(cfg, ref_id)
+    dir.create(history_dir, recursive = TRUE, showWarnings = FALSE)
+    history_path <- .litxr_llm_digest_history_path(cfg, ref_id, existing)
+    .litxr_write_json_atomic(existing, history_path)
+  }
   .litxr_write_json_atomic(payload, path)
   .litxr_update_enrichment_status_ref(cfg, ref_id)
   invisible(path)
@@ -2408,9 +2453,9 @@ litxr_read_llm_digest <- function(ref_id, config = NULL) {
   if (!file.exists(path)) {
     return(NULL)
   }
-  digest <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+  digest <- .litxr_postprocess_llm_digest_read(jsonlite::fromJSON(path, simplifyVector = FALSE))
   litxr_validate_llm_digest(digest)
-  .litxr_postprocess_llm_digest_read(digest)
+  digest
 }
 
 #' Read all project-level LLM digests
@@ -2439,6 +2484,11 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
     data.table::data.table(
       schema_version = x$schema_version %||% "v1",
       ref_id = x$ref_id %||% NA_character_,
+      digest_revision = suppressWarnings(as.integer(x$digest_revision %||% 1L)),
+      derived_from_revision = suppressWarnings(as.integer(x$derived_from_revision %||% NA_integer_)),
+      extraction_mode = x$extraction_mode %||% NA_character_,
+      prompt_version = x$prompt_version %||% NA_character_,
+      model_hint = x$model_hint %||% NA_character_,
       paper_type = x$paper_type %||% NA_character_,
       summary = x$summary %||% NA_character_,
       motivation = x$motivation %||% NA_character_,
@@ -2458,7 +2508,8 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
       evidence_strength = x$evidence_strength %||% NA_character_,
       keywords = list(unlist(x$keywords %||% character(), use.names = FALSE)),
       notes = x$notes %||% NA_character_,
-      generated_at = x$generated_at %||% NA_character_
+      generated_at = x$generated_at %||% NA_character_,
+      updated_at = x$updated_at %||% NA_character_
     )
   })
 
@@ -2535,6 +2586,116 @@ litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, co
   digests
 }
 
+#' List current and historical LLM digest revisions for one reference
+#'
+#' @param ref_id Reference identifier.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` describing available current and archived digest
+#'   revisions.
+#' @export
+litxr_list_llm_digest_revisions <- function(ref_id, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  rows <- list()
+  current_path <- .litxr_llm_digest_path(cfg, ref_id)
+  if (file.exists(current_path)) {
+    current <- litxr_read_llm_digest(ref_id, cfg)
+    rows[[length(rows) + 1L]] <- data.table::data.table(
+      ref_id = ref_id,
+      is_current = TRUE,
+      path = current_path,
+      schema_version = current$schema_version %||% "v1",
+      digest_revision = suppressWarnings(as.integer(current$digest_revision %||% 1L)),
+      derived_from_revision = suppressWarnings(as.integer(current$derived_from_revision %||% NA_integer_)),
+      extraction_mode = current$extraction_mode %||% NA_character_,
+      prompt_version = current$prompt_version %||% NA_character_,
+      model_hint = current$model_hint %||% NA_character_,
+      generated_at = current$generated_at %||% NA_character_,
+      updated_at = current$updated_at %||% NA_character_
+    )
+  }
+
+  history_dir <- .litxr_llm_history_ref_dir(cfg, ref_id)
+  if (dir.exists(history_dir)) {
+    history_files <- list.files(history_dir, pattern = "\\.json$", full.names = TRUE)
+    history_rows <- lapply(history_files, function(path) {
+      digest <- .litxr_postprocess_llm_digest_read(jsonlite::fromJSON(path, simplifyVector = FALSE))
+      litxr_validate_llm_digest(digest)
+      data.table::data.table(
+        ref_id = ref_id,
+        is_current = FALSE,
+        path = path,
+        schema_version = digest$schema_version %||% "v1",
+        digest_revision = suppressWarnings(as.integer(digest$digest_revision %||% 1L)),
+        derived_from_revision = suppressWarnings(as.integer(digest$derived_from_revision %||% NA_integer_)),
+        extraction_mode = digest$extraction_mode %||% NA_character_,
+        prompt_version = digest$prompt_version %||% NA_character_,
+        model_hint = digest$model_hint %||% NA_character_,
+        generated_at = digest$generated_at %||% NA_character_,
+        updated_at = digest$updated_at %||% NA_character_
+      )
+    })
+    rows <- c(rows, history_rows)
+  }
+
+  if (!length(rows)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      is_current = logical(),
+      path = character(),
+      schema_version = character(),
+      digest_revision = integer(),
+      derived_from_revision = integer(),
+      extraction_mode = character(),
+      prompt_version = character(),
+      model_hint = character(),
+      generated_at = character(),
+      updated_at = character()
+    ))
+  }
+
+  out <- data.table::rbindlist(rows, fill = TRUE)
+  out[order(-out$is_current, -out$digest_revision, out$path), ]
+}
+
+#' Read historical LLM digests for one reference
+#'
+#' @param ref_id Reference identifier.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param include_current Whether to include the current digest in the returned
+#'   history table.
+#'
+#' @return `data.table` with digest metadata plus a list-column `digest`.
+#' @export
+litxr_read_llm_digest_history <- function(ref_id, config = NULL, include_current = TRUE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  revisions <- litxr_list_llm_digest_revisions(ref_id, cfg)
+  if (!nrow(revisions)) {
+    revisions$digest <- list()
+    return(revisions)
+  }
+  if (!isTRUE(include_current)) {
+    revisions <- revisions[!revisions$is_current, ]
+  }
+  if (!nrow(revisions)) {
+    revisions$digest <- list()
+    return(revisions)
+  }
+
+  digests <- lapply(seq_len(nrow(revisions)), function(i) {
+    path <- revisions$path[[i]]
+    .litxr_postprocess_llm_digest_read(jsonlite::fromJSON(path, simplifyVector = FALSE))
+  })
+  revisions$digest <- digests
+  revisions
+}
+
 #' Write markdown content for one reference
 #'
 #' Stores markdown under the project-level `md/` directory using `ref_id` as the
@@ -2591,6 +2752,20 @@ litxr_validate_llm_digest <- function(digest) {
 
   if (identical(schema_version, "v2")) {
     litxr_validate_paper_type(digest$paper_type)
+    digest_revision <- suppressWarnings(as.integer(digest$digest_revision[[1]] %||% digest$digest_revision))
+    if (length(digest_revision) != 1L || is.na(digest_revision) || digest_revision < 1L) {
+      stop("LLM digest field `digest_revision` must be a positive integer.", call. = FALSE)
+    }
+    if (!is.null(digest$derived_from_revision) && length(digest$derived_from_revision)) {
+      derived <- suppressWarnings(as.integer(digest$derived_from_revision[[1]]))
+      if (length(derived) != 1L || is.na(derived) || derived < 1L) {
+        stop("LLM digest field `derived_from_revision` must be NULL or a positive integer.", call. = FALSE)
+      }
+    }
+    extraction_mode <- as.character(digest$extraction_mode[[1]] %||% digest$extraction_mode)
+    if (!length(extraction_mode) || is.na(extraction_mode[[1]]) || !nzchar(extraction_mode[[1]])) {
+      stop("LLM digest field `extraction_mode` must be a non-empty character scalar.", call. = FALSE)
+    }
     .litxr_validate_list_fields(
       digest,
       c(
@@ -4796,6 +4971,10 @@ litxr_add_refs <- function(
   file.path(.litxr_project_root(cfg), "llm")
 }
 
+.litxr_project_llm_history_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "llm_history")
+}
+
 .litxr_project_md_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "md")
 }
@@ -4828,6 +5007,14 @@ litxr_add_refs <- function(
   dir_path
 }
 
+.litxr_ensure_project_llm_history_dir <- function(cfg) {
+  dir_path <- .litxr_project_llm_history_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
 .litxr_ensure_project_md_dir <- function(cfg) {
   dir_path <- .litxr_project_md_dir(cfg)
   if (!dir.exists(dir_path)) {
@@ -4838,6 +5025,23 @@ litxr_add_refs <- function(
 
 .litxr_llm_digest_path <- function(cfg, ref_id) {
   file.path(.litxr_project_llm_dir(cfg), paste0(.litxr_record_slug(data.table::data.table(ref_id = ref_id, doi = NA_character_)), ".json"))
+}
+
+.litxr_llm_history_ref_dir <- function(cfg, ref_id) {
+  file.path(.litxr_project_llm_history_dir(cfg), .litxr_record_slug(data.table::data.table(ref_id = ref_id, doi = NA_character_)))
+}
+
+.litxr_llm_digest_history_path <- function(cfg, ref_id, digest) {
+  digest <- .litxr_postprocess_llm_digest_read(digest)
+  ref_dir <- .litxr_llm_history_ref_dir(cfg, ref_id)
+  timestamp <- as.character(digest$updated_at %||% digest$generated_at %||% format(Sys.time(), tz = "UTC", usetz = TRUE))
+  timestamp <- gsub(":", "-", timestamp, fixed = TRUE)
+  timestamp <- gsub(" ", "T", timestamp, fixed = TRUE)
+  timestamp <- gsub("[^A-Za-z0-9._-]+", "_", timestamp)
+  revision <- suppressWarnings(as.integer(digest$digest_revision[[1]] %||% digest$digest_revision))
+  if (is.na(revision) || revision < 1L) revision <- 1L
+  schema_version <- as.character(digest$schema_version[[1]] %||% digest$schema_version %||% "v1")
+  file.path(ref_dir, sprintf("%s__rev%03d__%s.json", timestamp, revision, schema_version))
 }
 
 .litxr_md_path <- function(cfg, ref_id) {

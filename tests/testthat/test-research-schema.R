@@ -49,6 +49,8 @@ stopifnot(inherits(try(litxr::litxr_validate_paper_type("bad_type_value"), silen
 
 digest_template <- litxr::litxr_llm_digest_template("doi:10.1000/v2")
 stopifnot(identical(digest_template$schema_version, "v2"))
+stopifnot(identical(digest_template$digest_revision, 1L))
+stopifnot(identical(digest_template$extraction_mode, "unknown"))
 stopifnot(identical(digest_template$paper_type, "unknown"))
 stopifnot(all(c("paper_structure", "research_data", "main_variables", "contribution_type") %in% names(digest_template)))
 stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template))))
@@ -79,6 +81,8 @@ litxr::litxr_upgrade_llm_digests(ref_ids = "doi:10.1000/legacy", config = cfg)
 legacy_upgraded <- litxr::litxr_read_llm_digest("doi:10.1000/legacy", cfg)
 stopifnot(identical(legacy_upgraded$schema_version, "v2"))
 stopifnot(identical(legacy_upgraded$paper_type, "unknown"))
+stopifnot(identical(legacy_upgraded$digest_revision, 1L))
+stopifnot(identical(as.character(legacy_upgraded$extraction_mode[[1]]), "legacy"))
 
 empty_findings <- litxr::litxr_read_standardized_findings(cfg)
 stopifnot(inherits(empty_findings, "data.table"))

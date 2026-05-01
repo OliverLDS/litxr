@@ -146,7 +146,8 @@ Implemented today:
 - project-level coverage helpers for missing digests, findings, and descriptive statistics
 
 These layers stay within the existing local-data architecture: JSON digests
-under `project.data_root/llm/` and `fst` main-plus-delta tables under
+under `project.data_root/llm/`, revision history under
+`project.data_root/llm_history/`, and `fst` main-plus-delta tables under
 `project.data_root/findings/`. External AI agents can read and write these
 stores, but `litxr` does not host essay-writing or meta-analysis agents inside
 the package.
