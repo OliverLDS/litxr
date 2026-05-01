@@ -277,6 +277,14 @@ new_keys <- vapply(seq_len(nrow(rows)), function(i) make_citekey(rows[i, ]), cha
 new_ref_ids <- as.character(rows$ref_id)
 
 if (!isTRUE(parsed$append)) {
+  if (file.exists(output_path)) {
+    stop(
+      "Target BibTeX file already exists: ",
+      normalizePath(output_path, winslash = "/", mustWork = FALSE),
+      ". Use `--append` to add entries to an existing file.",
+      call. = FALSE
+    )
+  }
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   writeLines(format_bib_file_lines(new_entries), output_path)
   cat(sprintf("created=%s\n", normalizePath(output_path, winslash = "/", mustWork = FALSE)))

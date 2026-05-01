@@ -1,3 +1,11 @@
+# litxr 0.0.8
+
+- Tightened `scripts/write_bib_by_ref_ids.R` so create mode now stops if the
+  target `.bib` file already exists and `--append` was not requested.
+- Added `docs/llm-digest-revision-design.md` to document a future revision-aware
+  digest workflow with explicit `schema_version` versus `digest_revision`
+  semantics and append-only digest history.
+
 # litxr 0.0.7.5
 
 - Changed BibTeX formatting so the `title` field is written on the same first

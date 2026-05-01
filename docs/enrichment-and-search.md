@@ -241,4 +241,9 @@ Rscript scripts/build_llm_digest_interactive.R \
 
 The script prints a ready-to-copy prompt, waits for you to download
 `litxr_schema.json`, then validates and writes the digest locally after you
-confirm.
+confirm. On macOS, the prompt is copied to the clipboard with `pbcopy` instead
+of being dumped directly to the terminal.
+
+For a future revision-aware digest workflow that can improve the same paper
+multiple times over time, see
+[llm-digest-revision-design.md](./llm-digest-revision-design.md).
