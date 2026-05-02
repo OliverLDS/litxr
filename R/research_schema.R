@@ -5,13 +5,29 @@
 litxr_paper_type_levels <- function() {
   c(
     "theoretical",
+    "conceptual",
     "empirical_archival",
     "empirical_experimental",
     "empirical_survey",
+    "empirical_qualitative",
     "empirical_case_study",
+    "empirical_mixed_methods",
     "methodological",
-    "review",
+    "computational",
+    "simulation",
+    "benchmark",
+    "system_design",
+    "review_narrative",
+    "review_systematic",
+    "review_scoping",
     "meta_analysis",
+    "replication",
+    "registered_report",
+    "study_protocol",
+    "policy_analysis",
+    "perspective",
+    "commentary",
+    "review",
     "dataset",
     "policy_report",
     "book",
@@ -24,34 +40,114 @@ litxr_paper_type_levels <- function() {
   aliases <- c(
     theory = "theoretical",
     theoretical_paper = "theoretical",
+    conceptual_framework = "conceptual",
+    conceptual_paper = "conceptual",
+    conceptual_model = "conceptual",
     archival = "empirical_archival",
     archive = "empirical_archival",
     empirical_archive = "empirical_archival",
     empirical_archival_study = "empirical_archival",
+    archival_empirical = "empirical_archival",
+    archival_study = "empirical_archival",
+    observational = "empirical_archival",
     experimental = "empirical_experimental",
     experiment = "empirical_experimental",
     empirical_experiment = "empirical_experimental",
+    randomized_experiment = "empirical_experimental",
+    field_experiment = "empirical_experimental",
+    lab_experiment = "empirical_experimental",
     survey = "empirical_survey",
     survey_based = "empirical_survey",
     questionnaire = "empirical_survey",
+    survey_research = "empirical_survey",
+    qualitative = "empirical_qualitative",
+    interview = "empirical_qualitative",
+    ethnography = "empirical_qualitative",
+    grounded_theory = "empirical_qualitative",
+    fieldwork = "empirical_qualitative",
+    discourse_analysis = "empirical_qualitative",
     case = "empirical_case_study",
     case_study = "empirical_case_study",
     empirical_case = "empirical_case_study",
+    case_analysis = "empirical_case_study",
+    mixed = "empirical_mixed_methods",
+    mixed_method = "empirical_mixed_methods",
+    mixed_methods = "empirical_mixed_methods",
     method = "methodological",
     methods = "methodological",
     methodology = "methodological",
-    literature_review = "review",
-    review_article = "review",
-    systematic_review = "review",
+    methodological_paper = "methodological",
+    measurement_method = "methodological",
+    computation = "computational",
+    computational_modeling = "computational",
+    machine_learning = "computational",
+    ml = "computational",
+    algorithmic = "computational",
+    simulate = "simulation",
+    simulation_study = "simulation",
+    monte_carlo = "simulation",
+    montecarlo = "simulation",
+    agent_based_model = "simulation",
+    scenario_simulation = "simulation",
+    benchmarking = "benchmark",
+    benchmark_study = "benchmark",
+    leaderboard = "benchmark",
+    evaluation_benchmark = "benchmark",
+    task_benchmark = "benchmark",
+    architecture = "system_design",
+    system_architecture = "system_design",
+    system_design_paper = "system_design",
+    platform_design = "system_design",
+    implementation = "system_design",
+    narrative_review = "review_narrative",
+    literature_review = "review_narrative",
+    review_article = "review_narrative",
+    overview = "review_narrative",
+    systematic_review = "review_systematic",
+    systematic_literature_review = "review_systematic",
+    scoping_review = "review_scoping",
+    mapping_review = "review_scoping",
+    evidence_map = "review_scoping",
     meta = "meta_analysis",
     meta_analytic = "meta_analysis",
+    meta_analysis = "meta_analysis",
+    replication = "replication",
+    reproduction = "replication",
+    reproducibility = "replication",
+    replicated = "replication",
+    replication_study = "replication",
+    reanalysis = "replication",
+    preregistered = "registered_report",
+    pre_registered = "registered_report",
+    pre_registered_report = "registered_report",
+    registered_report = "registered_report",
+    stage1 = "registered_report",
+    protocol = "study_protocol",
+    trial_protocol = "study_protocol",
+    review_protocol = "study_protocol",
+    study_design = "study_protocol",
+    policy_analysis = "policy_analysis",
     data = "dataset",
     data_paper = "dataset",
     database = "dataset",
+    dataset_paper = "dataset",
     report = "policy_report",
-    policy = "policy_report",
-    policy_brief = "policy_report",
-    policy_study = "policy_report",
+    policy = "policy_analysis",
+    policy_brief = "policy_analysis",
+    policy_study = "policy_analysis",
+    policy_paper = "policy_analysis",
+    governance_analysis = "policy_analysis",
+    regulatory_analysis = "policy_analysis",
+    regulation_analysis = "policy_analysis",
+    perspective = "perspective",
+    viewpoint = "perspective",
+    opinion = "commentary",
+    commentary = "commentary",
+    comment = "commentary",
+    response = "commentary",
+    editorial = "commentary",
+    letter = "commentary",
+    note = "commentary",
     monograph = "book",
     text = "book",
     na = "unknown",
@@ -186,6 +282,14 @@ litxr_validate_paper_type <- function(x) {
   )
 }
 
+.litxr_llm_digest_template_v3 <- function(ref_id) {
+  x <- .litxr_llm_digest_template_v2(ref_id)
+  x$schema_version <- "v3"
+  x$anchor_references <- list()
+  x$citation_logic_nodes <- list()
+  x
+}
+
 .litxr_first_nonnull <- function(...) {
   values <- list(...)
   for (value in values) {
@@ -196,13 +300,38 @@ litxr_validate_paper_type <- function(x) {
   NULL
 }
 
+.litxr_has_inline_llm_tables <- function(digest) {
+  any(c("anchor_references", "citation_logic_nodes") %in% names(digest))
+}
+
+.litxr_inline_llm_table_to_dt <- function(value, ref_id = NULL) {
+  if (is.null(value) || !length(value)) {
+    return(data.table::data.table())
+  }
+  dt <- .litxr_as_research_dt(value)
+  dt <- data.table::copy(dt)
+  if (!("ref_id" %in% names(dt))) {
+    dt$ref_id <- as.character(ref_id %||% "")
+  } else {
+    dt$ref_id <- as.character(dt$ref_id)
+    dt$ref_id[is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))] <- as.character(ref_id %||% "")
+  }
+  data.table::setcolorder(dt, c("ref_id", setdiff(names(dt), "ref_id")))
+  dt
+}
+
 .litxr_normalize_llm_digest_for_write <- function(digest, ref_id = NULL) {
   version <- if (is.null(digest[["schema_version"]]) || !length(digest[["schema_version"]])) {
-    "v2"
+    if (.litxr_has_inline_llm_tables(digest)) "v3" else "v2"
   } else {
     .litxr_llm_digest_schema_version(digest)
   }
-  payload <- .litxr_llm_digest_template_v2(.litxr_first_nonnull(ref_id, digest$ref_id, ""))
+  template_fun <- if (identical(version, "v3") || .litxr_has_inline_llm_tables(digest)) {
+    .litxr_llm_digest_template_v3
+  } else {
+    .litxr_llm_digest_template_v2
+  }
+  payload <- template_fun(.litxr_first_nonnull(ref_id, digest$ref_id, ""))
   if (!identical(version, "v2") && !is.null(digest[["schema_version"]]) && length(digest[["schema_version"]])) {
     payload[["schema_version"]] <- as.character(digest[["schema_version"]][[1]])
   }
@@ -212,6 +341,12 @@ litxr_validate_paper_type <- function(x) {
   }
   payload$ref_id <- as.character(.litxr_first_nonnull(ref_id, payload$ref_id, ""))
   payload$paper_type <- litxr_normalize_paper_type(.litxr_first_nonnull(payload$paper_type, NA_character_))
+  if ("anchor_references" %in% names(payload) || "anchor_references" %in% names(digest)) {
+    payload$anchor_references <- .litxr_inline_llm_table_to_dt(.litxr_first_nonnull(digest$anchor_references, payload$anchor_references), ref_id = payload$ref_id)
+  }
+  if ("citation_logic_nodes" %in% names(payload) || "citation_logic_nodes" %in% names(digest)) {
+    payload$citation_logic_nodes <- .litxr_inline_llm_table_to_dt(.litxr_first_nonnull(digest$citation_logic_nodes, payload$citation_logic_nodes), ref_id = payload$ref_id)
+  }
   if (!identical(version, "v2")) {
     payload$digest_revision <- 1L
     payload$derived_from_revision <- NULL
@@ -245,7 +380,7 @@ litxr_validate_paper_type <- function(x) {
   if (!("schema_version" %in% names(digest))) {
     digest$schema_version <- "v1"
   }
-  if (identical(.litxr_llm_digest_schema_version(digest), "v2")) {
+  if (identical(.litxr_llm_digest_schema_version(digest), "v2") || identical(.litxr_llm_digest_schema_version(digest), "v3")) {
     if (!("digest_revision" %in% names(digest)) || is.null(digest$digest_revision)) {
       digest$digest_revision <- 1L
     }
@@ -264,6 +399,12 @@ litxr_validate_paper_type <- function(x) {
     if (!("updated_at" %in% names(digest))) {
       digest$updated_at <- digest$generated_at %||% NA_character_
     }
+    if (!("anchor_references" %in% names(digest))) {
+      digest$anchor_references <- list()
+    }
+    if (!("citation_logic_nodes" %in% names(digest))) {
+      digest$citation_logic_nodes <- list()
+    }
   }
   if ("paper_type" %in% names(digest)) {
     digest$paper_type <- litxr_normalize_paper_type(digest$paper_type)
@@ -276,7 +417,7 @@ litxr_validate_paper_type <- function(x) {
 }
 
 .litxr_llm_digest_required_fields <- function(schema_version) {
-  if (identical(schema_version, "v2")) {
+  if (identical(schema_version, "v2") || identical(schema_version, "v3")) {
     return(c(
       "schema_version", "ref_id", "digest_revision",
       "extraction_mode", "prompt_version", "model_hint", "paper_type", "summary", "motivation",
@@ -342,6 +483,56 @@ litxr_validate_paper_type <- function(x) {
   }
 }
 
+.litxr_validate_inline_llm_table_field <- function(value, field_name, validator, ref_id = NULL) {
+  if (is.null(value) || !length(value)) {
+    return(invisible(TRUE))
+  }
+  dt <- .litxr_inline_llm_table_to_dt(value)
+  if (!nrow(dt)) {
+    return(invisible(TRUE))
+  }
+  if ("ref_id" %in% names(dt)) {
+    bad_ref <- is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))
+    if (any(bad_ref) && !is.null(ref_id) && nzchar(as.character(ref_id[[1]]))) {
+      dt$ref_id[bad_ref] <- as.character(ref_id[[1]])
+      bad_ref <- is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))
+    }
+    if (any(bad_ref)) {
+      stop("LLM digest field `", field_name, "` contains empty `ref_id` values.", call. = FALSE)
+    }
+  }
+  if (identical(field_name, "anchor_references")) {
+    dt <- .litxr_normalize_anchor_references(dt)
+  } else if (identical(field_name, "citation_logic_nodes")) {
+    dt <- .litxr_normalize_citation_logic_nodes(dt)
+  }
+  if (is.function(validator)) {
+    invisible(TRUE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_validate_inline_llm_table_field <- function(value, field_name, validator, ref_id = NULL) {
+  if (is.null(value) || !length(value)) {
+    return(invisible(TRUE))
+  }
+  dt <- .litxr_inline_llm_table_to_dt(value)
+  if (!nrow(dt)) {
+    return(invisible(TRUE))
+  }
+  if ("ref_id" %in% names(dt)) {
+    bad_ref <- is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))
+    if (any(bad_ref) && !is.null(ref_id) && nzchar(as.character(ref_id[[1]]))) {
+      dt$ref_id[bad_ref] <- as.character(ref_id[[1]])
+      bad_ref <- is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))
+    }
+    if (any(bad_ref)) {
+      stop("LLM digest field `", field_name, "` contains empty `ref_id` values.", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
 .litxr_project_findings_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "findings")
 }
@@ -365,6 +556,20 @@ litxr_validate_paper_type <- function(x) {
   list(
     main = file.path(.litxr_project_findings_dir(cfg), "descriptive_statistics.fst"),
     delta = file.path(.litxr_project_findings_dir(cfg), "descriptive_statistics_delta.fst")
+  )
+}
+
+.litxr_anchor_references_paths <- function(cfg) {
+  list(
+    main = file.path(.litxr_project_findings_dir(cfg), "anchor_references.fst"),
+    delta = file.path(.litxr_project_findings_dir(cfg), "anchor_references_delta.fst")
+  )
+}
+
+.litxr_citation_logic_nodes_paths <- function(cfg) {
+  list(
+    main = file.path(.litxr_project_findings_dir(cfg), "citation_logic_nodes.fst"),
+    delta = file.path(.litxr_project_findings_dir(cfg), "citation_logic_nodes_delta.fst")
   )
 }
 
@@ -420,6 +625,44 @@ litxr_validate_paper_type <- function(x) {
     extraction_method = character(),
     extracted_at = character(),
     notes = character()
+  )
+}
+
+.litxr_empty_anchor_references <- function() {
+  data.table::data.table(
+    ref_id = character(),
+    anchor_rank = integer(),
+    citation_key = character(),
+    anchor_title = character(),
+    anchor_authors = character(),
+    anchor_year = integer(),
+    anchor_ref_id = character(),
+    anchor_role = character(),
+    reason = character(),
+    relationship_to_current_paper = character(),
+    confidence = character(),
+    created_at = character(),
+    updated_at = character()
+  )
+}
+
+.litxr_empty_citation_logic_nodes <- function() {
+  data.table::data.table(
+    ref_id = character(),
+    node_id = character(),
+    claim_sentence = character(),
+    logic_type = character(),
+    subject_text = character(),
+    object_text = character(),
+    modifier_text = character(),
+    evidence_role = character(),
+    confidence = character(),
+    page_or_section = character(),
+    quote_support = character(),
+    citation_use = character(),
+    tags = character(),
+    created_at = character(),
+    updated_at = character()
   )
 }
 
@@ -520,6 +763,405 @@ litxr_validate_paper_type <- function(x) {
   text <- tolower(values)
   q <- tolower(as.character(query[[1]]))
   !is.na(text) & grepl(q, text, fixed = TRUE)
+}
+
+.litxr_scalar_or_default <- function(x, default = NA_character_) {
+  if (is.null(x) || !length(x)) {
+    return(default)
+  }
+  value <- as.character(x[[1]])
+  if (is.na(value) || !nzchar(trimws(value))) {
+    return(default)
+  }
+  value
+}
+
+.litxr_collapse_chr <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(NA_character_)
+  }
+  if (is.list(x)) {
+    x <- unlist(x, use.names = FALSE)
+  }
+  x <- as.character(x)
+  x <- x[!is.na(x) & nzchar(trimws(x))]
+  if (!length(x)) {
+    return(NA_character_)
+  }
+  paste(unique(trimws(x)), collapse = "; ")
+}
+
+.litxr_key_key <- function(x) {
+  tolower(trimws(as.character(x)))
+}
+
+.litxr_normalize_anchor_reference_role <- function(x) {
+  map <- c(
+    theoretical_foundation = "theoretical_foundation",
+    conceptual_foundation = "conceptual_foundation",
+    methodological_foundation = "methodological_foundation",
+    empirical_benchmark = "empirical_benchmark",
+    main_comparison = "main_comparison",
+    motivation = "motivation",
+    contrasting_view = "contrasting_view",
+    problem_origin = "problem_origin",
+    application_context = "application_context",
+    review_anchor = "review_anchor",
+    policy_context = "policy_context",
+    unknown = "unknown",
+    theoretical = "theoretical_foundation",
+    theory = "theoretical_foundation",
+    conceptual = "conceptual_foundation",
+    conceptual_framework = "conceptual_foundation",
+    methodological = "methodological_foundation",
+    method = "methodological_foundation",
+    empirical = "empirical_benchmark",
+    benchmark = "empirical_benchmark",
+    main = "main_comparison",
+    comparison = "main_comparison",
+    main_comparison = "main_comparison",
+    motivation = "motivation",
+    contrasting = "contrasting_view",
+    contrast = "contrasting_view",
+    contrasting_view = "contrasting_view",
+    problem = "problem_origin",
+    problem_origin = "problem_origin",
+    application = "application_context",
+    application_context = "application_context",
+    review = "review_anchor",
+    review_anchor = "review_anchor",
+    policy = "policy_context",
+    policy_context = "policy_context",
+    unknown = "unknown"
+  )
+  key <- .litxr_key_key(x)
+  out <- unname(map[key])
+  out[is.na(out) | !nzchar(out)] <- "unknown"
+  out
+}
+
+.litxr_validate_anchor_reference_role <- function(x) {
+  normalized <- .litxr_normalize_anchor_reference_role(x)
+  bad <- !(normalized %in% c(
+    "theoretical_foundation", "conceptual_foundation", "methodological_foundation",
+    "empirical_benchmark", "main_comparison", "motivation", "contrasting_view",
+    "problem_origin", "application_context", "review_anchor", "policy_context", "unknown"
+  ))
+  if (any(bad)) {
+    stop("Invalid anchor role value(s): ", paste(unique(as.character(x[bad])), collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_normalize_relationship_to_current_paper <- function(x) {
+  map <- c(
+    builds_on = "builds_on",
+    extends = "extends",
+    tests = "tests",
+    applies = "applies",
+    compares_with = "compares_with",
+    contradicts = "contradicts",
+    critiques = "critiques",
+    replicates = "replicates",
+    generalizes = "generalizes",
+    narrows = "narrows",
+    uses_as_context = "uses_as_context",
+    unknown = "unknown",
+    builds_on = "builds_on",
+    build_on = "builds_on",
+    extends = "extends",
+    extension = "extends",
+    tests = "tests",
+    test = "tests",
+    applies = "applies",
+    apply = "applies",
+    compares_with = "compares_with",
+    compare_with = "compares_with",
+    contradicts = "contradicts",
+    contradict = "contradicts",
+    critiques = "critiques",
+    critique = "critiques",
+    replicates = "replicates",
+    replicate = "replicates",
+    generalizes = "generalizes",
+    generalize = "generalizes",
+    narrows = "narrows",
+    narrow = "narrows",
+    uses_as_context = "uses_as_context",
+    use_as_context = "uses_as_context",
+    unknown = "unknown"
+  )
+  key <- .litxr_key_key(x)
+  out <- unname(map[key])
+  out[is.na(out) | !nzchar(out)] <- "unknown"
+  out
+}
+
+.litxr_validate_relationship_to_current_paper <- function(x) {
+  normalized <- .litxr_normalize_relationship_to_current_paper(x)
+  bad <- !(normalized %in% c(
+    "builds_on", "extends", "tests", "applies", "compares_with", "contradicts",
+    "critiques", "replicates", "generalizes", "narrows", "uses_as_context", "unknown"
+  ))
+  if (any(bad)) {
+    stop("Invalid relationship_to_current_paper value(s): ", paste(unique(as.character(x[bad])), collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_anchor_reference_levels <- function() {
+  c(
+    "theoretical_foundation",
+    "conceptual_foundation",
+    "methodological_foundation",
+    "empirical_benchmark",
+    "main_comparison",
+    "motivation",
+    "contrasting_view",
+    "problem_origin",
+    "application_context",
+    "review_anchor",
+    "policy_context",
+    "unknown"
+  )
+}
+
+.litxr_citation_logic_type_levels <- function() {
+  c(
+    "A_improves_B",
+    "A_reduces_B",
+    "A_causes_B",
+    "A_contributes_to_B",
+    "A_is_associated_with_B",
+    "A_predicts_B",
+    "A_mediates_B_and_C",
+    "A_moderates_B_and_C",
+    "A_mitigates_effect_of_B_on_C",
+    "A_amplifies_effect_of_B_on_C",
+    "A_has_limitation_B",
+    "A_faces_challenge_B",
+    "A_creates_risk_B",
+    "A_requires_B",
+    "A_depends_on_B",
+    "A_constrains_B",
+    "A_enables_B",
+    "A_outperforms_B",
+    "A_underperforms_B",
+    "A_is_better_than_B_for_C",
+    "A_is_worse_than_B_for_C",
+    "A_extends_B",
+    "A_contradicts_B",
+    "A_supports_B",
+    "A_represents_B",
+    "A_is_proxy_for_B",
+    "A_measures_B",
+    "A_operationalizes_B",
+    "A_can_be_classified_into_B_C_D",
+    "A_consists_of_B_C_D",
+    "A_has_dimension_B_C_D",
+    "A_introduces_B",
+    "A_proposes_B",
+    "A_reviews_B",
+    "A_synthesizes_B",
+    "A_provides_evidence_for_B",
+    "A_provides_counterevidence_to_B",
+    "unknown"
+  )
+}
+
+.litxr_normalize_citation_logic_type <- function(x) {
+  map <- c(
+    improves = "A_improves_B",
+    reduce = "A_reduces_B",
+    reduces = "A_reduces_B",
+    causes = "A_causes_B",
+    contribute = "A_contributes_to_B",
+    contributes = "A_contributes_to_B",
+    associated = "A_is_associated_with_B",
+    associated_with = "A_is_associated_with_B",
+    predicts = "A_predicts_B",
+    predict = "A_predicts_B",
+    mediates = "A_mediates_B_and_C",
+    moderates = "A_moderates_B_and_C",
+    mitigates = "A_mitigates_effect_of_B_on_C",
+    amplifies = "A_amplifies_effect_of_B_on_C",
+    limitation = "A_has_limitation_B",
+    challenge = "A_faces_challenge_B",
+    risk = "A_creates_risk_B",
+    requires = "A_requires_B",
+    depends = "A_depends_on_B",
+    constrains = "A_constrains_B",
+    enables = "A_enables_B",
+    outperforms = "A_outperforms_B",
+    underperforms = "A_underperforms_B",
+    better_than = "A_is_better_than_B_for_C",
+    worse_than = "A_is_worse_than_B_for_C",
+    extends = "A_extends_B",
+    contradicts = "A_contradicts_B",
+    supports = "A_supports_B",
+    represents = "A_represents_B",
+    proxy = "A_is_proxy_for_B",
+    measures = "A_measures_B",
+    operationalizes = "A_operationalizes_B",
+    classifies = "A_can_be_classified_into_B_C_D",
+    consists = "A_consists_of_B_C_D",
+    dimension = "A_has_dimension_B_C_D",
+    introduces = "A_introduces_B",
+    proposes = "A_proposes_B",
+    reviews = "A_reviews_B",
+    synthesizes = "A_synthesizes_B",
+    evidence = "A_provides_evidence_for_B",
+    counterevidence = "A_provides_counterevidence_to_B",
+    unknown = "unknown"
+  )
+  canonical <- .litxr_citation_logic_type_levels()
+  map <- c(stats::setNames(canonical, tolower(canonical)), map)
+  key <- .litxr_key_key(x)
+  out <- unname(map[key])
+  out[is.na(out) | !nzchar(out)] <- "unknown"
+  out
+}
+
+.litxr_validate_citation_logic_type <- function(x) {
+  normalized <- .litxr_normalize_citation_logic_type(x)
+  bad <- !(normalized %in% .litxr_citation_logic_type_levels())
+  if (any(bad)) {
+    stop("Invalid logic_type value(s): ", paste(unique(as.character(x[bad])), collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_evidence_role_levels <- function() {
+  c(
+    "main_finding",
+    "secondary_finding",
+    "theoretical_argument",
+    "conceptual_argument",
+    "methodological_claim",
+    "review_synthesis",
+    "policy_argument",
+    "background_context",
+    "counterevidence",
+    "limitation_note",
+    "example",
+    "unknown"
+  )
+}
+
+.litxr_normalize_evidence_role <- function(x) {
+  map <- c(
+    main_finding = "main_finding",
+    secondary_finding = "secondary_finding",
+    theoretical_argument = "theoretical_argument",
+    conceptual_argument = "conceptual_argument",
+    methodological_claim = "methodological_claim",
+    review_synthesis = "review_synthesis",
+    policy_argument = "policy_argument",
+    background_context = "background_context",
+    counterevidence = "counterevidence",
+    limitation_note = "limitation_note",
+    example = "example",
+    unknown = "unknown",
+    main_finding = "main_finding",
+    secondary_finding = "secondary_finding",
+    theoretical_argument = "theoretical_argument",
+    conceptual_argument = "conceptual_argument",
+    methodological_claim = "methodological_claim",
+    review_synthesis = "review_synthesis",
+    policy_argument = "policy_argument",
+    background_context = "background_context",
+    counterevidence = "counterevidence",
+    limitation = "limitation_note",
+    limitation_note = "limitation_note",
+    example = "example",
+    unknown = "unknown"
+  )
+  key <- .litxr_key_key(x)
+  out <- unname(map[key])
+  out[is.na(out) | !nzchar(out)] <- "unknown"
+  out
+}
+
+.litxr_validate_evidence_role <- function(x) {
+  normalized <- .litxr_normalize_evidence_role(x)
+  bad <- !(normalized %in% .litxr_evidence_role_levels())
+  if (any(bad)) {
+    stop("Invalid evidence_role value(s): ", paste(unique(as.character(x[bad])), collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_confidence_levels <- function() {
+  c("low", "medium", "high", "unknown")
+}
+
+.litxr_normalize_confidence <- function(x) {
+  map <- c(
+    low = "low",
+    medium = "medium",
+    high = "high",
+    unknown = "unknown"
+  )
+  key <- .litxr_key_key(x)
+  out <- unname(map[key])
+  out[is.na(out) | !nzchar(out)] <- "unknown"
+  out
+}
+
+.litxr_validate_confidence <- function(x) {
+  normalized <- .litxr_normalize_confidence(x)
+  bad <- !(normalized %in% .litxr_confidence_levels())
+  if (any(bad)) {
+    stop("Invalid confidence value(s): ", paste(unique(as.character(x[bad])), collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_normalize_anchor_references <- function(x) {
+  dt <- .litxr_align_columns(.litxr_as_research_dt(x), .litxr_empty_anchor_references())
+  dt <- data.table::copy(dt)
+  char_cols <- setdiff(names(dt), c("anchor_rank", "anchor_year"))
+  for (name in char_cols) {
+    dt[[name]] <- as.character(dt[[name]])
+  }
+  dt$anchor_rank <- as.integer(dt$anchor_rank)
+  dt$anchor_year <- as.integer(dt$anchor_year)
+  dt$ref_id <- as.character(dt$ref_id)
+  dt$anchor_title <- as.character(dt$anchor_title)
+  dt$anchor_authors <- as.character(dt$anchor_authors)
+  dt$anchor_ref_id <- as.character(dt$anchor_ref_id)
+  dt$reason <- as.character(dt$reason)
+  dt$created_at <- as.character(dt$created_at)
+  dt$updated_at <- as.character(dt$updated_at)
+  dt$citation_key <- as.character(dt$citation_key)
+  dt$anchor_role <- .litxr_normalize_anchor_reference_role(dt$anchor_role)
+  dt$relationship_to_current_paper <- .litxr_normalize_relationship_to_current_paper(dt$relationship_to_current_paper)
+  dt$confidence <- .litxr_normalize_confidence(dt$confidence)
+  dt
+}
+
+.litxr_normalize_citation_logic_nodes <- function(x) {
+  dt <- .litxr_align_columns(.litxr_as_research_dt(x), .litxr_empty_citation_logic_nodes())
+  dt <- data.table::copy(dt)
+  for (name in names(dt)) {
+    dt[[name]] <- as.character(dt[[name]])
+  }
+  dt$ref_id <- as.character(dt$ref_id)
+  dt$node_id <- as.character(dt$node_id)
+  dt$claim_sentence <- as.character(dt$claim_sentence)
+  dt$logic_type <- .litxr_normalize_citation_logic_type(dt$logic_type)
+  dt$subject_text <- as.character(dt$subject_text)
+  dt$object_text <- as.character(dt$object_text)
+  dt$modifier_text <- as.character(dt$modifier_text)
+  dt$evidence_role <- .litxr_normalize_evidence_role(dt$evidence_role)
+  dt$confidence <- .litxr_normalize_confidence(dt$confidence)
+  dt$page_or_section <- as.character(dt$page_or_section)
+  dt$quote_support <- as.character(dt$quote_support)
+  dt$citation_use <- as.character(dt$citation_use)
+  dt$tags <- vapply(dt$tags, .litxr_collapse_chr, character(1))
+  dt$created_at <- as.character(dt$created_at)
+  dt$updated_at <- as.character(dt$updated_at)
+  dt
 }
 
 #' Template row for standardized findings
@@ -880,6 +1522,349 @@ litxr_rebuild_descriptive_stats <- function(config = NULL) {
   litxr_compact_descriptive_stats(config = config)
 }
 
+#' Template row for anchor references
+#'
+#' @return One-row `data.table` with the anchor references schema.
+#' @export
+litxr_anchor_references_template <- function() {
+  data.table::data.table(
+    ref_id = "",
+    anchor_rank = 1L,
+    citation_key = NA_character_,
+    anchor_title = NA_character_,
+    anchor_authors = NA_character_,
+    anchor_year = NA_integer_,
+    anchor_ref_id = NA_character_,
+    anchor_role = "unknown",
+    reason = NA_character_,
+    relationship_to_current_paper = "unknown",
+    confidence = "unknown",
+    created_at = NA_character_,
+    updated_at = NA_character_
+  )
+}
+
+#' Validate anchor references rows
+#'
+#' @param anchors Data frame, data.table, or named list of anchor-reference
+#'   rows.
+#'
+#' @return Invisibly returns `TRUE` on success.
+#' @export
+litxr_validate_anchor_references <- function(anchors) {
+  dt <- .litxr_normalize_anchor_references(anchors)
+  bad_ref <- is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))
+  if (any(bad_ref)) {
+    stop("Anchor references require non-empty `ref_id` values.", call. = FALSE)
+  }
+  bad_rank <- is.na(dt$anchor_rank) | dt$anchor_rank < 1L
+  if (any(bad_rank)) {
+    stop("Anchor references require positive integer `anchor_rank` values.", call. = FALSE)
+  }
+  if (any(duplicated(dt[, c("ref_id", "anchor_rank"), with = FALSE])) ) {
+    stop("Anchor references require unique `ref_id` + `anchor_rank` pairs.", call. = FALSE)
+  }
+  .litxr_validate_anchor_reference_role(dt$anchor_role)
+  .litxr_validate_relationship_to_current_paper(dt$relationship_to_current_paper)
+  .litxr_validate_confidence(dt$confidence)
+  invisible(TRUE)
+}
+
+#' Write anchor references rows to the project delta store
+#'
+#' @param anchors Data frame, data.table, or named list of anchor-reference
+#'   rows.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the delta fst path.
+#' @export
+litxr_write_anchor_references <- function(anchors, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  rows <- .litxr_normalize_anchor_references(anchors)
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  rows$created_at[is.na(rows$created_at) | !nzchar(rows$created_at)] <- now
+  rows$updated_at[is.na(rows$updated_at) | !nzchar(rows$updated_at)] <- now
+  litxr_validate_anchor_references(rows)
+  .litxr_ensure_project_findings_dir(cfg)
+  paths <- .litxr_anchor_references_paths(cfg)
+  existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_anchor_references)
+  merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "anchor_rank"))
+  .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
+  invisible(paths$delta)
+}
+
+#' Read anchor references from main and delta stores
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param ref_ids Optional character vector of `ref_id` values to keep.
+#'
+#' @return `data.table` of anchor references.
+#' @export
+litxr_read_anchor_references <- function(config = NULL, ref_ids = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  paths <- .litxr_anchor_references_paths(cfg)
+  main <- .litxr_read_fst_or_empty(paths$main, .litxr_empty_anchor_references)
+  delta <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_anchor_references)
+  out <- .litxr_upsert_table_by_key(main, delta, c("ref_id", "anchor_rank"))
+  out <- .litxr_normalize_anchor_references(out)
+  if (!is.null(ref_ids) && length(ref_ids)) {
+    out <- out[out$ref_id %in% as.character(ref_ids), ]
+  }
+  out
+}
+
+#' Find anchor references rows
+#'
+#' @param query Optional substring query over text fields.
+#' @param ref_id Optional exact `ref_id` filter.
+#' @param anchor_rank Optional exact `anchor_rank` filter.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Filtered `data.table`.
+#' @export
+litxr_find_anchor_references <- function(query = NULL, ref_id = NULL, anchor_rank = NULL, config = NULL) {
+  out <- litxr_read_anchor_references(config = config, ref_ids = ref_id)
+  if (!nrow(out)) {
+    return(out)
+  }
+  if (!is.null(anchor_rank) && length(anchor_rank)) {
+    out <- out[out$anchor_rank %in% as.integer(anchor_rank), ]
+  }
+  if (!is.null(query) && nzchar(as.character(query[[1]]))) {
+    text <- paste(
+      out$citation_key,
+      out$anchor_title,
+      out$anchor_authors,
+      out$anchor_ref_id,
+      out$anchor_role,
+      out$reason,
+      out$relationship_to_current_paper,
+      out$confidence,
+      out$created_at,
+      out$updated_at
+    )
+    out <- out[.litxr_research_query_keep(text, query), ]
+  }
+  out
+}
+
+#' Compact anchor references delta into the main store
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the main fst path.
+#' @export
+litxr_compact_anchor_references <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_ensure_project_findings_dir(cfg)
+  paths <- .litxr_anchor_references_paths(cfg)
+  main <- .litxr_read_fst_or_empty(paths$main, .litxr_empty_anchor_references)
+  delta <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_anchor_references)
+  merged <- .litxr_upsert_table_by_key(
+    .litxr_normalize_anchor_references(main),
+    .litxr_normalize_anchor_references(delta),
+    c("ref_id", "anchor_rank")
+  )
+  .litxr_write_fst_atomic(as.data.frame(merged), paths$main)
+  if (file.exists(paths$delta)) {
+    unlink(paths$delta)
+  }
+  invisible(paths$main)
+}
+
+#' Rebuild anchor references main store from current local tables
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the rebuilt main fst path.
+#' @export
+litxr_rebuild_anchor_references <- function(config = NULL) {
+  litxr_compact_anchor_references(config = config)
+}
+
+#' Template row for citation logic nodes
+#'
+#' @return One-row `data.table` with the citation logic nodes schema.
+#' @export
+litxr_citation_logic_nodes_template <- function() {
+  data.table::data.table(
+    ref_id = "",
+    node_id = "",
+    claim_sentence = NA_character_,
+    logic_type = "unknown",
+    subject_text = NA_character_,
+    object_text = NA_character_,
+    modifier_text = NA_character_,
+    evidence_role = "unknown",
+    confidence = "unknown",
+    page_or_section = NA_character_,
+    quote_support = NA_character_,
+    citation_use = NA_character_,
+    tags = NA_character_,
+    created_at = NA_character_,
+    updated_at = NA_character_
+  )
+}
+
+#' Validate citation logic node rows
+#'
+#' @param nodes Data frame, data.table, or named list of citation-logic rows.
+#'
+#' @return Invisibly returns `TRUE` on success.
+#' @export
+litxr_validate_citation_logic_nodes <- function(nodes) {
+  dt <- .litxr_normalize_citation_logic_nodes(nodes)
+  bad_ref <- is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))
+  if (any(bad_ref)) {
+    stop("Citation logic nodes require non-empty `ref_id` values.", call. = FALSE)
+  }
+  bad_node <- is.na(dt$node_id) | !nzchar(trimws(dt$node_id))
+  if (any(bad_node)) {
+    stop("Citation logic nodes require non-empty `node_id` values.", call. = FALSE)
+  }
+  bad_claim <- is.na(dt$claim_sentence) | !nzchar(trimws(dt$claim_sentence))
+  if (any(bad_claim)) {
+    stop("Citation logic nodes require non-empty `claim_sentence` values.", call. = FALSE)
+  }
+  if (any(duplicated(dt[, c("ref_id", "node_id"), with = FALSE]))) {
+    stop("Citation logic nodes require unique `ref_id` + `node_id` pairs.", call. = FALSE)
+  }
+  .litxr_validate_citation_logic_type(dt$logic_type)
+  .litxr_validate_evidence_role(dt$evidence_role)
+  .litxr_validate_confidence(dt$confidence)
+  invisible(TRUE)
+}
+
+#' Write citation logic nodes to the project delta store
+#'
+#' @param nodes Data frame, data.table, or named list of citation-logic rows.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the delta fst path.
+#' @export
+litxr_write_citation_logic_nodes <- function(nodes, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  rows <- .litxr_normalize_citation_logic_nodes(nodes)
+  now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  rows$created_at[is.na(rows$created_at) | !nzchar(rows$created_at)] <- now
+  rows$updated_at[is.na(rows$updated_at) | !nzchar(rows$updated_at)] <- now
+  litxr_validate_citation_logic_nodes(rows)
+  .litxr_ensure_project_findings_dir(cfg)
+  paths <- .litxr_citation_logic_nodes_paths(cfg)
+  existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_citation_logic_nodes)
+  merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "node_id"))
+  .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
+  invisible(paths$delta)
+}
+
+#' Read citation logic nodes from main and delta stores
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param ref_ids Optional character vector of `ref_id` values to keep.
+#'
+#' @return `data.table` of citation logic nodes.
+#' @export
+litxr_read_citation_logic_nodes <- function(config = NULL, ref_ids = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  paths <- .litxr_citation_logic_nodes_paths(cfg)
+  main <- .litxr_read_fst_or_empty(paths$main, .litxr_empty_citation_logic_nodes)
+  delta <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_citation_logic_nodes)
+  out <- .litxr_upsert_table_by_key(main, delta, c("ref_id", "node_id"))
+  out <- .litxr_normalize_citation_logic_nodes(out)
+  if (!is.null(ref_ids) && length(ref_ids)) {
+    out <- out[out$ref_id %in% as.character(ref_ids), ]
+  }
+  out
+}
+
+#' Find citation logic nodes
+#'
+#' @param query Optional substring query over text fields.
+#' @param ref_id Optional exact `ref_id` filter.
+#' @param node_id Optional exact `node_id` filter.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Filtered `data.table`.
+#' @export
+litxr_find_citation_logic_nodes <- function(query = NULL, ref_id = NULL, node_id = NULL, config = NULL) {
+  out <- litxr_read_citation_logic_nodes(config = config, ref_ids = ref_id)
+  if (!nrow(out)) {
+    return(out)
+  }
+  if (!is.null(node_id) && length(node_id)) {
+    out <- out[out$node_id %in% as.character(node_id), ]
+  }
+  if (!is.null(query) && nzchar(as.character(query[[1]]))) {
+    text <- paste(
+      out$claim_sentence,
+      out$logic_type,
+      out$subject_text,
+      out$object_text,
+      out$modifier_text,
+      out$evidence_role,
+      out$confidence,
+      out$page_or_section,
+      out$quote_support,
+      out$citation_use,
+      out$tags,
+      out$created_at,
+      out$updated_at
+    )
+    out <- out[.litxr_research_query_keep(text, query), ]
+  }
+  out
+}
+
+#' Compact citation logic nodes delta into the main store
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the main fst path.
+#' @export
+litxr_compact_citation_logic_nodes <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_ensure_project_findings_dir(cfg)
+  paths <- .litxr_citation_logic_nodes_paths(cfg)
+  main <- .litxr_read_fst_or_empty(paths$main, .litxr_empty_citation_logic_nodes)
+  delta <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_citation_logic_nodes)
+  merged <- .litxr_upsert_table_by_key(
+    .litxr_normalize_citation_logic_nodes(main),
+    .litxr_normalize_citation_logic_nodes(delta),
+    c("ref_id", "node_id")
+  )
+  .litxr_write_fst_atomic(as.data.frame(merged), paths$main)
+  if (file.exists(paths$delta)) {
+    unlink(paths$delta)
+  }
+  invisible(paths$main)
+}
+
+#' Rebuild citation logic nodes main store from current local tables
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Invisibly returns the rebuilt main fst path.
+#' @export
+litxr_rebuild_citation_logic_nodes <- function(config = NULL) {
+  litxr_compact_citation_logic_nodes(config = config)
+}
+
 #' Read project-level research schema coverage
 #'
 #' Summarizes markdown, LLM digest, standardized findings, and descriptive
@@ -911,7 +1896,11 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
       has_standardized_findings = logical(),
       n_standardized_findings = integer(),
       has_descriptive_stats = logical(),
-      n_descriptive_stats = integer()
+      n_descriptive_stats = integer(),
+      has_anchor_references = logical(),
+      n_anchor_references = integer(),
+      has_citation_logic_nodes = logical(),
+      n_citation_logic_nodes = integer()
     ))
   }
 
@@ -920,6 +1909,8 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   digests <- litxr_read_llm_digests(cfg)
   findings <- litxr_read_standardized_findings(cfg)
   desc_stats <- litxr_read_descriptive_stats(cfg)
+  anchors <- litxr_read_anchor_references(cfg)
+  logic_nodes <- litxr_read_citation_logic_nodes(cfg)
 
   collection_map <- if (nrow(links)) {
     split_ids <- split(as.character(links$collection_id), as.character(links$ref_id))
@@ -948,6 +1939,24 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     )
   } else {
     data.table::data.table(ref_id = character(), n_descriptive_stats = integer())
+  }
+  anchor_counts <- if (nrow(anchors)) {
+    counts <- table(as.character(anchors$ref_id))
+    data.table::data.table(
+      ref_id = names(counts),
+      n_anchor_references = as.integer(counts)
+    )
+  } else {
+    data.table::data.table(ref_id = character(), n_anchor_references = integer())
+  }
+  logic_counts <- if (nrow(logic_nodes)) {
+    counts <- table(as.character(logic_nodes$ref_id))
+    data.table::data.table(
+      ref_id = names(counts),
+      n_citation_logic_nodes = as.integer(counts)
+    )
+  } else {
+    data.table::data.table(ref_id = character(), n_citation_logic_nodes = integer())
   }
 
   out <- data.table::data.table(
@@ -983,14 +1992,20 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   }
   out <- merge(out, finding_counts, by = "ref_id", all.x = TRUE)
   out <- merge(out, desc_counts, by = "ref_id", all.x = TRUE)
+  out <- merge(out, anchor_counts, by = "ref_id", all.x = TRUE)
+  out <- merge(out, logic_counts, by = "ref_id", all.x = TRUE)
 
   out$collection_ids[is.na(out$collection_ids)] <- ""
   out$has_md[is.na(out$has_md)] <- FALSE
   out$has_llm_digest[is.na(out$has_llm_digest)] <- FALSE
   out$n_standardized_findings[is.na(out$n_standardized_findings)] <- 0L
   out$n_descriptive_stats[is.na(out$n_descriptive_stats)] <- 0L
+  out$n_anchor_references[is.na(out$n_anchor_references)] <- 0L
+  out$n_citation_logic_nodes[is.na(out$n_citation_logic_nodes)] <- 0L
   out$has_standardized_findings <- out$n_standardized_findings > 0L
   out$has_descriptive_stats <- out$n_descriptive_stats > 0L
+  out$has_anchor_references <- out$n_anchor_references > 0L
+  out$has_citation_logic_nodes <- out$n_citation_logic_nodes > 0L
 
   if (!is.null(collection_id) && nzchar(as.character(collection_id[[1]]))) {
     keep_id <- as.character(collection_id[[1]])
@@ -1004,7 +2019,9 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     "ref_id", "title", "entry_type", "collection_ids",
     "has_md", "has_llm_digest", "llm_schema_version", "llm_paper_type",
     "has_standardized_findings", "n_standardized_findings",
-    "has_descriptive_stats", "n_descriptive_stats"
+    "has_descriptive_stats", "n_descriptive_stats",
+    "has_anchor_references", "n_anchor_references",
+    "has_citation_logic_nodes", "n_citation_logic_nodes"
   ), with = FALSE]
 }
 
@@ -1014,6 +2031,8 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     llm_digest = status_dt[!status_dt$has_llm_digest, ],
     standardized_findings = status_dt[!status_dt$has_standardized_findings, ],
     descriptive_stats = status_dt[!status_dt$has_descriptive_stats, ],
+    anchor_references = status_dt[!status_dt$has_anchor_references, ],
+    citation_logic_nodes = status_dt[!status_dt$has_citation_logic_nodes, ],
     stop("Unsupported missing type: ", missing_type, call. = FALSE)
   )
 }
@@ -1063,6 +2082,38 @@ litxr_find_refs_missing_descriptive_stats <- function(config = NULL, collection_
   .litxr_filter_missing_research_status(
     litxr_read_research_schema_status(config = config, collection_id = collection_id, ref_ids = ref_ids),
     "descriptive_stats"
+  )
+}
+
+#' Find references missing anchor references
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return Filtered `data.table` from `litxr_read_research_schema_status()`.
+#' @export
+litxr_find_refs_missing_anchor_references <- function(config = NULL, collection_id = NULL, ref_ids = NULL) {
+  .litxr_filter_missing_research_status(
+    litxr_read_research_schema_status(config = config, collection_id = collection_id, ref_ids = ref_ids),
+    "anchor_references"
+  )
+}
+
+#' Find references missing citation logic nodes
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_id Optional collection membership filter.
+#' @param ref_ids Optional character vector of reference ids to keep.
+#'
+#' @return Filtered `data.table` from `litxr_read_research_schema_status()`.
+#' @export
+litxr_find_refs_missing_citation_logic_nodes <- function(config = NULL, collection_id = NULL, ref_ids = NULL) {
+  .litxr_filter_missing_research_status(
+    litxr_read_research_schema_status(config = config, collection_id = collection_id, ref_ids = ref_ids),
+    "citation_logic_nodes"
   )
 }
 

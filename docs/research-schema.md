@@ -29,13 +29,29 @@ Use:
 Canonical levels:
 
 - `theoretical`
+- `conceptual`
 - `empirical_archival`
 - `empirical_experimental`
 - `empirical_survey`
+- `empirical_qualitative`
 - `empirical_case_study`
+- `empirical_mixed_methods`
 - `methodological`
-- `review`
+- `computational`
+- `simulation`
+- `benchmark`
+- `system_design`
+- `review_narrative`
+- `review_systematic`
+- `review_scoping`
 - `meta_analysis`
+- `replication`
+- `registered_report`
+- `study_protocol`
+- `policy_analysis`
+- `perspective`
+- `commentary`
+- `review`
 - `dataset`
 - `policy_report`
 - `book`
@@ -43,6 +59,8 @@ Canonical levels:
 
 Normalization lowercases, trims, replaces spaces and hyphens with underscores,
 maps common aliases, and falls back to `unknown` for missing or empty values.
+Legacy labels such as `review`, `dataset`, `policy_report`, and `book` remain
+accepted for backward compatibility.
 
 ## Digest Schema V2
 
@@ -79,6 +97,15 @@ Backward compatibility:
 - validation remains version-aware instead of forcing old files into the new
   shape
 - new writes use `paper_type` normalization automatically
+
+Optional schema-v3 inline fields:
+
+- `anchor_references`
+- `citation_logic_nodes`
+
+These are carried through when a digest is written with schema `v3`, and the
+same project-level tables can also be maintained independently under
+`project.data_root/findings/`.
 
 ## Standardized Findings Table
 
@@ -126,6 +153,52 @@ Design:
 - read as `main + delta` merged by `ref_id + table_id + variable`
 - allow incomplete numeric statistics with `NA`
 
+## Anchor References Table
+
+Project-level paths:
+
+- `project.data_root/findings/anchor_references.fst`
+- `project.data_root/findings/anchor_references_delta.fst`
+
+Helpers:
+
+- `litxr_anchor_references_template()`
+- `litxr_validate_anchor_references()`
+- `litxr_write_anchor_references()`
+- `litxr_read_anchor_references()`
+- `litxr_find_anchor_references()`
+- `litxr_compact_anchor_references()`
+- `litxr_rebuild_anchor_references()`
+
+Design:
+
+- write new or updated rows into the delta store
+- read as `main + delta` merged by `ref_id + anchor_rank`
+- compact explicitly to rewrite the main store and clear delta
+
+## Citation Logic Nodes Table
+
+Project-level paths:
+
+- `project.data_root/findings/citation_logic_nodes.fst`
+- `project.data_root/findings/citation_logic_nodes_delta.fst`
+
+Helpers:
+
+- `litxr_citation_logic_nodes_template()`
+- `litxr_validate_citation_logic_nodes()`
+- `litxr_write_citation_logic_nodes()`
+- `litxr_read_citation_logic_nodes()`
+- `litxr_find_citation_logic_nodes()`
+- `litxr_compact_citation_logic_nodes()`
+- `litxr_rebuild_citation_logic_nodes()`
+
+Design:
+
+- write new or updated rows into the delta store
+- read as `main + delta` merged by `ref_id + node_id`
+- compact explicitly to rewrite the main store and clear delta
+
 ## Main / Delta / Compact Pattern
 
 The new research-analysis tables reuse the package’s existing local-data
@@ -146,6 +219,8 @@ Use:
 - `litxr_find_refs_missing_llm_digest()`
 - `litxr_find_refs_missing_standardized_findings()`
 - `litxr_find_refs_missing_descriptive_stats()`
+- `litxr_find_refs_missing_anchor_references()`
+- `litxr_find_refs_missing_citation_logic_nodes()`
 
 For digest maintenance, use:
 

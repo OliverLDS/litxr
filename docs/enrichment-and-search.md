@@ -185,6 +185,11 @@ Helpers:
 The `paper_type` field uses the canonical vocabulary returned by
 `litxr_paper_type_levels()`.
 
+Schema `v3` digests may also carry optional inline `anchor_references` and
+`citation_logic_nodes` fields. Those are validated and preserved when present,
+but the same information can also be stored as separate project-level tables
+under `project.data_root/findings/`.
+
 ## Building Digests
 
 Single-reference build:

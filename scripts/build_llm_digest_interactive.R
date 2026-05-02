@@ -12,7 +12,7 @@ parse_args <- function(args) {
     ref_id = NULL,
     json_path = "~/Downloads/litxr_schema.json",
     mode = "create",
-    prompt_version = "v2.1"
+    prompt_version = "v3.0"
   )
   i <- 1L
 
@@ -51,15 +51,15 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/build_llm_digest_interactive.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json] [--mode create|revise] [--prompt-version v2.1]",
+      "  Rscript scripts/build_llm_digest_interactive.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json] [--mode create|revise] [--prompt-version v3.0]",
       "",
       "Options:",
-      "  --ref-id REF_ID     Canonical litxr ref_id to build a schema-v2 digest for.",
+      "  --ref-id REF_ID     Canonical litxr ref_id to build a schema-v3 digest for.",
       "  --json-path PATH    Downloaded JSON path to ingest after ChatGPT returns the schema.",
       "                      Default: ~/Downloads/litxr_schema.json",
       "  --mode MODE         Either `create` or `revise`. Default: create",
       "  --prompt-version V  Prompt template version metadata to store on ingest.",
-      "                      Default: v2.1",
+      "                      Default: v3.0",
       "  -h, --help          Show this help message.",
       "",
       "Workflow:",
@@ -113,7 +113,7 @@ title_value <- as_scalar_chr(ref$title, ref_id)
 doi_value <- as_scalar_chr(ref$doi)
 source_value <- as_scalar_chr(ref$source)
 source_id_value <- as_scalar_chr(ref$source_id)
-template <- litxr::litxr_llm_digest_template(ref_id)
+template <- litxr::litxr_llm_digest_template(ref_id, schema_version = "v3")
 existing_digest <- litxr::litxr_read_llm_digest(ref_id, cfg)
 if (identical(mode, "create") && !is.null(existing_digest)) {
   stop("A local digest already exists for this ref_id. Use `--mode revise` to improve it.", call. = FALSE)
@@ -128,6 +128,7 @@ template_json <- jsonlite::toJSON(
   null = "null",
   na = "null"
 )
+paper_type_vocab <- paste(litxr::litxr_paper_type_levels(), collapse = ", ")
 
 id_lines <- c(sprintf("ref_id: %s", ref_id))
 if (!is.na(doi_value)) id_lines <- c(id_lines, sprintf("doi: %s", doi_value))
@@ -137,7 +138,7 @@ if (!is.na(source_id_value) && !identical(source_id_value, ref_id)) {
 }
 
 prompt_lines <- c(
-  "You are helping build a structured litxr schema-v2 JSON digest for one academic paper.",
+  "You are helping build a structured litxr schema-v3 JSON digest for one academic paper.",
   "",
   "Paper metadata:",
   sprintf("title: %s", title_value),
@@ -149,16 +150,21 @@ prompt_lines <- c(
   "3. If HTML full text is not available, try to find a PDF version.",
   "4. Make sure you actually read the full text instead of guessing from abstract or metadata only.",
   "5. If you cannot find the full text, say clearly that you cannot find it and do not invent details.",
-  "6. After reading the full text, parse the paper into the exact JSON schema below.",
+  "6. After reading the full text, parse the paper into the exact schema-v3 JSON below.",
   "7. Return a downloadable JSON file named litxr_schema.json.",
   "8. Do not add extra keys beyond this schema unless they already exist in the schema.",
   "9. Keep unknown fields explicit with null, empty string, or empty arrays as appropriate; do not guess.",
-  sprintf("10. This extraction is in `%s` mode with prompt_version `%s`.", mode, parsed$prompt_version),
+  sprintf("10. The accepted paper_type vocabulary is: %s.", paper_type_vocab),
+  sprintf("11. This extraction is in `%s` mode with prompt_version `%s`.", mode, parsed$prompt_version),
+  "12. Populate the optional inline v3 blocks explicitly when supported by the paper:",
+  "    - anchor_references",
+  "    - citation_logic_nodes",
+  "    Use these inline blocks to provide up to three anchor references and reusable citation logic sentences.",
   "",
   if (identical(mode, "revise")) "Existing local digest to improve:" else NULL,
   if (identical(mode, "revise")) jsonlite::toJSON(existing_digest, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null") else NULL,
   if (identical(mode, "revise")) "" else NULL,
-  if (identical(mode, "revise")) "Revise the existing digest rather than rewriting blindly. Preserve correct fields, correct mistakes, and improve incomplete fields when the full text supports it." else NULL,
+  if (identical(mode, "revise")) "Revise the existing digest rather than rewriting blindly. Preserve correct fields, correct mistakes, and improve incomplete fields when the full text supports it. Keep the inline anchor_references and citation_logic_nodes blocks current and explicit." else NULL,
   if (identical(mode, "revise")) "" else NULL,
   "Return JSON matching this schema exactly:",
   template_json

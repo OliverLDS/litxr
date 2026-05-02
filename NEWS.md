@@ -1,3 +1,12 @@
+# litxr 0.0.8.2
+
+- Wired the project-level `anchor_references` and `citation_logic_nodes`
+  tables into optional schema-v3 inline digest fields.
+- Updated `scripts/build_llm_digest_interactive.R` to prompt for schema-v3 and
+  explicitly request inline anchor and citation-logic blocks.
+- Kept the standalone project-level anchor and citation-logic tables separate
+  from the inline digest shape so they remain searchable and compactable.
+
 # litxr 0.0.8.1
 
 - Added revision-aware LLM digest writes with `digest_revision`,

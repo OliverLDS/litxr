@@ -2252,14 +2252,17 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 #' Create a default structured LLM digest template
 #'
 #' @param ref_id Reference identifier.
-#' @param schema_version Digest schema version. Currently only `"v2"` is
-#'   supported for new templates.
+#' @param schema_version Digest schema version. Supported values are `"v2"`
+#'   and `"v3"`.
 #'
 #' @return Named list representing the default digest schema.
 #' @export
 litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {
-  if (!identical(schema_version, "v2")) {
-    stop("Only `schema_version = \"v2\"` is supported for new templates in the current package version.", call. = FALSE)
+  if (!identical(schema_version, "v2") && !identical(schema_version, "v3")) {
+    stop("Only `schema_version = \"v2\"` or `\"v3\"` is supported for new templates in the current package version.", call. = FALSE)
+  }
+  if (identical(schema_version, "v3")) {
+    return(.litxr_llm_digest_template_v3(ref_id))
   }
   .litxr_llm_digest_template_v2(ref_id)
 }
@@ -2506,6 +2509,8 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
       standardized_findings_summary = x$standardized_findings_summary %||% NA_character_,
       contribution_type = list(unlist(x$contribution_type %||% character(), use.names = FALSE)),
       evidence_strength = x$evidence_strength %||% NA_character_,
+      anchor_references = list(x$anchor_references %||% list()),
+      citation_logic_nodes = list(x$citation_logic_nodes %||% list()),
       keywords = list(unlist(x$keywords %||% character(), use.names = FALSE)),
       notes = x$notes %||% NA_character_,
       generated_at = x$generated_at %||% NA_character_,
@@ -2572,6 +2577,8 @@ litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, co
           flatten_cell(row$empirical_setting[[1]]),
           flatten_cell(row$descriptive_statistics_summary[[1]]),
           flatten_cell(row$standardized_findings_summary[[1]]),
+          flatten_cell(row$anchor_references[[1]]),
+          flatten_cell(row$citation_logic_nodes[[1]]),
           flatten_cell(row$contribution_type[[1]]),
           flatten_cell(row$evidence_strength[[1]]),
           flatten_cell(row$keywords[[1]])
@@ -2750,7 +2757,7 @@ litxr_validate_llm_digest <- function(digest) {
     stop("LLM digest is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
   }
 
-  if (identical(schema_version, "v2")) {
+  if (identical(schema_version, "v2") || identical(schema_version, "v3")) {
     litxr_validate_paper_type(digest$paper_type)
     digest_revision <- suppressWarnings(as.integer(digest$digest_revision[[1]] %||% digest$digest_revision))
     if (length(digest_revision) != 1L || is.na(digest_revision) || digest_revision < 1L) {
@@ -2792,6 +2799,22 @@ litxr_validate_llm_digest <- function(digest) {
         "control_variables", "mechanism_variables"
       )
     )
+    if ("anchor_references" %in% names(digest)) {
+      .litxr_validate_inline_llm_table_field(
+        digest$anchor_references,
+        "anchor_references",
+        litxr_validate_anchor_references,
+        ref_id = digest$ref_id %||% NULL
+      )
+    }
+    if ("citation_logic_nodes" %in% names(digest)) {
+      .litxr_validate_inline_llm_table_field(
+        digest$citation_logic_nodes,
+        "citation_logic_nodes",
+        litxr_validate_citation_logic_nodes,
+        ref_id = digest$ref_id %||% NULL
+      )
+    }
   } else {
     if (!is.list(digest$sample)) {
       stop("LLM digest field `sample` must be a named list.", call. = FALSE)

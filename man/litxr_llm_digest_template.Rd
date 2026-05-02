@@ -9,8 +9,8 @@ litxr_llm_digest_template(ref_id, schema_version = "v2")
 \arguments{
 \item{ref_id}{Reference identifier.}
 
-\item{schema_version}{Digest schema version. Currently only \code{"v2"} is
-supported for new templates.}
+\item{schema_version}{Digest schema version. Supported values are \code{"v2"}
+and \code{"v3"}.}
 }
 \value{
 Named list representing the default digest schema.
