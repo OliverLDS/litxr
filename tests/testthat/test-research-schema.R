@@ -87,6 +87,43 @@ stopifnot(identical(digest_template_v3$schema_version, "v3"))
 stopifnot(all(c("anchor_references", "citation_logic_nodes") %in% names(digest_template_v3)))
 stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v3))))
 
+digest_template_v3_emp <- litxr::litxr_llm_digest_template("doi:10.1000/v3-emp", schema_version = "v3")
+digest_template_v3_emp$paper_type <- "empirical archival"
+digest_template_v3_emp$summary <- "Empirical summary"
+digest_template_v3_emp$motivation <- "Empirical motivation"
+warning_seen <- FALSE
+withCallingHandlers(
+  litxr::litxr_validate_llm_digest(digest_template_v3_emp),
+  warning = function(w) {
+    if (grepl("identification_strategy|empirical_setting|descriptive_statistics_summary|standardized_findings_summary", conditionMessage(w))) {
+      warning_seen <<- TRUE
+    }
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(isTRUE(warning_seen))
+
+legacy_inline_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-legacy", schema_version = "v3")
+legacy_inline_v3$summary <- "Legacy inline summary"
+legacy_inline_v3$motivation <- "Legacy inline motivation"
+legacy_inline_v3$anchor_references <- list(
+  list(ref_id = "doi:10.1000/v3-legacy", V1 = "cite-1", V2 = "cite-2"),
+  list(ref_id = "doi:10.1000/v3-legacy", V1 = "Title 1", V2 = "Title 2"),
+  list(ref_id = "doi:10.1000/v3-legacy", V1 = "Reason 1", V2 = "Reason 2"),
+  list(ref_id = "doi:10.1000/v3-legacy", V1 = "builds_on", V2 = "compares_with")
+)
+legacy_inline_v3$citation_logic_nodes <- list(
+  list(ref_id = "doi:10.1000/v3-legacy", V1 = "improves", V2 = "contradicts"),
+  list(ref_id = "doi:10.1000/v3-legacy", V1 = "A improves B.", V2 = "A contradicts C.")
+)
+litxr::litxr_write_llm_digest("doi:10.1000/v3-legacy", legacy_inline_v3, cfg, keep_history = FALSE, bump_revision = FALSE)
+legacy_inline_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-legacy", cfg)
+stopifnot(identical(legacy_inline_read$schema_version, "v3"))
+stopifnot(inherits(legacy_inline_read$anchor_references, "data.table"))
+stopifnot(inherits(legacy_inline_read$citation_logic_nodes, "data.table"))
+stopifnot(all(c("anchor_rank", "citation_key", "anchor_title", "reason", "relationship_to_current_paper") %in% names(legacy_inline_read$anchor_references)))
+stopifnot(all(c("node_id", "logic_type", "claim_sentence") %in% names(legacy_inline_read$citation_logic_nodes)))
+
 legacy_digest <- list(
   ref_id = "doi:10.1000/legacy",
   summary = "Legacy summary",

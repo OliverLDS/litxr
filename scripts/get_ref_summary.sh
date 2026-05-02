@@ -76,6 +76,38 @@ to_md_lines <- function(digest) {
     if (!length(vals)) return(character())
     c(title, paste0("- ", vals), "")
   }
+  inline_lines <- function(title, x) {
+    if (is.null(x) || !length(x)) return(character())
+
+    items <- NULL
+    if (inherits(x, "data.frame")) {
+      items <- lapply(seq_len(nrow(x)), function(i) as.list(x[i, , drop = FALSE]))
+    } else if (is.list(x) && length(x) && all(vapply(x, is.list, logical(1L)))) {
+      n_items <- max(vapply(x, function(el) sum(grepl("^V\\d+$", names(el))), integer(1L)), 0L)
+      if (n_items > 0L) {
+        items <- lapply(seq_len(n_items), function(i) {
+          vals <- lapply(x, function(el) {
+            nm <- paste0("V", i)
+            if (nm %in% names(el)) el[[nm]] else NA_character_
+          })
+          names(vals) <- paste0("field_", seq_along(vals))
+          vals
+        })
+      }
+    }
+
+    if (is.null(items) || !length(items)) return(character())
+    lines <- vapply(seq_along(items), function(i) {
+      vals <- as.character(unlist(items[[i]], use.names = FALSE))
+      vals <- vals[!is.na(vals) & nzchar(trimws(vals))]
+      if (!length(vals)) {
+        sprintf("%d. [missing]", i)
+      } else {
+        sprintf("%d. %s", i, paste(vals, collapse = " — "))
+      }
+    }, character(1))
+    c(title, lines, "")
+  }
   named_scalar_lines <- function(title, x) {
     if (!is.list(x) || !length(x)) return(character())
     vals <- unlist(x, use.names = TRUE)
@@ -119,6 +151,8 @@ to_md_lines <- function(digest) {
     section_scalar("## Standardized Findings Summary", digest$standardized_findings_summary),
     vector_lines("## Contribution Type", digest$contribution_type),
     vector_lines("## Keywords", digest$keywords),
+    inline_lines("## Anchor References", digest$anchor_references),
+    inline_lines("## Citation Logic Nodes", digest$citation_logic_nodes),
     section_scalar("## Notes", digest$notes)
   )
 

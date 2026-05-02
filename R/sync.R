@@ -2799,6 +2799,9 @@ litxr_validate_llm_digest <- function(digest) {
         "control_variables", "mechanism_variables"
       )
     )
+    if (identical(schema_version, "v3")) {
+      .litxr_warn_v3_missing_empirical_fields(digest)
+    }
     if ("anchor_references" %in% names(digest)) {
       .litxr_validate_inline_llm_table_field(
         digest$anchor_references,

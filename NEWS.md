@@ -1,3 +1,13 @@
+# litxr 0.0.8.3
+
+- Normalized schema-v3 inline `anchor_references` and
+  `citation_logic_nodes` into rowwise digest fields on write and read, while
+  still supporting the earlier transposed legacy shape during revision writes.
+- Updated `scripts/get_ref_summary.sh` so the digest summary output now renders
+  the inline v3 anchor and citation-logic blocks.
+- Kept the project-level anchor and citation-logic tables unchanged as the
+  searchable, compactable canonical storage layer.
+
 # litxr 0.0.8.2
 
 - Wired the project-level `anchor_references` and `citation_logic_nodes`

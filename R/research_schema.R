@@ -304,12 +304,102 @@ litxr_validate_paper_type <- function(x) {
   any(c("anchor_references", "citation_logic_nodes") %in% names(digest))
 }
 
-.litxr_inline_llm_table_to_dt <- function(value, ref_id = NULL) {
+.litxr_inline_llm_table_legacy_field_names <- function(field_name) {
+  if (identical(field_name, "anchor_references")) {
+    return(c("citation_key", "anchor_title", "reason", "relationship_to_current_paper"))
+  }
+  if (identical(field_name, "citation_logic_nodes")) {
+    return(c("logic_type", "claim_sentence"))
+  }
+  character()
+}
+
+.litxr_inline_llm_table_legacy_transpose <- function(value, field_name, ref_id = NULL) {
+  row_names <- .litxr_inline_llm_table_legacy_field_names(field_name)
+  if (!length(row_names) || !is.list(value) || !length(value)) {
+    return(data.table::data.table())
+  }
+  v_names <- unique(unlist(lapply(value, function(x) names(x)[grepl("^V\\d+$", names(x))]), use.names = FALSE))
+  v_names <- sort(v_names, na.last = TRUE)
+  if (!length(v_names)) {
+    return(data.table::data.table())
+  }
+  ref_value <- as.character(.litxr_first_nonnull(ref_id, value[[1]]$ref_id, ""))
+  rows <- lapply(v_names, function(v_name) {
+    row <- list(ref_id = ref_value)
+    if (identical(field_name, "anchor_references")) {
+      row$anchor_rank <- suppressWarnings(as.integer(sub("^V", "", v_name)))
+      row$citation_key <- as.character(value[[1]][[v_name]] %||% NA_character_)
+      row$anchor_title <- as.character(value[[2]][[v_name]] %||% NA_character_)
+      row$reason <- as.character(value[[3]][[v_name]] %||% NA_character_)
+      row$relationship_to_current_paper <- as.character(value[[4]][[v_name]] %||% NA_character_)
+      row$anchor_authors <- NA_character_
+      row$anchor_year <- NA_integer_
+      row$anchor_ref_id <- NA_character_
+      row$anchor_role <- NA_character_
+      row$confidence <- NA_character_
+      row$created_at <- NA_character_
+      row$updated_at <- NA_character_
+    } else if (identical(field_name, "citation_logic_nodes")) {
+      row$node_id <- paste0("node_", sub("^V", "", v_name))
+      row$logic_type <- as.character(value[[1]][[v_name]] %||% NA_character_)
+      row$claim_sentence <- as.character(value[[2]][[v_name]] %||% NA_character_)
+      row$subject_text <- NA_character_
+      row$object_text <- NA_character_
+      row$modifier_text <- NA_character_
+      row$evidence_role <- NA_character_
+      row$confidence <- NA_character_
+      row$page_or_section <- NA_character_
+      row$quote_support <- NA_character_
+      row$citation_use <- NA_character_
+      row$tags <- NA_character_
+      row$created_at <- NA_character_
+      row$updated_at <- NA_character_
+    }
+    row
+  })
+  dt <- data.table::rbindlist(rows, fill = TRUE)
+  if (identical(field_name, "anchor_references")) {
+    dt <- .litxr_align_columns(dt, .litxr_empty_anchor_references())
+    dt <- .litxr_normalize_anchor_references(dt)
+  } else if (identical(field_name, "citation_logic_nodes")) {
+    dt <- .litxr_align_columns(dt, .litxr_empty_citation_logic_nodes())
+    dt <- .litxr_normalize_citation_logic_nodes(dt)
+  }
+  dt
+}
+
+.litxr_inline_llm_table_to_dt <- function(value, ref_id = NULL, field_name = NULL) {
   if (is.null(value) || !length(value)) {
     return(data.table::data.table())
   }
+  if (!is.null(field_name) && is.list(value) && length(value) && all(vapply(value, is.list, logical(1L)))) {
+    inner_names <- unique(unlist(lapply(value, names), use.names = FALSE))
+    if (any(grepl("^V\\d+$", inner_names, perl = TRUE)) && !any(inner_names %in% c(
+      "anchor_rank", "citation_key", "anchor_title", "anchor_authors", "anchor_year",
+      "anchor_ref_id", "anchor_role", "reason", "relationship_to_current_paper",
+      "confidence", "created_at", "updated_at", "node_id", "claim_sentence",
+      "logic_type", "subject_text", "object_text", "modifier_text", "evidence_role",
+      "page_or_section", "quote_support", "citation_use", "tags"
+    ))) {
+      return(.litxr_inline_llm_table_legacy_transpose(value, field_name, ref_id = ref_id))
+    }
+  }
   dt <- .litxr_as_research_dt(value)
   dt <- data.table::copy(dt)
+  if (!is.null(field_name) && nrow(dt) > 0L) {
+    raw_names <- setdiff(names(dt), "ref_id")
+    if (length(raw_names) && all(grepl("^V\\d+$", raw_names, perl = TRUE)) && !any(raw_names %in% c(
+      "anchor_rank", "citation_key", "anchor_title", "anchor_authors", "anchor_year",
+      "anchor_ref_id", "anchor_role", "reason", "relationship_to_current_paper",
+      "confidence", "created_at", "updated_at", "node_id", "claim_sentence",
+      "logic_type", "subject_text", "object_text", "modifier_text", "evidence_role",
+      "page_or_section", "quote_support", "citation_use", "tags"
+    ))) {
+      rows <- lapply(seq_len(nrow(dt)), function(i) as.list(dt[i, , drop = FALSE]))
+      return(.litxr_inline_llm_table_legacy_transpose(rows, field_name, ref_id = ref_id))
+    }
+  }
   if (!("ref_id" %in% names(dt))) {
     dt$ref_id <- as.character(ref_id %||% "")
   } else {
@@ -342,10 +432,18 @@ litxr_validate_paper_type <- function(x) {
   payload$ref_id <- as.character(.litxr_first_nonnull(ref_id, payload$ref_id, ""))
   payload$paper_type <- litxr_normalize_paper_type(.litxr_first_nonnull(payload$paper_type, NA_character_))
   if ("anchor_references" %in% names(payload) || "anchor_references" %in% names(digest)) {
-    payload$anchor_references <- .litxr_inline_llm_table_to_dt(.litxr_first_nonnull(digest$anchor_references, payload$anchor_references), ref_id = payload$ref_id)
+    payload$anchor_references <- .litxr_inline_llm_table_to_dt(
+      .litxr_first_nonnull(digest$anchor_references, payload$anchor_references),
+      ref_id = payload$ref_id,
+      field_name = "anchor_references"
+    )
   }
   if ("citation_logic_nodes" %in% names(payload) || "citation_logic_nodes" %in% names(digest)) {
-    payload$citation_logic_nodes <- .litxr_inline_llm_table_to_dt(.litxr_first_nonnull(digest$citation_logic_nodes, payload$citation_logic_nodes), ref_id = payload$ref_id)
+    payload$citation_logic_nodes <- .litxr_inline_llm_table_to_dt(
+      .litxr_first_nonnull(digest$citation_logic_nodes, payload$citation_logic_nodes),
+      ref_id = payload$ref_id,
+      field_name = "citation_logic_nodes"
+    )
   }
   if (!identical(version, "v2")) {
     payload$digest_revision <- 1L
@@ -401,9 +499,21 @@ litxr_validate_paper_type <- function(x) {
     }
     if (!("anchor_references" %in% names(digest))) {
       digest$anchor_references <- list()
+    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3")) {
+      digest$anchor_references <- .litxr_inline_llm_table_to_dt(
+        digest$anchor_references,
+        ref_id = digest$ref_id %||% NULL,
+        field_name = "anchor_references"
+      )
     }
     if (!("citation_logic_nodes" %in% names(digest))) {
       digest$citation_logic_nodes <- list()
+    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3")) {
+      digest$citation_logic_nodes <- .litxr_inline_llm_table_to_dt(
+        digest$citation_logic_nodes,
+        ref_id = digest$ref_id %||% NULL,
+        field_name = "citation_logic_nodes"
+      )
     }
   }
   if ("paper_type" %in% names(digest)) {
@@ -416,8 +526,67 @@ litxr_validate_paper_type <- function(x) {
   identical(.litxr_llm_digest_schema_version(digest), "v2")
 }
 
+.litxr_llm_digest_v3_optional_empirical_fields <- function() {
+  c(
+    "identification_strategy",
+    "empirical_setting",
+    "descriptive_statistics_summary",
+    "standardized_findings_summary"
+  )
+}
+
+.litxr_llm_digest_empirical_paper_type <- function(paper_type) {
+  paper_type <- litxr_normalize_paper_type(paper_type)
+  nzchar(paper_type) & startsWith(paper_type, "empirical_")
+}
+
+.litxr_llm_digest_field_is_present <- function(value) {
+  if (is.null(value) || !length(value)) {
+    return(FALSE)
+  }
+  if (is.list(value)) {
+    if (!length(value)) {
+      return(FALSE)
+    }
+    if (length(value) == 1L) {
+      return(.litxr_llm_digest_field_is_present(value[[1]]))
+    }
+    return(any(vapply(value, .litxr_llm_digest_field_is_present, logical(1L))))
+  }
+  if (is.character(value)) {
+    value <- value[!is.na(value)]
+    if (!length(value)) {
+      return(FALSE)
+    }
+    return(any(nzchar(trimws(value))))
+  }
+  if (is.numeric(value) || is.integer(value)) {
+    value <- value[!is.na(value)]
+    return(length(value) > 0L)
+  }
+  TRUE
+}
+
+.litxr_warn_v3_missing_empirical_fields <- function(digest) {
+  if (!.litxr_llm_digest_empirical_paper_type(digest$paper_type)) {
+    return(invisible(TRUE))
+  }
+  optional <- .litxr_llm_digest_v3_optional_empirical_fields()
+  missing <- optional[!vapply(optional, function(field) .litxr_llm_digest_field_is_present(digest[[field]]), logical(1L))]
+  if (length(missing)) {
+    warning(
+      "LLM digest paper_type `",
+      litxr_normalize_paper_type(digest$paper_type),
+      "` suggests empirical fields, but the following optional fields are missing or empty: ",
+      paste(missing, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
 .litxr_llm_digest_required_fields <- function(schema_version) {
-  if (identical(schema_version, "v2") || identical(schema_version, "v3")) {
+  if (identical(schema_version, "v2")) {
     return(c(
       "schema_version", "ref_id", "digest_revision",
       "extraction_mode", "prompt_version", "model_hint", "paper_type", "summary", "motivation",
@@ -425,6 +594,17 @@ litxr_validate_paper_type <- function(x) {
       "identification_strategy", "main_variables", "key_findings",
       "limitations", "theoretical_mechanism", "empirical_setting",
       "descriptive_statistics_summary", "standardized_findings_summary",
+      "contribution_type", "evidence_strength", "keywords", "notes",
+      "generated_at", "updated_at"
+    ))
+  }
+  if (identical(schema_version, "v3")) {
+    return(c(
+      "schema_version", "ref_id", "digest_revision",
+      "extraction_mode", "prompt_version", "model_hint", "paper_type", "summary", "motivation",
+      "research_questions", "paper_structure", "methods", "research_data",
+      "main_variables", "key_findings",
+      "limitations", "theoretical_mechanism",
       "contribution_type", "evidence_strength", "keywords", "notes",
       "generated_at", "updated_at"
     ))
