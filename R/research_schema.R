@@ -258,7 +258,8 @@ litxr_validate_paper_type <- function(x) {
       sample_period = NA_character_,
       sample_region = NA_character_,
       unit_of_observation = NA_character_,
-      sample_size = NULL
+      sample_size = NULL,
+      sample_size_note = NA_character_
     ),
     identification_strategy = NA_character_,
     main_variables = list(
@@ -300,6 +301,81 @@ litxr_validate_paper_type <- function(x) {
   NULL
 }
 
+.litxr_research_data_normalize_sample_size <- function(research_data) {
+  if (!is.list(research_data) || !length(research_data)) {
+    return(research_data)
+  }
+  out <- research_data
+  sample_size <- out$sample_size %||% NULL
+  if (is.list(sample_size) && !length(sample_size)) {
+    sample_size <- NULL
+  }
+  if (is.list(sample_size)) {
+    sample_size <- unlist(sample_size, use.names = FALSE)
+  }
+  if (is.character(sample_size)) {
+    sample_size <- as.character(sample_size)
+    sample_size <- sample_size[!is.na(sample_size)]
+    sample_size <- trimws(sample_size)
+    sample_size <- sample_size[nzchar(sample_size)]
+    if (!length(sample_size)) {
+      out$sample_size <- NULL
+    } else if (length(sample_size) == 1L) {
+      parsed <- suppressWarnings(as.numeric(sample_size[[1]]))
+      if (!is.na(parsed) && grepl("^[-+]?[0-9]+(?:\\.[0-9]+)?$", sample_size[[1]], perl = TRUE)) {
+        out$sample_size <- parsed
+      } else {
+        existing_note <- out$sample_size_note %||% character()
+        if (is.list(existing_note)) {
+          existing_note <- unlist(existing_note, use.names = FALSE)
+        }
+        existing_note <- as.character(existing_note)
+        existing_note <- existing_note[!is.na(existing_note)]
+        existing_note <- trimws(existing_note)
+        existing_note <- existing_note[nzchar(existing_note)]
+        out$sample_size_note <- unique(c(existing_note, sample_size[[1]]))
+        out$sample_size <- NULL
+      }
+    } else {
+      existing_note <- out$sample_size_note %||% character()
+      if (is.list(existing_note)) {
+        existing_note <- unlist(existing_note, use.names = FALSE)
+      }
+      existing_note <- as.character(existing_note)
+      existing_note <- existing_note[!is.na(existing_note)]
+      existing_note <- trimws(existing_note)
+      existing_note <- existing_note[nzchar(existing_note)]
+      out$sample_size_note <- unique(c(existing_note, sample_size))
+      out$sample_size <- NULL
+    }
+  } else if (is.numeric(sample_size) || is.integer(sample_size)) {
+    if (length(sample_size) == 0L) {
+      out$sample_size <- NULL
+    } else if (length(sample_size) == 1L) {
+      out$sample_size <- sample_size[[1]]
+    } else {
+      out$sample_size <- sample_size
+    }
+  }
+
+  if ("sample_size_note" %in% names(out)) {
+    sample_size_note <- out$sample_size_note
+    if (is.list(sample_size_note)) {
+      sample_size_note <- unlist(sample_size_note, use.names = FALSE)
+    }
+    if (is.null(sample_size_note)) {
+      out$sample_size_note <- NA_character_
+    } else {
+      sample_size_note <- as.character(sample_size_note)
+      sample_size_note <- sample_size_note[!is.na(sample_size_note)]
+      sample_size_note <- trimws(sample_size_note)
+      sample_size_note <- sample_size_note[nzchar(sample_size_note)]
+      out$sample_size_note <- if (length(sample_size_note)) unique(sample_size_note) else NA_character_
+    }
+  }
+  out
+}
+
 .litxr_has_inline_llm_tables <- function(digest) {
   any(c("anchor_references", "citation_logic_nodes") %in% names(digest))
 }
@@ -314,12 +390,27 @@ litxr_validate_paper_type <- function(x) {
   character()
 }
 
+.litxr_inline_llm_table_legacy_cell <- function(value, row_idx, v_name, default = NA_character_) {
+  if (!is.list(value) || row_idx < 1L || row_idx > length(value)) {
+    return(default)
+  }
+  row <- value[[row_idx]]
+  if (!is.list(row) || is.null(names(row)) || !(v_name %in% names(row))) {
+    return(default)
+  }
+  cell <- row[[v_name]]
+  if (is.null(cell) || !length(cell)) {
+    return(default)
+  }
+  as.character(cell[[1]])
+}
+
 .litxr_inline_llm_table_legacy_transpose <- function(value, field_name, ref_id = NULL) {
   row_names <- .litxr_inline_llm_table_legacy_field_names(field_name)
   if (!length(row_names) || !is.list(value) || !length(value)) {
     return(data.table::data.table())
   }
-  v_names <- unique(unlist(lapply(value, function(x) names(x)[grepl("^V\\d+$", names(x))]), use.names = FALSE))
+  v_names <- unique(unlist(lapply(value, function(x) names(x)[grepl("^V[0-9]+$", names(x))]), use.names = FALSE))
   v_names <- sort(v_names, na.last = TRUE)
   if (!length(v_names)) {
     return(data.table::data.table())
@@ -329,10 +420,10 @@ litxr_validate_paper_type <- function(x) {
     row <- list(ref_id = ref_value)
     if (identical(field_name, "anchor_references")) {
       row$anchor_rank <- suppressWarnings(as.integer(sub("^V", "", v_name)))
-      row$citation_key <- as.character(value[[1]][[v_name]] %||% NA_character_)
-      row$anchor_title <- as.character(value[[2]][[v_name]] %||% NA_character_)
-      row$reason <- as.character(value[[3]][[v_name]] %||% NA_character_)
-      row$relationship_to_current_paper <- as.character(value[[4]][[v_name]] %||% NA_character_)
+      row$citation_key <- .litxr_inline_llm_table_legacy_cell(value, 1L, v_name)
+      row$anchor_title <- .litxr_inline_llm_table_legacy_cell(value, 2L, v_name)
+      row$reason <- .litxr_inline_llm_table_legacy_cell(value, 3L, v_name)
+      row$relationship_to_current_paper <- .litxr_inline_llm_table_legacy_cell(value, 4L, v_name)
       row$anchor_authors <- NA_character_
       row$anchor_year <- NA_integer_
       row$anchor_ref_id <- NA_character_
@@ -342,8 +433,8 @@ litxr_validate_paper_type <- function(x) {
       row$updated_at <- NA_character_
     } else if (identical(field_name, "citation_logic_nodes")) {
       row$node_id <- paste0("node_", sub("^V", "", v_name))
-      row$logic_type <- as.character(value[[1]][[v_name]] %||% NA_character_)
-      row$claim_sentence <- as.character(value[[2]][[v_name]] %||% NA_character_)
+      row$logic_type <- .litxr_inline_llm_table_legacy_cell(value, 1L, v_name)
+      row$claim_sentence <- .litxr_inline_llm_table_legacy_cell(value, 2L, v_name)
       row$subject_text <- NA_character_
       row$object_text <- NA_character_
       row$modifier_text <- NA_character_
@@ -375,7 +466,24 @@ litxr_validate_paper_type <- function(x) {
   }
   if (!is.null(field_name) && is.list(value) && length(value) && all(vapply(value, is.list, logical(1L)))) {
     inner_names <- unique(unlist(lapply(value, names), use.names = FALSE))
-    if (any(grepl("^V\\d+$", inner_names, perl = TRUE)) && !any(inner_names %in% c(
+    if (!any(grepl("^V[0-9]+$", inner_names, perl = TRUE)) && length(inner_names)) {
+      rows <- lapply(value, function(el) data.table::as.data.table(el))
+      dt <- data.table::rbindlist(rows, fill = TRUE)
+      if (!("ref_id" %in% names(dt))) {
+        dt$ref_id <- as.character(ref_id %||% "")
+      } else {
+        dt$ref_id <- as.character(dt$ref_id)
+        dt$ref_id[is.na(dt$ref_id) | !nzchar(trimws(dt$ref_id))] <- as.character(ref_id %||% "")
+      }
+      data.table::setcolorder(dt, c("ref_id", setdiff(names(dt), "ref_id")))
+      if (identical(field_name, "anchor_references")) {
+        dt <- .litxr_normalize_anchor_references(dt)
+      } else if (identical(field_name, "citation_logic_nodes")) {
+        dt <- .litxr_normalize_citation_logic_nodes(dt)
+      }
+      return(dt)
+    }
+    if (any(grepl("^V[0-9]+$", inner_names, perl = TRUE)) && !any(inner_names %in% c(
       "anchor_rank", "citation_key", "anchor_title", "anchor_authors", "anchor_year",
       "anchor_ref_id", "anchor_role", "reason", "relationship_to_current_paper",
       "confidence", "created_at", "updated_at", "node_id", "claim_sentence",
@@ -389,7 +497,7 @@ litxr_validate_paper_type <- function(x) {
   dt <- data.table::copy(dt)
   if (!is.null(field_name) && nrow(dt) > 0L) {
     raw_names <- setdiff(names(dt), "ref_id")
-    if (length(raw_names) && all(grepl("^V\\d+$", raw_names, perl = TRUE)) && !any(raw_names %in% c(
+    if (length(raw_names) && all(grepl("^V[0-9]+$", raw_names, perl = TRUE)) && !any(raw_names %in% c(
       "anchor_rank", "citation_key", "anchor_title", "anchor_authors", "anchor_year",
       "anchor_ref_id", "anchor_role", "reason", "relationship_to_current_paper",
       "confidence", "created_at", "updated_at", "node_id", "claim_sentence",
@@ -444,6 +552,9 @@ litxr_validate_paper_type <- function(x) {
       ref_id = payload$ref_id,
       field_name = "citation_logic_nodes"
     )
+  }
+  if ("research_data" %in% names(payload)) {
+    payload$research_data <- .litxr_research_data_normalize_sample_size(payload$research_data)
   }
   if (!identical(version, "v2")) {
     payload$digest_revision <- 1L
@@ -519,6 +630,9 @@ litxr_validate_paper_type <- function(x) {
   if ("paper_type" %in% names(digest)) {
     digest$paper_type <- litxr_normalize_paper_type(digest$paper_type)
   }
+  if ("research_data" %in% names(digest)) {
+    digest$research_data <- .litxr_research_data_normalize_sample_size(digest$research_data)
+  }
   digest
 }
 
@@ -526,18 +640,48 @@ litxr_validate_paper_type <- function(x) {
   identical(.litxr_llm_digest_schema_version(digest), "v2")
 }
 
-.litxr_llm_digest_v3_optional_empirical_fields <- function() {
-  c(
-    "identification_strategy",
-    "empirical_setting",
-    "descriptive_statistics_summary",
-    "standardized_findings_summary"
-  )
-}
-
 .litxr_llm_digest_empirical_paper_type <- function(paper_type) {
   paper_type <- litxr_normalize_paper_type(paper_type)
   nzchar(paper_type) & startsWith(paper_type, "empirical_")
+}
+
+.litxr_llm_digest_v3_expected_empirical_fields <- function(paper_type) {
+  paper_type <- litxr_normalize_paper_type(paper_type)
+  switch(
+    paper_type,
+    empirical_archival = c(
+      "identification_strategy",
+      "empirical_setting",
+      "descriptive_statistics_summary",
+      "standardized_findings_summary"
+    ),
+    empirical_experimental = c(
+      "identification_strategy",
+      "empirical_setting",
+      "descriptive_statistics_summary",
+      "standardized_findings_summary"
+    ),
+    empirical_mixed_methods = c(
+      "identification_strategy",
+      "empirical_setting",
+      "descriptive_statistics_summary",
+      "standardized_findings_summary"
+    ),
+    empirical_survey = c(
+      "empirical_setting",
+      "descriptive_statistics_summary",
+      "standardized_findings_summary"
+    ),
+    empirical_case_study = c(
+      "empirical_setting",
+      "standardized_findings_summary"
+    ),
+    empirical_qualitative = c(
+      "empirical_setting",
+      "standardized_findings_summary"
+    ),
+    character()
+  )
 }
 
 .litxr_llm_digest_field_is_present <- function(value) {
@@ -571,7 +715,10 @@ litxr_validate_paper_type <- function(x) {
   if (!.litxr_llm_digest_empirical_paper_type(digest$paper_type)) {
     return(invisible(TRUE))
   }
-  optional <- .litxr_llm_digest_v3_optional_empirical_fields()
+  optional <- .litxr_llm_digest_v3_expected_empirical_fields(digest$paper_type)
+  if (!length(optional)) {
+    return(invisible(TRUE))
+  }
   missing <- optional[!vapply(optional, function(field) .litxr_llm_digest_field_is_present(digest[[field]]), logical(1L))]
   if (length(missing)) {
     warning(
@@ -1298,15 +1445,34 @@ litxr_validate_paper_type <- function(x) {
 }
 
 .litxr_normalize_anchor_references <- function(x) {
-  dt <- .litxr_align_columns(.litxr_as_research_dt(x), .litxr_empty_anchor_references())
+  dt <- .litxr_as_research_dt(x)
+  raw_reference <- if ("reference" %in% names(dt)) as.character(dt$reference) else NULL
+  raw_role <- if ("role" %in% names(dt)) as.character(dt$role) else NULL
+  if ("reference" %in% names(dt) && !("anchor_title" %in% names(dt))) {
+    dt$anchor_title <- dt$reference
+  }
+  if ("role" %in% names(dt) && !("anchor_role" %in% names(dt))) {
+    dt$anchor_role <- dt$role
+  }
+  dt <- .litxr_align_columns(dt, .litxr_empty_anchor_references())
   dt <- data.table::copy(dt)
   char_cols <- setdiff(names(dt), c("anchor_rank", "anchor_year"))
   for (name in char_cols) {
     dt[[name]] <- as.character(dt[[name]])
   }
   dt$anchor_rank <- as.integer(dt$anchor_rank)
+  bad_rank <- is.na(dt$anchor_rank) | dt$anchor_rank < 1L
+  if (nrow(dt) && any(bad_rank)) {
+    dt$anchor_rank[bad_rank] <- seq_len(nrow(dt))[bad_rank]
+  }
   dt$anchor_year <- as.integer(dt$anchor_year)
   dt$ref_id <- as.character(dt$ref_id)
+  if ("reference" %in% names(dt) && any(!nzchar(trimws(dt$anchor_title %||% character())))) {
+    dt$anchor_title[!nzchar(trimws(dt$anchor_title %||% character()))] <- as.character(dt$reference[!nzchar(trimws(dt$anchor_title %||% character()))])
+  }
+  if ("role" %in% names(dt) && any(!nzchar(trimws(dt$anchor_role %||% character())))) {
+    dt$anchor_role[!nzchar(trimws(dt$anchor_role %||% character()))] <- as.character(dt$role[!nzchar(trimws(dt$anchor_role %||% character()))])
+  }
   dt$anchor_title <- as.character(dt$anchor_title)
   dt$anchor_authors <- as.character(dt$anchor_authors)
   dt$anchor_ref_id <- as.character(dt$anchor_ref_id)
@@ -1317,19 +1483,51 @@ litxr_validate_paper_type <- function(x) {
   dt$anchor_role <- .litxr_normalize_anchor_reference_role(dt$anchor_role)
   dt$relationship_to_current_paper <- .litxr_normalize_relationship_to_current_paper(dt$relationship_to_current_paper)
   dt$confidence <- .litxr_normalize_confidence(dt$confidence)
+  if (!is.null(raw_reference)) {
+    dt$reference <- raw_reference
+  }
+  if (!is.null(raw_role)) {
+    dt$role <- raw_role
+  }
   dt
 }
 
 .litxr_normalize_citation_logic_nodes <- function(x) {
-  dt <- .litxr_align_columns(.litxr_as_research_dt(x), .litxr_empty_citation_logic_nodes())
+  dt <- .litxr_as_research_dt(x)
+  raw_sentence <- if ("sentence" %in% names(dt)) as.character(dt$sentence) else NULL
+  raw_relation <- if ("relation" %in% names(dt)) as.character(dt$relation) else NULL
+  raw_reuse_context <- if ("reuse_context" %in% names(dt)) as.character(dt$reuse_context) else NULL
+  if ("sentence" %in% names(dt) && !("claim_sentence" %in% names(dt))) {
+    dt$claim_sentence <- dt$sentence
+  }
+  if ("relation" %in% names(dt) && !("modifier_text" %in% names(dt))) {
+    dt$modifier_text <- dt$relation
+  }
+  if ("reuse_context" %in% names(dt) && !("citation_use" %in% names(dt))) {
+    dt$citation_use <- dt$reuse_context
+  }
+  dt <- .litxr_align_columns(dt, .litxr_empty_citation_logic_nodes())
   dt <- data.table::copy(dt)
   for (name in names(dt)) {
     dt[[name]] <- as.character(dt[[name]])
   }
   dt$ref_id <- as.character(dt$ref_id)
   dt$node_id <- as.character(dt$node_id)
+  bad_node <- is.na(dt$node_id) | !nzchar(trimws(dt$node_id))
+  if (nrow(dt) && any(bad_node)) {
+    dt$node_id[bad_node] <- paste0("node_", seq_len(nrow(dt))[bad_node])
+  }
   dt$claim_sentence <- as.character(dt$claim_sentence)
+  if ("sentence" %in% names(dt) && any(!nzchar(trimws(dt$claim_sentence %||% character())))) {
+    dt$claim_sentence[!nzchar(trimws(dt$claim_sentence %||% character()))] <- as.character(dt$sentence[!nzchar(trimws(dt$claim_sentence %||% character()))])
+  }
   dt$logic_type <- .litxr_normalize_citation_logic_type(dt$logic_type)
+  if ("relation" %in% names(dt) && any(!nzchar(trimws(dt$modifier_text %||% character())))) {
+    dt$modifier_text[!nzchar(trimws(dt$modifier_text %||% character()))] <- as.character(dt$relation[!nzchar(trimws(dt$modifier_text %||% character()))])
+  }
+  if ("reuse_context" %in% names(dt) && any(!nzchar(trimws(dt$citation_use %||% character())))) {
+    dt$citation_use[!nzchar(trimws(dt$citation_use %||% character()))] <- as.character(dt$reuse_context[!nzchar(trimws(dt$citation_use %||% character()))])
+  }
   dt$subject_text <- as.character(dt$subject_text)
   dt$object_text <- as.character(dt$object_text)
   dt$modifier_text <- as.character(dt$modifier_text)
@@ -1341,6 +1539,15 @@ litxr_validate_paper_type <- function(x) {
   dt$tags <- vapply(dt$tags, .litxr_collapse_chr, character(1))
   dt$created_at <- as.character(dt$created_at)
   dt$updated_at <- as.character(dt$updated_at)
+  if (!is.null(raw_sentence)) {
+    dt$sentence <- raw_sentence
+  }
+  if (!is.null(raw_relation)) {
+    dt$relation <- raw_relation
+  }
+  if (!is.null(raw_reuse_context)) {
+    dt$reuse_context <- raw_reuse_context
+  }
   dt
 }
 

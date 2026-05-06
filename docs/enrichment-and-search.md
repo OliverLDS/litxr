@@ -157,6 +157,7 @@ Core v2 fields:
 - `paper_structure`
 - `methods`
 - `research_data`
+  - `sample_size` stays numeric when possible, while narrative sample-size context belongs in `sample_size_note`
 - `identification_strategy`
 - `main_variables`
 - `key_findings`

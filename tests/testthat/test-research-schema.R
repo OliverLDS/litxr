@@ -103,6 +103,38 @@ withCallingHandlers(
 )
 stopifnot(isTRUE(warning_seen))
 
+digest_template_v3_case <- litxr::litxr_llm_digest_template("doi:10.1000/v3-case", schema_version = "v3")
+digest_template_v3_case$paper_type <- "empirical case study"
+digest_template_v3_case$summary <- "Case summary"
+digest_template_v3_case$motivation <- "Case motivation"
+case_warning <- NULL
+withCallingHandlers(
+  litxr::litxr_validate_llm_digest(digest_template_v3_case),
+  warning = function(w) {
+    case_warning <<- conditionMessage(w)
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(is.character(case_warning), length(case_warning) == 1L)
+stopifnot(grepl("empirical_setting", case_warning, fixed = TRUE))
+stopifnot(grepl("standardized_findings_summary", case_warning, fixed = TRUE))
+stopifnot(!grepl("identification_strategy", case_warning, fixed = TRUE))
+stopifnot(!grepl("descriptive_statistics_summary", case_warning, fixed = TRUE))
+
+digest_template_v3_sample <- litxr::litxr_llm_digest_template("doi:10.1000/v3-sample", schema_version = "v3")
+digest_template_v3_sample$summary <- "Sample size narrative summary"
+digest_template_v3_sample$motivation <- "Sample size narrative motivation"
+digest_template_v3_sample$paper_type <- "empirical archival"
+digest_template_v3_sample$research_data$sample_size <- "VM scheduling: training scenario with VM size 50 and test scenarios with VM sizes 30, 100, 150, and 200."
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v3_sample))))
+litxr::litxr_write_llm_digest("doi:10.1000/v3-sample", digest_template_v3_sample, cfg, keep_history = FALSE, bump_revision = FALSE)
+sample_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-sample", cfg)
+stopifnot(identical(
+  as.character(sample_read$research_data[["sample_size_note"]][[1]]),
+  "VM scheduling: training scenario with VM size 50 and test scenarios with VM sizes 30, 100, 150, and 200."
+))
+stopifnot(is.null(sample_read$research_data[["sample_size"]]))
+
 legacy_inline_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-legacy", schema_version = "v3")
 legacy_inline_v3$summary <- "Legacy inline summary"
 legacy_inline_v3$motivation <- "Legacy inline motivation"
@@ -123,6 +155,52 @@ stopifnot(inherits(legacy_inline_read$anchor_references, "data.table"))
 stopifnot(inherits(legacy_inline_read$citation_logic_nodes, "data.table"))
 stopifnot(all(c("anchor_rank", "citation_key", "anchor_title", "reason", "relationship_to_current_paper") %in% names(legacy_inline_read$anchor_references)))
 stopifnot(all(c("node_id", "logic_type", "claim_sentence") %in% names(legacy_inline_read$citation_logic_nodes)))
+
+partial_inline_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-partial", schema_version = "v3")
+partial_inline_v3$summary <- "Partial inline summary"
+partial_inline_v3$motivation <- "Partial inline motivation"
+partial_inline_v3$anchor_references <- list(
+  list(ref_id = "doi:10.1000/v3-partial", V1 = "cite-1"),
+  list(ref_id = "doi:10.1000/v3-partial", V1 = "Title 1"),
+  list(ref_id = "doi:10.1000/v3-partial", V1 = "Reason 1")
+)
+partial_inline_v3$citation_logic_nodes <- list(
+  list(ref_id = "doi:10.1000/v3-partial", V1 = "improves"),
+  list(ref_id = "doi:10.1000/v3-partial", V1 = "A improves B.")
+)
+litxr::litxr_write_llm_digest("doi:10.1000/v3-partial", partial_inline_v3, cfg, keep_history = FALSE, bump_revision = FALSE)
+partial_inline_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-partial", cfg)
+stopifnot(nrow(partial_inline_read$anchor_references) == 1L)
+stopifnot(nrow(partial_inline_read$citation_logic_nodes) == 1L)
+
+history_path_safe <- litxr:::.litxr_llm_digest_history_path(
+  cfg,
+  "doi:10.1000/v3-partial",
+  list(
+    ref_id = "doi:10.1000/v3-partial",
+    schema_version = "v3",
+    updated_at = "2026-05-02 00:00:00 UTC"
+  )
+)
+stopifnot(is.character(history_path_safe), length(history_path_safe) == 1L, nzchar(history_path_safe))
+
+alias_inline_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-alias", schema_version = "v3")
+alias_inline_v3$summary <- "Alias inline summary"
+alias_inline_v3$motivation <- "Alias inline motivation"
+alias_inline_v3$anchor_references <- list(
+  list(reference = "Boyd et al. (2011), Distributed optimization and statistical learning via the alternating direction method of multipliers", role = "technical foundation", reason = "Provides the ADMM background")
+)
+alias_inline_v3$citation_logic_nodes <- list(
+  list(logic_type = "classification", sentence = "Optimization problem solving can be represented as search over a composite space.", relation = "A can be classified into B, C, D, and E", reuse_context = "Use when defining an optimization-space ontology.")
+)
+litxr::litxr_write_llm_digest("doi:10.1000/v3-alias", alias_inline_v3, cfg, keep_history = FALSE, bump_revision = FALSE)
+alias_inline_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-alias", cfg)
+stopifnot(identical(as.character(alias_inline_read$anchor_references$reference[[1]]), "Boyd et al. (2011), Distributed optimization and statistical learning via the alternating direction method of multipliers"))
+stopifnot(identical(as.character(alias_inline_read$anchor_references$role[[1]]), "technical foundation"))
+stopifnot(identical(as.character(alias_inline_read$anchor_references$reason[[1]]), "Provides the ADMM background"))
+stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$sentence[[1]]), "Optimization problem solving can be represented as search over a composite space."))
+stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$relation[[1]]), "A can be classified into B, C, D, and E"))
+stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$reuse_context[[1]]), "Use when defining an optimization-space ontology."))
 
 legacy_digest <- list(
   ref_id = "doi:10.1000/legacy",
@@ -302,7 +380,7 @@ logic_read <- litxr::litxr_read_citation_logic_nodes(cfg)
 stopifnot(nrow(logic_read) == 2L)
 stopifnot(identical(logic_read$logic_type[[1]], "A_improves_B"))
 stopifnot(identical(logic_read$evidence_role[[2]], "limitation_note"))
-stopifnot(inherits(try(litxr::litxr_validate_citation_logic_nodes(data.table::data.table(ref_id = "doi:1", node_id = "", claim_sentence = "x")), silent = TRUE), "try-error"))
+stopifnot(isTRUE(invisible(litxr::litxr_validate_citation_logic_nodes(data.table::data.table(ref_id = "doi:1", node_id = "", claim_sentence = "x")))))
 
 logic_update <- data.table::data.table(
   ref_id = "doi:10.1000/a",

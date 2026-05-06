@@ -77,6 +77,8 @@ Main fields:
 - `paper_structure`
 - `methods`
 - `research_data`
+  - `sample_size` stays numeric when a real count exists
+  - `sample_size_note` carries narrative or ambiguous sample-size context
 - `identification_strategy`
 - `main_variables`
 - `key_findings`

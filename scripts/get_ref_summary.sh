@@ -83,7 +83,7 @@ to_md_lines <- function(digest) {
     if (inherits(x, "data.frame")) {
       items <- lapply(seq_len(nrow(x)), function(i) as.list(x[i, , drop = FALSE]))
     } else if (is.list(x) && length(x) && all(vapply(x, is.list, logical(1L)))) {
-      n_items <- max(vapply(x, function(el) sum(grepl("^V\\d+$", names(el))), integer(1L)), 0L)
+      n_items <- max(vapply(x, function(el) sum(grepl("^V[0-9]+$", names(el))), integer(1L)), 0L)
       if (n_items > 0L) {
         items <- lapply(seq_len(n_items), function(i) {
           vals <- lapply(x, function(el) {
@@ -97,9 +97,39 @@ to_md_lines <- function(digest) {
     }
 
     if (is.null(items) || !length(items)) return(character())
-    lines <- vapply(seq_along(items), function(i) {
-      vals <- as.character(unlist(items[[i]], use.names = FALSE))
+    preferred_fields <- function(title) {
+      if (identical(title, "## Anchor References")) {
+        return(c(
+          "anchor_title", "reference", "citation_key", "anchor_role", "role",
+          "reason", "relationship_to_current_paper", "confidence",
+          "anchor_ref_id", "anchor_year"
+        ))
+      }
+      if (identical(title, "## Citation Logic Nodes")) {
+        return(c(
+          "node_id", "logic_type", "claim_sentence", "sentence", "relation",
+          "reuse_context", "subject_text", "object_text", "modifier_text",
+          "evidence_role", "citation_use", "confidence", "page_or_section"
+        ))
+      }
+      character()
+    }
+    format_item <- function(item, title) {
+      if (is.list(item) && length(item) && !is.null(names(item))) {
+        fields <- preferred_fields(title)
+        if (length(fields)) {
+          vals <- unlist(item[intersect(fields, names(item))], use.names = FALSE)
+        } else {
+          vals <- unlist(item, use.names = FALSE)
+        }
+      } else {
+        vals <- as.character(unlist(item, use.names = FALSE))
+      }
       vals <- vals[!is.na(vals) & nzchar(trimws(vals))]
+      vals
+    }
+    lines <- vapply(seq_along(items), function(i) {
+      vals <- format_item(items[[i]], title)
       if (!length(vals)) {
         sprintf("%d. [missing]", i)
       } else {

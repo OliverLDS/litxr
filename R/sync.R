@@ -2782,11 +2782,29 @@ litxr_validate_llm_digest <- function(digest) {
     )
     .litxr_validate_named_list_fields(
       digest$research_data,
-      required_fields = c("data_sources", "sample_period", "sample_region", "unit_of_observation", "sample_size"),
+      required_fields = c("data_sources", "sample_period", "sample_region", "unit_of_observation"),
       field_name = "research_data",
-      character_vector_fields = "data_sources",
-      numeric_scalar_fields = "sample_size"
+      character_vector_fields = "data_sources"
     )
+    sample_size <- digest$research_data$sample_size %||% NULL
+    if (is.list(sample_size) && !length(sample_size)) {
+      sample_size <- NULL
+    }
+    if (is.list(sample_size)) {
+      sample_size <- unlist(sample_size, use.names = FALSE)
+    }
+    if (!(is.null(sample_size) || is.numeric(sample_size) || is.integer(sample_size) || is.character(sample_size))) {
+      stop("LLM digest field `research_data$sample_size` must be numeric, character, or NA.", call. = FALSE)
+    }
+    if ("sample_size_note" %in% names(digest$research_data)) {
+      sample_size_note <- digest$research_data$sample_size_note
+      if (is.list(sample_size_note)) {
+        sample_size_note <- unlist(sample_size_note, use.names = FALSE)
+      }
+      if (!(is.character(sample_size_note) || is.null(sample_size_note))) {
+        stop("LLM digest field `research_data$sample_size_note` must be a character vector.", call. = FALSE)
+      }
+    }
     .litxr_validate_named_list_fields(
       digest$main_variables,
       required_fields = c(
@@ -5064,8 +5082,12 @@ litxr_add_refs <- function(
   timestamp <- gsub(":", "-", timestamp, fixed = TRUE)
   timestamp <- gsub(" ", "T", timestamp, fixed = TRUE)
   timestamp <- gsub("[^A-Za-z0-9._-]+", "_", timestamp)
-  revision <- suppressWarnings(as.integer(digest$digest_revision[[1]] %||% digest$digest_revision))
-  if (is.na(revision) || revision < 1L) revision <- 1L
+  revision <- suppressWarnings(as.integer(.litxr_first_nonnull(digest$digest_revision, 1L)))
+  if (length(revision) != 1L || is.na(revision[[1]]) || revision[[1]] < 1L) {
+    revision <- 1L
+  } else {
+    revision <- revision[[1]]
+  }
   schema_version <- as.character(digest$schema_version[[1]] %||% digest$schema_version %||% "v1")
   file.path(ref_dir, sprintf("%s__rev%03d__%s.json", timestamp, revision, schema_version))
 }

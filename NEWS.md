@@ -1,3 +1,20 @@
+# litxr 0.0.8.4
+
+- Made schema-v3 research-data handling more permissive by accepting
+  narrative `sample_size` input at ingest time and normalizing it into
+  `sample_size_note` on write.
+- Fixed revision-history edge cases in LLM digest writes, including safer
+  revision archiving when older digests have incomplete revision metadata.
+- Hardened schema-v3 inline `anchor_references` and `citation_logic_nodes`
+  ingestion so partial or alias-shaped ChatGPT payloads are preserved instead
+  of collapsing into placeholder `unknown` rows.
+- Improved `scripts/build_llm_digest_interactive.R` with explicit field-level
+  examples for anchor references and citation logic nodes, and updated
+  `scripts/get_ref_summary.sh` to render those richer inline fields.
+- Made empirical-field validator warnings more paper-type-sensitive so case
+  studies and qualitative papers no longer warn about low-value missing fields
+  such as `identification_strategy`.
+
 # litxr 0.0.8.3
 
 - Normalized schema-v3 inline `anchor_references` and

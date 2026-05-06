@@ -136,6 +136,16 @@ if (!is.na(source_id_value) && !identical(source_id_value, ref_id)) {
   source_label <- if (is.na(source_value) || !nzchar(source_value)) "source" else source_value
   id_lines <- c(id_lines, sprintf("%s_id: %s", source_label, source_id_value))
 }
+arxiv_hint_lines <- character()
+if (startsWith(ref_id, "arxiv:")) {
+  arxiv_id <- sub("^arxiv:", "", ref_id)
+  arxiv_hint_lines <- c(
+    "ArXiv-specific hint:",
+    sprintf("  - HTML full text: %s", sprintf("https://arxiv.org/html/%s", arxiv_id)),
+    sprintf("  - PDF full text: %s", sprintf("https://arxiv.org/pdf/%s", arxiv_id)),
+    "  Use these direct links first before exploring other resources."
+  )
+}
 
 prompt_lines <- c(
   "You are helping build a structured litxr schema-v3 JSON digest for one academic paper.",
@@ -143,6 +153,7 @@ prompt_lines <- c(
   "Paper metadata:",
   sprintf("title: %s", title_value),
   id_lines,
+  arxiv_hint_lines,
   "",
   "Instructions:",
   "1. Find the full text of this paper.",
@@ -160,6 +171,37 @@ prompt_lines <- c(
   "    - anchor_references",
   "    - citation_logic_nodes",
   "    Use these inline blocks to provide up to three anchor references and reusable citation logic sentences.",
+  "    Follow these field rules strictly:",
+  "    - Do not collapse multiple meanings into one field.",
+  "    - Do not put the whole explanation into citation_key and leave the other anchor fields empty.",
+  "    - Do not leave claim_sentence empty or copy node_id into claim_sentence.",
+  "    - If a field is unsupported by the paper, use null, empty string, or empty array instead of guessing.",
+  "    Anchor reference field guidance:",
+  "    - citation_key: short citation key such as boyd_2011_admm",
+  "    - anchor_title: the prior-work title or short citation text",
+  "    - anchor_role: one role label such as methodological_foundation, conceptual_foundation, review_anchor, main_comparison",
+  "    - reason: why this prior work matters for understanding the current paper",
+  "    - relationship_to_current_paper: one relationship such as builds_on, extends, compares_with, uses_as_context",
+  "    Anchor reference example:",
+  '    [{"anchor_rank":1,"citation_key":"boyd_2011_admm","anchor_title":"Distributed Optimization and Statistical Learning via the Alternating Direction Method of Multipliers","anchor_role":"methodological_foundation","reason":"Provides the ADMM background underlying the optimization workflow discussed in the paper.","relationship_to_current_paper":"builds_on","confidence":"high"}]',
+  "    Citation logic node field guidance:",
+  "    - claim_sentence: a reusable citation-ready sentence",
+  "    - logic_type: the controlled relation label such as A_improves_B, A_reduces_B, A_supports_B, A_has_limitation_B",
+  "    - subject_text: the main subject of the claim",
+  "    - object_text: the main object or outcome of the claim",
+  "    - modifier_text: qualifier, condition, mechanism, or relation detail when useful",
+  "    - citation_use: when a future writer should cite this node",
+  "    Citation logic node example:",
+  '    [{"node_id":"node_1","claim_sentence":"Agentic workflows can reduce manual coordination burdens when reasoning, tool use, and validation are decomposed across specialized agents.","logic_type":"A_reduces_B","subject_text":"agentic workflows with specialized agents","object_text":"manual coordination burdens","modifier_text":"when reasoning, tool use, and validation are decomposed across agent roles","evidence_role":"conceptual_argument","confidence":"medium","page_or_section":"Section 3","quote_support":"","citation_use":"Use when arguing that agentic workflow design can reduce coordination-heavy manual work.","tags":["agentic workflow","coordination","specialized agents"]}]',
+  "13. For research_data, keep sample_size numeric only when there is a real count.",
+  "    If the paper only describes a scenario, benchmark size, application count, or other narrative context, put that text in sample_size_note instead of sample_size.",
+  "14. Keep field semantics separate. For example:",
+  "    - citation_key is a short key, not the entire prior-work explanation",
+  "    - anchor_title is the title or short citation text",
+  "    - anchor_role is the role label",
+  "    - reason is the explanation",
+  "    - claim_sentence is the actual reusable sentence",
+  "    - logic_type is the controlled relation label",
   "",
   if (identical(mode, "revise")) "Existing local digest to improve:" else NULL,
   if (identical(mode, "revise")) jsonlite::toJSON(existing_digest, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null") else NULL,
