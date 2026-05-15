@@ -5,6 +5,8 @@ suppressPackageStartupMessages({
   library(litxr)
 })
 
+article_log_path <- "/Users/oliver/Documents/2026/_2026-04-02_Cognaptus_maintenance/workflows/new_blog_article/state/article_record_log.tsv"
+
 args <- commandArgs(trailingOnly = TRUE)
 
 parse_args <- function(args) {
@@ -166,6 +168,24 @@ embed_fun <- function(texts) {
   inferencer::embed_openrouter(texts, model = embed_model)
 }
 
+normalize_arxiv_ref_id <- function(x) {
+  x <- as.character(x)
+  x <- trimws(x)
+  x <- x[!is.na(x) & nzchar(x)]
+  x <- sub("^arxiv:", "", x, ignore.case = TRUE)
+  paste0("arxiv:", x)
+}
+
+split_logged_arxiv_ids <- function(x) {
+  x <- as.character(x)
+  x <- x[!is.na(x) & nzchar(trimws(x))]
+  if (!length(x)) {
+    return(character())
+  }
+  pieces <- unlist(strsplit(x, ",", fixed = TRUE), use.names = FALSE)
+  trimws(pieces)
+}
+
 if (!is.null(inquiry_path)) {
   query_set_id <- paste0(
     "tmp_inquiry_",
@@ -246,6 +266,35 @@ scores[, rank_in_category := seq_len(.N), by = category_id]
 
 selected <- copy(scores)
 selected <- selected[rank_in_category <= top_n & !is.na(score_max) & score_max >= threshold]
+
+if (file.exists(article_log_path)) {
+  article_log <- data.table::fread(article_log_path, sep = "\t", header = TRUE, na.strings = c("", "NA"))
+  if (all(c("arxiv_id", "blog_article_filename") %in% names(article_log))) {
+    article_log <- article_log[!is.na(arxiv_id) & nzchar(trimws(arxiv_id))]
+    if (nrow(article_log)) {
+      article_log <- data.table::rbindlist(
+        lapply(seq_len(nrow(article_log)), function(i) {
+          ids <- split_logged_arxiv_ids(article_log$arxiv_id[[i]])
+          if (!length(ids)) {
+            return(NULL)
+          }
+          data.table::data.table(
+            recorded_at = article_log$recorded_at[[i]],
+            arxiv_id = ids,
+            blog_article_filename = rep(as.character(article_log$blog_article_filename[[i]]), length(ids))
+          )
+        }),
+        fill = TRUE
+      )
+      article_log[, arxiv_ref_id := normalize_arxiv_ref_id(arxiv_id)]
+      article_log[, blog_article_filename := as.character(blog_article_filename)]
+      selected[, ref_id_norm := normalize_arxiv_ref_id(ref_id)]
+      excluded_ref_ids <- unique(article_log$arxiv_ref_id)
+      selected <- selected[!(ref_id_norm %in% excluded_ref_ids)]
+      selected[, ref_id_norm := NULL]
+    }
+  }
+}
 
 if (!nrow(selected)) {
   cat("No refs met the selection rule.\n")

@@ -1492,6 +1492,51 @@ litxr_validate_paper_type <- function(x) {
   dt
 }
 
+.litxr_merge_duplicate_citation_logic_nodes <- function(dt) {
+  if (!nrow(dt)) {
+    return(dt)
+  }
+  dt <- data.table::copy(dt)
+  key_cols <- intersect(c(
+    "ref_id", "node_id", "logic_type", "claim_sentence", "subject_text",
+    "object_text", "modifier_text", "evidence_role", "confidence",
+    "page_or_section", "quote_support", "citation_use", "sentence",
+    "relation", "reuse_context"
+  ), names(dt))
+  if (!length(key_cols)) {
+    return(dt)
+  }
+  tag_parts <- strsplit(as.character(dt$tags %||% NA_character_), "\\s*;\\s*")
+  dt$tags <- vapply(tag_parts, function(x) {
+    x <- trimws(as.character(x))
+    x <- x[!is.na(x) & nzchar(x)]
+    if (!length(x)) NA_character_ else paste(unique(x), collapse = "; ")
+  }, character(1))
+  key_matrix <- dt[, key_cols, drop = FALSE]
+  key_values <- do.call(paste, c(lapply(key_matrix, function(col) {
+    col <- as.character(col)
+    col[is.na(col)] <- ""
+    col
+  }), sep = "\r"))
+  group_idx <- split(seq_len(nrow(dt)), key_values)
+  merged_rows <- lapply(group_idx, function(idx) {
+    row <- dt[idx[[1]], , drop = FALSE]
+    tags <- unlist(strsplit(as.character(dt$tags[idx]), "\\s*;\\s*"), use.names = FALSE)
+    row$tags <- .litxr_collapse_chr(tags)
+    created_vals <- as.character(dt$created_at[idx])
+    created_vals <- created_vals[!is.na(created_vals) & nzchar(trimws(created_vals))]
+    row$created_at <- if (length(created_vals)) created_vals[[1]] else NA_character_
+    updated_vals <- as.character(dt$updated_at[idx])
+    updated_vals <- updated_vals[!is.na(updated_vals) & nzchar(trimws(updated_vals))]
+    row$updated_at <- if (length(updated_vals)) updated_vals[[length(updated_vals)]] else NA_character_
+    row
+  })
+  merged <- data.table::rbindlist(merged_rows, fill = TRUE)
+  merged <- .litxr_align_columns(merged, .litxr_empty_citation_logic_nodes())
+  data.table::setcolorder(merged, names(.litxr_empty_citation_logic_nodes()))
+  merged
+}
+
 .litxr_normalize_citation_logic_nodes <- function(x) {
   dt <- .litxr_as_research_dt(x)
   raw_sentence <- if ("sentence" %in% names(dt)) as.character(dt$sentence) else NULL
@@ -1548,7 +1593,7 @@ litxr_validate_paper_type <- function(x) {
   if (!is.null(raw_reuse_context)) {
     dt$reuse_context <- raw_reuse_context
   }
-  dt
+  .litxr_merge_duplicate_citation_logic_nodes(dt)
 }
 
 #' Template row for standardized findings

@@ -198,9 +198,37 @@ alias_inline_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-alias", cfg)
 stopifnot(identical(as.character(alias_inline_read$anchor_references$reference[[1]]), "Boyd et al. (2011), Distributed optimization and statistical learning via the alternating direction method of multipliers"))
 stopifnot(identical(as.character(alias_inline_read$anchor_references$role[[1]]), "technical foundation"))
 stopifnot(identical(as.character(alias_inline_read$anchor_references$reason[[1]]), "Provides the ADMM background"))
-stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$sentence[[1]]), "Optimization problem solving can be represented as search over a composite space."))
-stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$relation[[1]]), "A can be classified into B, C, D, and E"))
-stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$reuse_context[[1]]), "Use when defining an optimization-space ontology."))
+stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$claim_sentence[[1]]), "Optimization problem solving can be represented as search over a composite space."))
+stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$modifier_text[[1]]), "A can be classified into B, C, D, and E"))
+stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$citation_use[[1]]), "Use when defining an optimization-space ontology."))
+
+duplicate_tag_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-dup-tags", schema_version = "v3")
+duplicate_tag_v3$summary <- "Duplicate tag summary"
+duplicate_tag_v3$motivation <- "Duplicate tag motivation"
+duplicate_tag_v3$citation_logic_nodes <- data.table::data.table(
+  ref_id = "doi:10.1000/v3-dup-tags",
+  node_id = c("node_1", "node_1"),
+  claim_sentence = c(
+    "Agentic workflows can reduce coordination burdens.",
+    "Agentic workflows can reduce coordination burdens."
+  ),
+  logic_type = c("A_reduces_B", "A_reduces_B"),
+  subject_text = c("agentic workflows", "agentic workflows"),
+  object_text = c("coordination burdens", "coordination burdens"),
+  modifier_text = c("through specialization", "through specialization"),
+  evidence_role = c("conceptual_argument", "conceptual_argument"),
+  confidence = c("high", "high"),
+  page_or_section = c("Section 3", "Section 3"),
+  quote_support = c("", ""),
+  citation_use = c("Use for workflow design arguments.", "Use for workflow design arguments."),
+  tags = c("coordination", "specialization"),
+  created_at = NA_character_,
+  updated_at = NA_character_
+)
+litxr::litxr_write_llm_digest("doi:10.1000/v3-dup-tags", duplicate_tag_v3, cfg, keep_history = FALSE, bump_revision = FALSE)
+duplicate_tag_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-dup-tags", cfg)
+stopifnot(nrow(duplicate_tag_read$citation_logic_nodes) == 1L)
+stopifnot(identical(as.character(duplicate_tag_read$citation_logic_nodes$tags[[1]]), "coordination; specialization"))
 
 legacy_digest <- list(
   ref_id = "doi:10.1000/legacy",

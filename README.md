@@ -122,6 +122,8 @@ The arXiv repair scripts now prefer `--collection-id`; `--journal-id` still
 works as a compatibility alias.
 Range repair writes fetched pages to a small delta index during the run and
 compacts that delta into the full collection index once at the end by default.
+`scripts/get_ref_summary.sh` prints a key research-schema summary by default;
+use `--complete` for the full digest rendering.
 
 ## Status
 

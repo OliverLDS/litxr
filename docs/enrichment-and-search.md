@@ -236,7 +236,7 @@ Current reasons:
 
 ## Interactive Digest Workflow
 
-For manual schema-v2 extraction with ChatGPT, use:
+For manual schema-v3 extraction with ChatGPT, use:
 
 - `scripts/build_llm_digest_interactive.R`
 
@@ -248,10 +248,14 @@ Rscript scripts/build_llm_digest_interactive.R \
   --mode create
 ```
 
-The script prints a ready-to-copy prompt, waits for you to download
+The script copies a ready-to-paste prompt with `pbcopy`, waits for you to download
 `litxr_schema.json`, then validates and writes the digest locally after you
 confirm. On macOS, the prompt is copied to the clipboard with `pbcopy` instead
 of being dumped directly to the terminal.
+
+To inspect a reference quickly, use `scripts/get_ref_summary.sh`. By default it
+prints only the key schema sections. Pass `--complete` or `--report complete`
+to render the full digest.
 
 Use `--mode revise` when a local digest already exists and you want ChatGPT to
 improve that digest rather than start from scratch. Revised digests bump

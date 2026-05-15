@@ -1,3 +1,18 @@
+# litxr 0.0.8.5
+
+- Added key versus complete modes to `scripts/get_ref_summary.sh`; key mode is
+  now the default and reports only the most useful research-schema sections for
+  quick reading.
+- Fixed duplicated markdown heading prefixes in the complete
+  `get_ref_summary.sh` output.
+- Hardened schema-v3 citation logic node normalization so duplicate nodes with
+  different tags are merged into one node with combined tags.
+- Expanded the interactive digest prompt with a full citation-logic
+  `logic_type` vocabulary, explicit tag-deduplication guidance, and
+  `anchor_ref_id` guidance for detected arXiv ids or DOIs.
+- Updated `scripts/report_arxiv_category_labels.R` to exclude arXiv ids already
+  present in the blog article record log, including comma-separated grouped ids.
+
 # litxr 0.0.8.4
 
 - Made schema-v3 research-data handling more permissive by accepting
