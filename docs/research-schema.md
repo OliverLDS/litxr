@@ -62,7 +62,78 @@ maps common aliases, and falls back to `unknown` for missing or empty values.
 Legacy labels such as `review`, `dataset`, `policy_report`, and `book` remain
 accepted for backward compatibility.
 
-## Digest Schema V2
+## Digest Schema V4
+
+Schema `v4` is the current schema for new interactive LLM digest prompts. It
+extends `v3` without breaking `v1`, `v2`, or `v3` reads.
+
+Required top-level fields:
+
+- `schema_version`: must be `v4`.
+- `ref_id`: canonical litxr reference id.
+- `digest_revision`: positive integer revision counter.
+- `derived_from_revision`: optional previous revision.
+- `extraction_mode`: extraction workflow label.
+- `prompt_version`: prompt-template version.
+- `model_hint`: optional external model label.
+- `paper_type`: one value from `litxr_paper_type_levels()`.
+- `summary`: concise plain-language summary.
+- `motivation`: gap, puzzle, debate, problem, or need motivating the paper.
+- `research_questions`: explicit or inferred questions.
+- `paper_structure`: section-level structure and purpose.
+- `methods`: methods, research design, analytical procedure, or review strategy.
+- `research_data`: data-source and sample context.
+- `main_variables`: dependent, independent, control, and mechanism variables.
+- `key_findings`: main results, conclusions, propositions, or claims.
+- `limitations`: author-stated or design-implied limitations.
+- `theoretical_mechanism`: conceptual, causal, formal, or process mechanism.
+- `contribution_type`: unordered contribution labels. Prefer
+  `theory_building`, `theory_testing`, `conceptual_framework`,
+  `empirical_evidence`, `causal_evidence`, `measurement`, `method`,
+  `algorithm`, `benchmark`, `system_architecture`, `replication`,
+  `literature_synthesis`, `policy_implication`, `business_implication`,
+  `research_agenda`, or `other`.
+- `ranked_contributions`: ranked contribution objects with `rank`,
+  `contribution_type`, `contribution`, and `reason`.
+- `likely_reader_misconceptions`: ways an average reader might misunderstand,
+  overgeneralize, or misuse the paper.
+- `business_relevance_pathway`: concrete ways the paper can matter for business
+  decisions, operations, governance, products, strategy, risk, or workflows.
+- `evidence_strength`: legacy short evidence-strength field. Prefer
+  `very_low`, `low`, `medium`, `high`, `very_high`, `not_applicable`, or
+  `unknown`; a short explanatory string remains accepted for backward
+  compatibility.
+- `evidence_shape`: general evidence structure for any paper type.
+- `anchor_references`: optional inline anchor-reference rows.
+- `citation_logic_nodes`: optional inline citation-logic rows.
+- `keywords`: retrieval keywords.
+- `notes`: free-form notes.
+- `generated_at`: creation timestamp.
+- `updated_at`: write/update timestamp.
+
+`identification_strategy` remains an optional empirical field. It means how the
+paper supports its empirical or causal claim through research design. Examples
+include randomized assignment, quasi-experimental design, panel or
+observational identification, comparison logic, triangulation, qualitative
+process tracing, benchmark protocol, or a clear statement that no causal
+identification is claimed.
+
+`evidence_shape` generalizes evidence beyond empirical papers:
+
+- `evidence_mode`: one of `empirical_quantitative`,
+  `empirical_qualitative`, `experimental`, `simulation`, `benchmark`,
+  `theoretical_model`, `conceptual_argument`,
+  `methodological_demonstration`, `review_synthesis`, `policy_analysis`,
+  `descriptive`, `none`, `unknown`.
+- `evidence_basis`: short points describing what the paper uses as support.
+- `inference_type`: one of `causal`, `associational`, `predictive`,
+  `descriptive`, `mechanistic`, `formal`, `interpretive`, `comparative`,
+  `normative`, `synthetic`, `not_applicable`, `unknown`.
+- `strength_level`: one of `very_low`, `low`, `medium`, `high`,
+  `very_high`, `not_applicable`, `unknown`.
+- `limitations`: short evidence limitations.
+
+## Digest Schema V2/V3
 
 `litxr_llm_digest_template()` now defaults to schema `v2`.
 
@@ -100,7 +171,7 @@ Backward compatibility:
   shape
 - new writes use `paper_type` normalization automatically
 
-Optional schema-v3 inline fields:
+Schema `v3` adds optional inline fields:
 
 - `anchor_references`
 - `citation_logic_nodes`

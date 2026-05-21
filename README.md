@@ -124,6 +124,10 @@ Range repair writes fetched pages to a small delta index during the run and
 compacts that delta into the full collection index once at the end by default.
 `scripts/get_ref_summary.sh` prints a key research-schema summary by default;
 use `--complete` for the full digest rendering.
+The interactive digest prompt is built by `litxr_llm_digest_prompt()` from
+package fragments under `inst/prompts/`. New interactive prompts use schema
+`v4`, which adds ranked contributions, reader-misconception checks, business
+relevance pathways, and a general `evidence_shape` field.
 
 ## Status
 

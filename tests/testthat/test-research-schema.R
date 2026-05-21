@@ -87,6 +87,67 @@ stopifnot(identical(digest_template_v3$schema_version, "v3"))
 stopifnot(all(c("anchor_references", "citation_logic_nodes") %in% names(digest_template_v3)))
 stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v3))))
 
+digest_template_v4 <- litxr::litxr_llm_digest_template("doi:10.1000/v4", schema_version = "v4")
+stopifnot(identical(digest_template_v4$schema_version, "v4"))
+stopifnot(all(c(
+  "ranked_contributions",
+  "likely_reader_misconceptions",
+  "business_relevance_pathway",
+  "evidence_shape"
+) %in% names(digest_template_v4)))
+digest_template_v4$ranked_contributions <- list(list(
+  rank = 1L,
+  contribution_type = "method",
+  contribution = "Provides a test contribution.",
+  reason = "It is the central contribution in this fixture."
+))
+digest_template_v4$likely_reader_misconceptions <- c("A reader might overgeneralize the result.")
+digest_template_v4$business_relevance_pathway <- c("The method can inform workflow design.")
+digest_template_v4$evidence_shape <- list(
+  evidence_mode = "conceptual_argument",
+  evidence_basis = c("The fixture uses conceptual support."),
+  inference_type = "interpretive",
+  strength_level = "medium",
+  limitations = c("Fixture-only evidence.")
+)
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v4))))
+bad_v4 <- digest_template_v4
+bad_v4$evidence_shape$evidence_mode <- "bad_mode"
+stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v4), silent = TRUE), "try-error"))
+
+prompt_ref <- data.table::data.table(
+  ref_id = "arxiv:2501.00001",
+  source = "arxiv",
+  source_id = "2501.00001",
+  title = "Prompt Builder Test Paper",
+  abstract = "Prompt builder abstract.",
+  doi = NA_character_,
+  year = 2025L
+)
+litxr:::.litxr_write_project_references_index(cfg, prompt_ref)
+prompt_create <- litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "create")
+stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create, fixed = TRUE))
+stopifnot(grepl("https://arxiv.org/pdf/2501.00001", prompt_create, fixed = TRUE))
+stopifnot(grepl("anchor_ref_id", prompt_create, fixed = TRUE))
+stopifnot(grepl("Do not fabricate anchor_ref_id", prompt_create, fixed = TRUE))
+stopifnot(grepl("A_mitigates_effect_of_B_on_C", prompt_create, fixed = TRUE))
+stopifnot(grepl("schema-v4", prompt_create, fixed = TRUE))
+stopifnot(grepl("identification_strategy: how the paper supports its empirical or causal claim", prompt_create, fixed = TRUE))
+stopifnot(grepl("likely_reader_misconceptions", prompt_create, fixed = TRUE))
+stopifnot(grepl("business_relevance_pathway", prompt_create, fixed = TRUE))
+stopifnot(grepl("ranked_contributions", prompt_create, fixed = TRUE))
+stopifnot(grepl("evidence_shape", prompt_create, fixed = TRUE))
+stopifnot(!grepl("{{", prompt_create, fixed = TRUE))
+
+prompt_digest <- litxr::litxr_llm_digest_template("arxiv:2501.00001", schema_version = "v3")
+prompt_digest$summary <- "Existing summary"
+prompt_digest$motivation <- "Existing motivation"
+litxr::litxr_write_llm_digest("arxiv:2501.00001", prompt_digest, cfg, keep_history = FALSE, bump_revision = FALSE)
+prompt_revise <- litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "revise")
+stopifnot(grepl("Existing local digest to improve:", prompt_revise, fixed = TRUE))
+stopifnot(grepl("Existing summary", prompt_revise, fixed = TRUE))
+stopifnot(inherits(try(litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "create"), silent = TRUE), "try-error"))
+
 digest_template_v3_emp <- litxr::litxr_llm_digest_template("doi:10.1000/v3-emp", schema_version = "v3")
 digest_template_v3_emp$paper_type <- "empirical archival"
 digest_template_v3_emp$summary <- "Empirical summary"

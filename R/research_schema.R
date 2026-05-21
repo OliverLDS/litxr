@@ -291,6 +291,22 @@ litxr_validate_paper_type <- function(x) {
   x
 }
 
+.litxr_llm_digest_template_v4 <- function(ref_id) {
+  x <- .litxr_llm_digest_template_v3(ref_id)
+  x$schema_version <- "v4"
+  x$ranked_contributions <- list()
+  x$likely_reader_misconceptions <- character()
+  x$business_relevance_pathway <- character()
+  x$evidence_shape <- list(
+    evidence_mode = "unknown",
+    evidence_basis = character(),
+    inference_type = "unknown",
+    strength_level = "unknown",
+    limitations = character()
+  )
+  x
+}
+
 .litxr_first_nonnull <- function(...) {
   values <- list(...)
   for (value in values) {
@@ -378,6 +394,15 @@ litxr_validate_paper_type <- function(x) {
 
 .litxr_has_inline_llm_tables <- function(digest) {
   any(c("anchor_references", "citation_logic_nodes") %in% names(digest))
+}
+
+.litxr_has_v4_llm_fields <- function(digest) {
+  any(c(
+    "ranked_contributions",
+    "likely_reader_misconceptions",
+    "business_relevance_pathway",
+    "evidence_shape"
+  ) %in% names(digest))
 }
 
 .litxr_inline_llm_table_legacy_field_names <- function(field_name) {
@@ -520,11 +545,19 @@ litxr_validate_paper_type <- function(x) {
 
 .litxr_normalize_llm_digest_for_write <- function(digest, ref_id = NULL) {
   version <- if (is.null(digest[["schema_version"]]) || !length(digest[["schema_version"]])) {
-    if (.litxr_has_inline_llm_tables(digest)) "v3" else "v2"
+    if (.litxr_has_v4_llm_fields(digest)) {
+      "v4"
+    } else if (.litxr_has_inline_llm_tables(digest)) {
+      "v3"
+    } else {
+      "v2"
+    }
   } else {
     .litxr_llm_digest_schema_version(digest)
   }
-  template_fun <- if (identical(version, "v3") || .litxr_has_inline_llm_tables(digest)) {
+  template_fun <- if (identical(version, "v4") || .litxr_has_v4_llm_fields(digest)) {
+    .litxr_llm_digest_template_v4
+  } else if (identical(version, "v3") || .litxr_has_inline_llm_tables(digest)) {
     .litxr_llm_digest_template_v3
   } else {
     .litxr_llm_digest_template_v2
@@ -556,14 +589,10 @@ litxr_validate_paper_type <- function(x) {
   if ("research_data" %in% names(payload)) {
     payload$research_data <- .litxr_research_data_normalize_sample_size(payload$research_data)
   }
-  if (!identical(version, "v2")) {
-    payload$digest_revision <- 1L
-    payload$derived_from_revision <- NULL
-    payload$extraction_mode <- "legacy"
-    payload$prompt_version <- NA_character_
-    payload$model_hint <- NA_character_
-    payload$updated_at <- payload$generated_at %||% format(Sys.time(), tz = "UTC", usetz = TRUE)
-  } else {
+  if ("evidence_shape" %in% names(payload)) {
+    payload$evidence_shape <- .litxr_normalize_evidence_shape(payload$evidence_shape)
+  }
+  if (identical(version, "v2") || identical(version, "v3") || identical(version, "v4")) {
     payload$digest_revision <- suppressWarnings(as.integer(.litxr_first_nonnull(payload$digest_revision, 1L)))
     if (is.na(payload$digest_revision) || payload$digest_revision < 1L) payload$digest_revision <- 1L
     derived <- .litxr_first_nonnull(payload$derived_from_revision, NULL)
@@ -578,6 +607,13 @@ litxr_validate_paper_type <- function(x) {
     payload$model_hint <- as.character(.litxr_first_nonnull(payload$model_hint, NA_character_))
     payload$generated_at <- as.character(.litxr_first_nonnull(payload$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
     payload$updated_at <- as.character(.litxr_first_nonnull(payload$updated_at, payload$generated_at, format(Sys.time(), tz = "UTC", usetz = TRUE)))
+  } else {
+    payload$digest_revision <- 1L
+    payload$derived_from_revision <- NULL
+    payload$extraction_mode <- "legacy"
+    payload$prompt_version <- NA_character_
+    payload$model_hint <- NA_character_
+    payload$updated_at <- payload$generated_at %||% format(Sys.time(), tz = "UTC", usetz = TRUE)
   }
   payload
 }
@@ -589,7 +625,7 @@ litxr_validate_paper_type <- function(x) {
   if (!("schema_version" %in% names(digest))) {
     digest$schema_version <- "v1"
   }
-  if (identical(.litxr_llm_digest_schema_version(digest), "v2") || identical(.litxr_llm_digest_schema_version(digest), "v3")) {
+  if (identical(.litxr_llm_digest_schema_version(digest), "v2") || identical(.litxr_llm_digest_schema_version(digest), "v3") || identical(.litxr_llm_digest_schema_version(digest), "v4")) {
     if (!("digest_revision" %in% names(digest)) || is.null(digest$digest_revision)) {
       digest$digest_revision <- 1L
     }
@@ -610,7 +646,7 @@ litxr_validate_paper_type <- function(x) {
     }
     if (!("anchor_references" %in% names(digest))) {
       digest$anchor_references <- list()
-    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3")) {
+    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3") || identical(.litxr_llm_digest_schema_version(digest), "v4")) {
       digest$anchor_references <- .litxr_inline_llm_table_to_dt(
         digest$anchor_references,
         ref_id = digest$ref_id %||% NULL,
@@ -619,7 +655,7 @@ litxr_validate_paper_type <- function(x) {
     }
     if (!("citation_logic_nodes" %in% names(digest))) {
       digest$citation_logic_nodes <- list()
-    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3")) {
+    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3") || identical(.litxr_llm_digest_schema_version(digest), "v4")) {
       digest$citation_logic_nodes <- .litxr_inline_llm_table_to_dt(
         digest$citation_logic_nodes,
         ref_id = digest$ref_id %||% NULL,
@@ -633,7 +669,144 @@ litxr_validate_paper_type <- function(x) {
   if ("research_data" %in% names(digest)) {
     digest$research_data <- .litxr_research_data_normalize_sample_size(digest$research_data)
   }
+  if ("evidence_shape" %in% names(digest)) {
+    digest$evidence_shape <- .litxr_normalize_evidence_shape(digest$evidence_shape)
+  }
   digest
+}
+
+.litxr_evidence_shape_levels <- function() {
+  list(
+    evidence_mode = c(
+      "empirical_quantitative",
+      "empirical_qualitative",
+      "experimental",
+      "simulation",
+      "benchmark",
+      "theoretical_model",
+      "conceptual_argument",
+      "methodological_demonstration",
+      "review_synthesis",
+      "policy_analysis",
+      "descriptive",
+      "none",
+      "unknown"
+    ),
+    inference_type = c(
+      "causal",
+      "associational",
+      "predictive",
+      "descriptive",
+      "mechanistic",
+      "formal",
+      "interpretive",
+      "comparative",
+      "normative",
+      "synthetic",
+      "not_applicable",
+      "unknown"
+    ),
+    strength_level = c(
+      "very_low",
+      "low",
+      "medium",
+      "high",
+      "very_high",
+      "not_applicable",
+      "unknown"
+    )
+  )
+}
+
+.litxr_normalize_schema_token <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  x[is.na(x)] <- "unknown"
+  x <- gsub("[[:space:]-]+", "_", x)
+  x <- gsub("_+", "_", x)
+  x <- gsub("^_+|_+$", "", x)
+  x[!nzchar(x)] <- "unknown"
+  x
+}
+
+.litxr_normalize_evidence_shape <- function(x) {
+  template <- .litxr_llm_digest_template_v4("")$evidence_shape
+  if (is.null(x) || !length(x)) {
+    return(template)
+  }
+  if (!is.list(x)) {
+    stop("LLM digest field `evidence_shape` must be a named list.", call. = FALSE)
+  }
+  out <- template
+  for (name in intersect(names(out), names(x))) {
+    out[[name]] <- x[[name]]
+  }
+  for (name in c("evidence_mode", "inference_type", "strength_level")) {
+    value <- out[[name]]
+    if (is.list(value) && length(value)) value <- value[[1]]
+    value <- .litxr_normalize_schema_token(value[[1]] %||% value)
+    out[[name]] <- value[[1]]
+  }
+  for (name in c("evidence_basis", "limitations")) {
+    value <- out[[name]]
+    if (is.list(value)) value <- unlist(value, use.names = FALSE)
+    out[[name]] <- as.character(value %||% character())
+  }
+  out
+}
+
+.litxr_validate_ranked_contributions <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(invisible(TRUE))
+  }
+  if (!is.list(x)) {
+    stop("LLM digest field `ranked_contributions` must be a list.", call. = FALSE)
+  }
+  ranks <- integer()
+  for (i in seq_along(x)) {
+    row <- x[[i]]
+    if (!is.list(row)) {
+      stop("Each `ranked_contributions` item must be a named list.", call. = FALSE)
+    }
+    missing <- setdiff(c("rank", "contribution_type", "contribution", "reason"), names(row))
+    if (length(missing)) {
+      stop("Each `ranked_contributions` item is missing fields: ", paste(missing, collapse = ", "), call. = FALSE)
+    }
+    rank <- suppressWarnings(as.integer(row$rank[[1]] %||% row$rank))
+    if (length(rank) != 1L || is.na(rank) || rank < 1L) {
+      stop("Each `ranked_contributions$rank` must be a positive integer.", call. = FALSE)
+    }
+    ranks <- c(ranks, rank)
+    contribution <- as.character(row$contribution[[1]] %||% row$contribution)
+    if (!length(contribution) || is.na(contribution[[1]]) || !nzchar(trimws(contribution[[1]]))) {
+      stop("Each `ranked_contributions$contribution` must be non-empty.", call. = FALSE)
+    }
+  }
+  if (anyDuplicated(ranks)) {
+    stop("`ranked_contributions$rank` values must be unique.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_validate_evidence_shape <- function(x) {
+  if (!is.list(x)) {
+    stop("LLM digest field `evidence_shape` must be a named list.", call. = FALSE)
+  }
+  missing <- setdiff(c("evidence_mode", "evidence_basis", "inference_type", "strength_level", "limitations"), names(x))
+  if (length(missing)) {
+    stop("LLM digest field `evidence_shape` is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  levels <- .litxr_evidence_shape_levels()
+  for (name in c("evidence_mode", "inference_type", "strength_level")) {
+    value <- .litxr_normalize_schema_token(x[[name]][[1]] %||% x[[name]])
+    if (!(value %in% levels[[name]])) {
+      stop(
+        "LLM digest field `evidence_shape$", name, "` must be one of: ",
+        paste(levels[[name]], collapse = ", "),
+        call. = FALSE
+      )
+    }
+  }
+  invisible(TRUE)
 }
 
 .litxr_llm_digest_is_v2 <- function(digest) {
@@ -753,6 +926,19 @@ litxr_validate_paper_type <- function(x) {
       "main_variables", "key_findings",
       "limitations", "theoretical_mechanism",
       "contribution_type", "evidence_strength", "keywords", "notes",
+      "generated_at", "updated_at"
+    ))
+  }
+  if (identical(schema_version, "v4")) {
+    return(c(
+      "schema_version", "ref_id", "digest_revision",
+      "extraction_mode", "prompt_version", "model_hint", "paper_type", "summary", "motivation",
+      "research_questions", "paper_structure", "methods", "research_data",
+      "main_variables", "key_findings",
+      "limitations", "theoretical_mechanism",
+      "contribution_type", "ranked_contributions",
+      "likely_reader_misconceptions", "business_relevance_pathway",
+      "evidence_strength", "evidence_shape", "keywords", "notes",
       "generated_at", "updated_at"
     ))
   }

@@ -141,15 +141,22 @@ before digest generation.
 
 Each digest is one JSON file under `project.data_root/llm/`.
 
-Current template default: schema `v2`.
+Interactive prompt default: schema `v4`.
+
+Package template default: schema `v2`, retained for backward compatibility in
+programmatic code.
 
 Legacy `v1` digests without `schema_version` still read and validate
 successfully.
 
-Core v2 fields:
+Core latest fields:
 
 - `schema_version`
 - `ref_id`
+- `digest_revision`
+- `extraction_mode`
+- `prompt_version`
+- `model_hint`
 - `paper_type`
 - `summary`
 - `motivation`
@@ -167,10 +174,23 @@ Core v2 fields:
 - `descriptive_statistics_summary`
 - `standardized_findings_summary`
 - `contribution_type`
+- `ranked_contributions`
+- `likely_reader_misconceptions`
+- `business_relevance_pathway`
 - `evidence_strength`
+- `evidence_shape`
+- `anchor_references`
+- `citation_logic_nodes`
 - `keywords`
 - `notes`
 - `generated_at`
+- `updated_at`
+
+`identification_strategy` means how the paper supports its empirical or causal
+claim through research design, such as randomized assignment,
+quasi-experimental design, panel/observational identification, qualitative
+process tracing, benchmark protocol, triangulation, or a statement that the
+paper does not make a causal claim.
 
 Helpers:
 
@@ -186,9 +206,11 @@ Helpers:
 The `paper_type` field uses the canonical vocabulary returned by
 `litxr_paper_type_levels()`.
 
-Schema `v3` digests may also carry optional inline `anchor_references` and
-`citation_logic_nodes` fields. Those are validated and preserved when present,
-but the same information can also be stored as separate project-level tables
+Schema `v3` digests may carry optional inline `anchor_references` and
+`citation_logic_nodes` fields. Schema `v4` keeps those blocks and adds
+`ranked_contributions`, `likely_reader_misconceptions`,
+`business_relevance_pathway`, and `evidence_shape`. The same anchor and
+citation-node information can also be stored as separate project-level tables
 under `project.data_root/findings/`.
 
 ## Building Digests
@@ -252,6 +274,11 @@ The script copies a ready-to-paste prompt with `pbcopy`, waits for you to downlo
 `litxr_schema.json`, then validates and writes the digest locally after you
 confirm. On macOS, the prompt is copied to the clipboard with `pbcopy` instead
 of being dumped directly to the terminal.
+
+Prompt generation itself is package-owned through `litxr_llm_digest_prompt()`.
+The prompt text is assembled from Markdown fragments under
+`inst/prompts/llm_digest_v3/fragments/`, while the script remains a thin
+clipboard and ingestion wrapper.
 
 To inspect a reference quickly, use `scripts/get_ref_summary.sh`. By default it
 prints only the key schema sections. Pass `--complete` or `--report complete`

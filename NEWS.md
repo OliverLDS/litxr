@@ -1,3 +1,13 @@
+# litxr 0.0.8.6
+
+- Added schema-v4 LLM digest support with `ranked_contributions`,
+  `likely_reader_misconceptions`, `business_relevance_pathway`, and the
+  general-purpose `evidence_shape` block.
+- Moved the interactive digest prompt default to schema-v4 and documented a
+  fuller schema contract, including the meaning of `identification_strategy`.
+- Extended LLM digest reads/search summaries to carry schema-v4 fields while
+  preserving v2/v3 compatibility.
+
 # litxr 0.0.8.5
 
 - Added key versus complete modes to `scripts/get_ref_summary.sh`; key mode is

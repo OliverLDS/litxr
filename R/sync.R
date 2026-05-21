@@ -2252,14 +2252,17 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 #' Create a default structured LLM digest template
 #'
 #' @param ref_id Reference identifier.
-#' @param schema_version Digest schema version. Supported values are `"v2"`
-#'   and `"v3"`.
+#' @param schema_version Digest schema version. Supported values are `"v2"`,
+#'   `"v3"`, and `"v4"`.
 #'
 #' @return Named list representing the default digest schema.
 #' @export
 litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {
-  if (!identical(schema_version, "v2") && !identical(schema_version, "v3")) {
-    stop("Only `schema_version = \"v2\"` or `\"v3\"` is supported for new templates in the current package version.", call. = FALSE)
+  if (!identical(schema_version, "v2") && !identical(schema_version, "v3") && !identical(schema_version, "v4")) {
+    stop("Only `schema_version = \"v2\"`, `\"v3\"`, or `\"v4\"` is supported for new templates in the current package version.", call. = FALSE)
+  }
+  if (identical(schema_version, "v4")) {
+    return(.litxr_llm_digest_template_v4(ref_id))
   }
   if (identical(schema_version, "v3")) {
     return(.litxr_llm_digest_template_v3(ref_id))
@@ -2294,10 +2297,10 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history =
 
   existing <- litxr_read_llm_digest(ref_id, cfg)
   payload <- .litxr_normalize_llm_digest_for_write(digest, ref_id = ref_id)
-  if (identical(.litxr_llm_digest_schema_version(payload), "v2")) {
+  if (identical(.litxr_llm_digest_schema_version(payload), "v2") || identical(.litxr_llm_digest_schema_version(payload), "v3") || identical(.litxr_llm_digest_schema_version(payload), "v4")) {
     if (is.null(existing)) {
       existing_revision <- 0L
-    } else if (!identical(.litxr_llm_digest_schema_version(existing), "v2")) {
+    } else if (!identical(.litxr_llm_digest_schema_version(existing), .litxr_llm_digest_schema_version(payload))) {
       existing_revision <- 1L
     } else {
       existing_revision <- suppressWarnings(as.integer(existing$digest_revision %||% 1L))
@@ -2508,7 +2511,11 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
       descriptive_statistics_summary = x$descriptive_statistics_summary %||% NA_character_,
       standardized_findings_summary = x$standardized_findings_summary %||% NA_character_,
       contribution_type = list(unlist(x$contribution_type %||% character(), use.names = FALSE)),
+      ranked_contributions = list(x$ranked_contributions %||% list()),
+      likely_reader_misconceptions = list(unlist(x$likely_reader_misconceptions %||% character(), use.names = FALSE)),
+      business_relevance_pathway = list(unlist(x$business_relevance_pathway %||% character(), use.names = FALSE)),
       evidence_strength = x$evidence_strength %||% NA_character_,
+      evidence_shape = list(x$evidence_shape %||% NULL),
       anchor_references = list(x$anchor_references %||% list()),
       citation_logic_nodes = list(x$citation_logic_nodes %||% list()),
       keywords = list(unlist(x$keywords %||% character(), use.names = FALSE)),
@@ -2580,7 +2587,11 @@ litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, co
           flatten_cell(row$anchor_references[[1]]),
           flatten_cell(row$citation_logic_nodes[[1]]),
           flatten_cell(row$contribution_type[[1]]),
+          flatten_cell(row$ranked_contributions[[1]]),
+          flatten_cell(row$likely_reader_misconceptions[[1]]),
+          flatten_cell(row$business_relevance_pathway[[1]]),
           flatten_cell(row$evidence_strength[[1]]),
+          flatten_cell(row$evidence_shape[[1]]),
           flatten_cell(row$keywords[[1]])
         ),
         collapse = " "
@@ -2757,7 +2768,7 @@ litxr_validate_llm_digest <- function(digest) {
     stop("LLM digest is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
   }
 
-  if (identical(schema_version, "v2") || identical(schema_version, "v3")) {
+  if (identical(schema_version, "v2") || identical(schema_version, "v3") || identical(schema_version, "v4")) {
     litxr_validate_paper_type(digest$paper_type)
     digest_revision <- suppressWarnings(as.integer(digest$digest_revision[[1]] %||% digest$digest_revision))
     if (length(digest_revision) != 1L || is.na(digest_revision) || digest_revision < 1L) {
@@ -2817,8 +2828,16 @@ litxr_validate_llm_digest <- function(digest) {
         "control_variables", "mechanism_variables"
       )
     )
-    if (identical(schema_version, "v3")) {
+    if (identical(schema_version, "v3") || identical(schema_version, "v4")) {
       .litxr_warn_v3_missing_empirical_fields(digest)
+    }
+    if (identical(schema_version, "v4")) {
+      .litxr_validate_list_fields(
+        digest,
+        c("likely_reader_misconceptions", "business_relevance_pathway")
+      )
+      .litxr_validate_ranked_contributions(digest$ranked_contributions)
+      .litxr_validate_evidence_shape(digest$evidence_shape)
     }
     if ("anchor_references" %in% names(digest)) {
       .litxr_validate_inline_llm_table_field(

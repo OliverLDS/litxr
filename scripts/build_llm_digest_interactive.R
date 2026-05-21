@@ -12,7 +12,7 @@ parse_args <- function(args) {
     ref_id = NULL,
     json_path = "~/Downloads/litxr_schema.json",
     mode = "create",
-    prompt_version = "v3.0"
+    prompt_version = "v4.0"
   )
   i <- 1L
 
@@ -51,15 +51,15 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/build_llm_digest_interactive.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json] [--mode create|revise] [--prompt-version v3.0]",
+      "  Rscript scripts/build_llm_digest_interactive.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json] [--mode create|revise] [--prompt-version v4.0]",
       "",
       "Options:",
-      "  --ref-id REF_ID     Canonical litxr ref_id to build a schema-v3 digest for.",
+      "  --ref-id REF_ID     Canonical litxr ref_id to build a schema-v4 digest for.",
       "  --json-path PATH    Downloaded JSON path to ingest after ChatGPT returns the schema.",
       "                      Default: ~/Downloads/litxr_schema.json",
       "  --mode MODE         Either `create` or `revise`. Default: create",
       "  --prompt-version V  Prompt template version metadata to store on ingest.",
-      "                      Default: v3.0",
+      "                      Default: v4.0",
       "  -h, --help          Show this help message.",
       "",
       "Workflow:",
@@ -70,13 +70,6 @@ usage <- function() {
       sep = "\n"
     )
   )
-}
-
-as_scalar_chr <- function(x, default = NA_character_) {
-  if (is.null(x) || !length(x) || is.na(x[[1]]) || !nzchar(as.character(x[[1]]))) {
-    return(default)
-  }
-  as.character(x[[1]])
 }
 
 parsed <- parse_args(args)
@@ -95,162 +88,19 @@ ref_id <- as.character(parsed$ref_id)
 json_path <- path.expand(as.character(parsed$json_path))
 
 cfg <- litxr::litxr_read_config()
-ref <- litxr::litxr_find_refs(ref_id = ref_id, config = cfg)
-
-if (!nrow(ref)) {
-  stop("Reference not found in local litxr cache: ", ref_id, call. = FALSE)
-}
-if (nrow(ref) > 1L) {
-  stop("Expected exactly one reference row for ", ref_id, " but found ", nrow(ref), ".", call. = FALSE)
-}
 
 mode <- tolower(trimws(as.character(parsed$mode)))
 if (!(mode %in% c("create", "revise"))) {
   stop("`--mode` must be either `create` or `revise`.", call. = FALSE)
 }
 
-title_value <- as_scalar_chr(ref$title, ref_id)
-doi_value <- as_scalar_chr(ref$doi)
-source_value <- as_scalar_chr(ref$source)
-source_id_value <- as_scalar_chr(ref$source_id)
-template <- litxr::litxr_llm_digest_template(ref_id, schema_version = "v3")
-existing_digest <- litxr::litxr_read_llm_digest(ref_id, cfg)
-if (identical(mode, "create") && !is.null(existing_digest)) {
-  stop("A local digest already exists for this ref_id. Use `--mode revise` to improve it.", call. = FALSE)
-}
-if (identical(mode, "revise") && is.null(existing_digest)) {
-  stop("`--mode revise` requires an existing local digest for ref_id: ", ref_id, call. = FALSE)
-}
-template_json <- jsonlite::toJSON(
-  template,
-  auto_unbox = TRUE,
-  pretty = TRUE,
-  null = "null",
-  na = "null"
+prompt_text <- litxr::litxr_llm_digest_prompt(
+  ref_id = ref_id,
+  config = cfg,
+  mode = mode,
+  schema_version = "v4",
+  prompt_version = parsed$prompt_version
 )
-paper_type_vocab <- paste(litxr::litxr_paper_type_levels(), collapse = ", ")
-
-id_lines <- c(sprintf("ref_id: %s", ref_id))
-if (!is.na(doi_value)) id_lines <- c(id_lines, sprintf("doi: %s", doi_value))
-if (!is.na(source_id_value) && !identical(source_id_value, ref_id)) {
-  source_label <- if (is.na(source_value) || !nzchar(source_value)) "source" else source_value
-  id_lines <- c(id_lines, sprintf("%s_id: %s", source_label, source_id_value))
-}
-arxiv_hint_lines <- character()
-if (startsWith(ref_id, "arxiv:")) {
-  arxiv_id <- sub("^arxiv:", "", ref_id)
-  arxiv_hint_lines <- c(
-    "ArXiv-specific hint:",
-    sprintf("  - HTML full text: %s", sprintf("https://arxiv.org/html/%s", arxiv_id)),
-    sprintf("  - PDF full text: %s", sprintf("https://arxiv.org/pdf/%s", arxiv_id)),
-    "  Use these direct links first before exploring other resources."
-  )
-}
-
-prompt_lines <- c(
-  "You are helping build a structured litxr schema-v3 JSON digest for one academic paper.",
-  "",
-  "Paper metadata:",
-  sprintf("title: %s", title_value),
-  id_lines,
-  arxiv_hint_lines,
-  "",
-  "Instructions:",
-  "1. Find the full text of this paper.",
-  "2. Prefer an HTML full-text version if available.",
-  "3. If HTML full text is not available, try to find a PDF version.",
-  "4. Make sure you actually read the full text instead of guessing from abstract or metadata only.",
-  "5. If you cannot find the full text, say clearly that you cannot find it and do not invent details.",
-  "6. After reading the full text, parse the paper into the exact schema-v3 JSON below.",
-  "7. Return a downloadable JSON file named litxr_schema.json.",
-  "8. Do not add extra keys beyond this schema unless they already exist in the schema.",
-  "9. Keep unknown fields explicit with null, empty string, or empty arrays as appropriate; do not guess.",
-  sprintf("10. The accepted paper_type vocabulary is: %s.", paper_type_vocab),
-  sprintf("11. This extraction is in `%s` mode with prompt_version `%s`.", mode, parsed$prompt_version),
-  "12. Populate the optional inline v3 blocks explicitly when supported by the paper:",
-  "    - anchor_references",
-  "    - citation_logic_nodes",
-  "    Use these inline blocks to provide up to three anchor references and reusable citation logic sentences.",
-  "    Follow these field rules strictly:",
-  "    - Do not collapse multiple meanings into one field.",
-  "    - Do not put the whole explanation into citation_key and leave the other anchor fields empty.",
-  "    - Do not leave claim_sentence empty or copy node_id into claim_sentence.",
-  "    - Do not repeat the same citation_logic_node just to attach different tags. Keep one node per semantic claim and combine all relevant tags into that node's tags array.",
-  "    - If a field is unsupported by the paper, use null, empty string, or empty array instead of guessing.",
-  "    Anchor reference field guidance:",
-  "    - citation_key: short citation key such as boyd_2011_admm",
-  "    - anchor_title: the prior-work title or short citation text",
-  "    - anchor_ref_id: if the anchor reference has a detected arXiv id or DOI, use canonical form such as arxiv:2401.01234 or doi:10.1000/example; otherwise use null",
-  "    - anchor_role: one role label such as methodological_foundation, conceptual_foundation, review_anchor, main_comparison",
-  "    - reason: why this prior work matters for understanding the current paper",
-  "    - relationship_to_current_paper: one relationship such as builds_on, extends, compares_with, uses_as_context",
-  "    - Do not fabricate anchor_ref_id. Only provide an arXiv id or DOI when it is explicitly detected from the paper, reference list, metadata, or reliable source.",
-  "    Anchor reference example:",
-  '    [{"anchor_rank":1,"citation_key":"boyd_2011_admm","anchor_title":"Distributed Optimization and Statistical Learning via the Alternating Direction Method of Multipliers","anchor_ref_id":"doi:10.1561/2200000016","anchor_role":"methodological_foundation","reason":"Provides the ADMM background underlying the optimization workflow discussed in the paper.","relationship_to_current_paper":"builds_on","confidence":"high"}]',
-  "    Citation logic node field guidance:",
-  "    - claim_sentence: a reusable citation-ready sentence",
-  "    - logic_type: choose exactly one controlled relation label from the allowed vocabulary below:",
-  "      A_improves_B",
-  "      A_reduces_B",
-  "      A_causes_B",
-  "      A_contributes_to_B",
-  "      A_is_associated_with_B",
-  "      A_predicts_B",
-  "      A_mediates_B_and_C",
-  "      A_moderates_B_and_C",
-  "      A_mitigates_effect_of_B_on_C",
-  "      A_amplifies_effect_of_B_on_C",
-  "      A_has_limitation_B",
-  "      A_faces_challenge_B",
-  "      A_outperforms_B",
-  "      A_underperforms_B",
-  "      A_is_better_than_B_for_C",
-  "      A_is_worse_than_B_for_C",
-  "      A_extends_B",
-  "      A_contradicts_B",
-  "      A_supports_B",
-  "      A_classified_into_B_C_D",
-  "      A_consists_of_B_C_D",
-  "      A_requires_B",
-  "      A_depends_on_B",
-  "      A_enables_B",
-  "      A_constrains_B",
-  "      A_is_proxy_for_B",
-  "      A_measures_B",
-  "      A_operationalizes_B",
-  "      A_introduces_B",
-  "      A_proposes_B",
-  "      A_reviews_B",
-  "      A_synthesizes_B",
-  "      A_provides_evidence_for_B",
-  "      A_provides_counterevidence_to_B",
-  "      unknown",
-  "    - subject_text: the main subject of the claim",
-  "    - object_text: the main object or outcome of the claim",
-  "    - modifier_text: qualifier, condition, mechanism, or relation detail when useful",
-  "    - citation_use: when a future writer should cite this node",
-  "    Citation logic node example:",
-  '    [{"node_id":"node_1","claim_sentence":"Agentic workflows can reduce manual coordination burdens when reasoning, tool use, and validation are decomposed across specialized agents.","logic_type":"A_reduces_B","subject_text":"agentic workflows with specialized agents","object_text":"manual coordination burdens","modifier_text":"when reasoning, tool use, and validation are decomposed across agent roles","evidence_role":"conceptual_argument","confidence":"medium","page_or_section":"Section 3","quote_support":"","citation_use":"Use when arguing that agentic workflow design can reduce coordination-heavy manual work.","tags":["agentic workflow","coordination","specialized agents"]}]',
-  "13. For research_data, keep sample_size numeric only when there is a real count.",
-  "    If the paper only describes a scenario, benchmark size, application count, or other narrative context, put that text in sample_size_note instead of sample_size.",
-  "14. Keep field semantics separate. For example:",
-  "    - citation_key is a short key, not the entire prior-work explanation",
-  "    - anchor_title is the title or short citation text",
-  "    - anchor_role is the role label",
-  "    - reason is the explanation",
-  "    - claim_sentence is the actual reusable sentence",
-  "    - logic_type is the controlled relation label",
-  "",
-  if (identical(mode, "revise")) "Existing local digest to improve:" else NULL,
-  if (identical(mode, "revise")) jsonlite::toJSON(existing_digest, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null") else NULL,
-  if (identical(mode, "revise")) "" else NULL,
-  if (identical(mode, "revise")) "Revise the existing digest rather than rewriting blindly. Preserve correct fields, correct mistakes, and improve incomplete fields when the full text supports it. Keep the inline anchor_references and citation_logic_nodes blocks current and explicit." else NULL,
-  if (identical(mode, "revise")) "" else NULL,
-  "Return JSON matching this schema exactly:",
-  template_json
-)
-
-prompt_text <- paste(prompt_lines, collapse = "\n")
 clipboard <- pipe("pbcopy", open = "w")
 writeLines(prompt_text, clipboard, useBytes = TRUE)
 close(clipboard)
