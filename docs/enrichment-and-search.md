@@ -258,27 +258,27 @@ Current reasons:
 
 ## Interactive Digest Workflow
 
-For manual schema-v3 extraction with ChatGPT, use:
+For manual schema-v4 extraction with ChatGPT, use:
 
-- `scripts/build_llm_digest_interactive.R`
+- `scripts/build_llm_digest_interactive.sh`
 
 Example:
 
 ```sh
-Rscript scripts/build_llm_digest_interactive.R \
-  --ref-id arxiv:2505.07087 \
-  --mode create
+scripts/build_llm_digest_interactive.sh \
+  --ref-id arxiv:2505.07087
 ```
 
-The script copies a ready-to-paste prompt with `pbcopy`, waits for you to download
-`litxr_schema.json`, then validates and writes the digest locally after you
-confirm. On macOS, the prompt is copied to the clipboard with `pbcopy` instead
-of being dumped directly to the terminal.
+The shell wrapper checks whether the digest already exists, generates the
+appropriate create or revise prompt, copies it with `pbcopy`, then hands ingest
+off to `scripts/ingest_llm_digest_json.R` after you confirm the download.
+On macOS, the prompt is copied to the clipboard with `pbcopy` instead of being
+dumped directly to the terminal.
 
 Prompt generation itself is package-owned through `litxr_llm_digest_prompt()`.
 The prompt text is assembled from Markdown fragments under
-`inst/prompts/llm_digest_v3/fragments/`, while the script remains a thin
-clipboard and ingestion wrapper.
+`inst/prompts/llm_digest_v4/fragments/`, while the shell wrapper remains a thin
+orchestration layer.
 
 To inspect a reference quickly, use `scripts/get_ref_summary.sh`. By default it
 prints only the key schema sections. Pass `--complete` or `--report complete`

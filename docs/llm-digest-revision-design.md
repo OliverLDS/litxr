@@ -13,7 +13,7 @@ It is based on the current practical workflow:
 The current package already supports the human-in-the-loop extraction model
 through:
 
-- `scripts/build_llm_digest_interactive.R`
+- `scripts/build_llm_digest_interactive.sh`
 
 This design note extends that workflow so the same paper can be extracted
 multiple times over time, with explicit revision tracking.
@@ -202,7 +202,7 @@ These helpers would let users:
 
 The current manual extraction CLI is:
 
-- `scripts/build_llm_digest_interactive.R`
+- `scripts/build_llm_digest_interactive.sh`
 
 It should eventually become revision-aware.
 
@@ -247,11 +247,9 @@ The prompt itself should become versioned.
 Example CLI direction:
 
 ```sh
-Rscript scripts/build_llm_digest_interactive.R \
+scripts/build_llm_digest_interactive.sh \
   --ref-id arxiv:2505.07087 \
-  --schema-version v3 \
-  --prompt-version v3.1 \
-  --mode revise
+  --prompt-version v4.0
 ```
 
 ### Why prompt versioning matters
@@ -320,7 +318,7 @@ This lets older files remain valid without forced rewrite.
 
 ### Phase 3
 
-- update `scripts/build_llm_digest_interactive.R`
+- update `scripts/build_llm_digest_interactive.sh`
 - support `create` and `revise`
 - support prompt version metadata
 

@@ -112,7 +112,7 @@ Included shell helpers:
 
 - `scripts/repair_arxiv_range.R`
 - `scripts/repair_arxiv_latest.R`
-- `scripts/build_llm_digest_interactive.R`
+- `scripts/build_llm_digest_interactive.sh`
 - `scripts/get_ref_summary.sh`
 - `scripts/report_arxiv_category_labels.R`
 - `scripts/cache_category_inquiries.R`

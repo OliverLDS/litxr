@@ -1,3 +1,13 @@
+# litxr 0.0.8.7
+
+- Split the interactive schema-generation workflow into a shell wrapper plus
+  separate prompt-build, status-check, and JSON-ingest helpers.
+- Added key, complete, JSON, and ref-id-only output modes to the category
+  label reporter, plus a faster year-filter path that avoids loading the full
+  collection.
+- Extended `scripts/get_ref_summary.sh` to render schema-v4 research-analysis
+  fields in complete mode.
+
 # litxr 0.0.8.6
 
 - Added schema-v4 LLM digest support with `ranked_contributions`,
