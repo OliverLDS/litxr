@@ -19,7 +19,8 @@ parse_args <- function(args) {
     inquiry = NULL,
     local_inq = "ai_category_query_set_v1",
     top_n = "3",
-    threshold = "0.45"
+    threshold = "0.45",
+    output_format = "md"
   )
   i <- 1L
 
@@ -59,6 +60,8 @@ parse_args <- function(args) {
       out$top_n <- value
     } else if (identical(key, "--threshold")) {
       out$threshold <- value
+    } else if (identical(key, "--output-format")) {
+      out$output_format <- value
     } else {
       stop("Unknown argument: ", key, call. = FALSE)
     }
@@ -89,12 +92,15 @@ if (show_help) {
       "  --top_n N          Keep only the top N refs per category by score. Default: 3.",
       "  --top-n N          Alias of --top_n.",
       "  --threshold X      Keep only refs with score >= X. Default: 0.45.",
+      "  --output-format F  Output format: md, json, or ref_ids. Default: md.",
       "  -h, --help         Show this help message.",
       "",
       "Selection rule:",
       "  - Keep refs that satisfy both conditions:",
       "    rank_in_category <= top_n and score_max >= threshold.",
       "  - Default values are top_n = 3 and threshold = 0.45.",
+      "  - Use --output-format json for machine-readable category output.",
+      "  - Use --output-format ref_ids to emit a unique JSON array of ref_ids only.",
       "  - By default, the script does not call litxr_embed_collection_delta().",
       "    Use --embed-missing when you want to embed uncovered corpus refs first.",
       "  - Without --inquiry, the script uses the cached query set id",
@@ -117,6 +123,7 @@ inquiry_path <- parsed$inquiry
 local_inq <- as.character(parsed$local_inq)
 top_n <- as.integer(parsed$top_n)
 threshold <- as.numeric(parsed$threshold)
+output_format <- tolower(trimws(as.character(parsed$output_format)))
 
 year_from <- if (is.null(year_from)) NULL else as.integer(year_from)
 year_to <- if (is.null(year_to)) NULL else as.integer(year_to)
@@ -135,6 +142,9 @@ if (is.na(top_n) || top_n < 0L) {
 }
 if (is.na(threshold)) {
   stop("`--threshold` must be numeric.", call. = FALSE)
+}
+if (!(output_format %in% c("md", "json", "ref_ids"))) {
+  stop("`--output-format` must be either md, json, or ref_ids.", call. = FALSE)
 }
 if (is.na(local_inq) || !nzchar(local_inq)) {
   stop("`--local-inq` must be non-empty.", call. = FALSE)
@@ -222,7 +232,18 @@ if (isTRUE(embed_missing)) {
 
 ref_ids <- NULL
 if (!is.null(year_from) || !is.null(year_to)) {
-  refs <- litxr::litxr_read_collection("arxiv_cs_ai", cfg)
+  journal <- litxr:::.litxr_get_journal(cfg, "arxiv_cs_ai")
+  local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
+  index_path <- litxr:::.litxr_index_path(local_path)
+  index_columns <- fst::metadata_fst(index_path)$columnNames
+  if (!("ref_id" %in% index_columns)) {
+    stop("Collection index is missing `ref_id`: ", index_path, call. = FALSE)
+  }
+  read_columns <- intersect(c("ref_id", "year"), index_columns)
+  refs <- fst::read_fst(index_path, columns = read_columns, as.data.table = TRUE)
+  if (!("year" %in% names(refs))) {
+    refs$year <- NA_integer_
+  }
   keep <- rep(TRUE, nrow(refs))
   if (!is.null(year_from)) {
     keep <- keep & !is.na(refs$year) & refs$year >= year_from
@@ -230,7 +251,11 @@ if (!is.null(year_from) || !is.null(year_to)) {
   if (!is.null(year_to)) {
     keep <- keep & !is.na(refs$year) & refs$year <= year_to
   }
-  ref_ids <- unique(as.character(refs$ref_id[keep & !is.na(refs$ref_id) & nzchar(refs$ref_id)]))
+  if (nrow(refs)) {
+    ref_ids <- unique(as.character(refs$ref_id[keep & !is.na(refs$ref_id) & nzchar(refs$ref_id)]))
+  } else {
+    ref_ids <- character()
+  }
 }
 
 scores <- if (isTRUE(delta_only)) {
@@ -297,23 +322,86 @@ if (file.exists(article_log_path)) {
 }
 
 if (!nrow(selected)) {
-  cat("No refs met the selection rule.\n")
+  if (identical(output_format, "json")) {
+    cat(jsonlite::toJSON(
+      list(
+        status = "ok",
+        output_format = output_format,
+        selection_rule = list(
+          top_n = top_n,
+          threshold = threshold,
+          delta_only = delta_only,
+          year_from = year_from,
+          year_to = year_to,
+          local_inq = local_inq,
+          query_set_id = query_set_id
+        ),
+        categories = list()
+      ),
+      auto_unbox = TRUE,
+      null = "null",
+      pretty = FALSE
+    ))
+  } else if (identical(output_format, "ref_ids")) {
+    cat(jsonlite::toJSON(character(), auto_unbox = TRUE, null = "null", pretty = FALSE))
+  } else {
+    cat("No refs met the selection rule.\n")
+  }
   quit(save = "no", status = 0)
 }
 
 data.table::setorderv(selected, c("category_id", "score_max", "title"), order = c(1L, -1L, 1L), na.last = TRUE)
 
-for (cat_id in unique(as.character(selected$category_id))) {
-  chunk <- selected[category_id == cat_id, ]
-  cat(cat_id, "\n", sep = "")
-  for (i in seq_len(nrow(chunk))) {
-    cat(sprintf(
-      "%d. %s (%.7f): %s\n",
-      i,
-      chunk$ref_id[[i]],
-      chunk$score_max[[i]],
-      chunk$title[[i]]
-    ))
+if (identical(output_format, "json")) {
+  category_list <- lapply(unique(as.character(selected$category_id)), function(cat_id) {
+    chunk <- selected[category_id == cat_id, ]
+    list(
+      category_id = cat_id,
+      items = lapply(seq_len(nrow(chunk)), function(i) {
+        list(
+          rank = i,
+          ref_id = as.character(chunk$ref_id[[i]]),
+          score_max = as.numeric(chunk$score_max[[i]]),
+          title = as.character(chunk$title[[i]])
+        )
+      })
+    )
+  })
+  cat(jsonlite::toJSON(
+    list(
+      status = "ok",
+      output_format = output_format,
+      selection_rule = list(
+        top_n = top_n,
+        threshold = threshold,
+        delta_only = delta_only,
+        year_from = year_from,
+        year_to = year_to,
+        local_inq = local_inq,
+        query_set_id = query_set_id
+      ),
+      categories = category_list
+    ),
+    auto_unbox = TRUE,
+    null = "null",
+    pretty = FALSE
+  ))
+} else if (identical(output_format, "ref_ids")) {
+  ref_ids_out <- unique(as.character(selected$ref_id))
+  cat(jsonlite::toJSON(ref_ids_out, auto_unbox = TRUE, null = "null", pretty = FALSE))
+} else {
+  for (cat_id in unique(as.character(selected$category_id))) {
+    chunk <- selected[category_id == cat_id, ]
+    cat(cat_id, "\n", sep = "")
+    for (i in seq_len(nrow(chunk))) {
+      cat(sprintf(
+        "%d. %s (%.7f): %s\n",
+        i,
+        chunk$ref_id[[i]],
+        chunk$score_max[[i]],
+        chunk$title[[i]]
+      ))
+    }
+    cat("\n")
   }
-  cat("\n")
 }
