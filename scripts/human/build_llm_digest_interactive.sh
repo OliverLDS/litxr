@@ -3,6 +3,8 @@
 set -eu
 
 script_dir="${0:A:h}"
+repo_root="${script_dir:A:h:h}"
+script_root="${repo_root}/scripts"
 json_path_default="~/Downloads/litxr_schema.json"
 prompt_version_default="v4.0"
 
@@ -90,13 +92,13 @@ normalize_ref_id() {
 
 ref_id="$(normalize_ref_id "$ref_id")"
 
-status_json="$(Rscript "$script_dir/check_llm_digest_status.R" --ref-id "$ref_id")"
+status_json="$(Rscript "$script_root/check_llm_digest_status.R" --ref-id "$ref_id")"
 if [[ "$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[1]); if (!identical(x$status, "ok")) quit(save="no", status=1L); cat(if (isTRUE(x$already_digested)) "yes" else "no")' "$status_json")" == "yes" ]]; then
   print -u2 "Warning: $ref_id already has a digest; the workflow will continue in revise mode."
 fi
 mode="$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[1]); if (!identical(x$status, "ok")) quit(save="no", status=1L); cat(if (isTRUE(x$already_digested)) "revise" else "create")' "$status_json")"
 
-prompt_json="$(Rscript "$script_dir/build_llm_digest_prompt.R" --ref-id "$ref_id" --mode "$mode" --prompt-version "$prompt_version")"
+prompt_json="$(Rscript "$script_root/build_llm_digest_prompt.R" --ref-id "$ref_id" --mode "$mode" --prompt-version "$prompt_version")"
 prompt_text="$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[1]); if (!identical(x$status, "ok")) quit(save="no", status=1L); cat(x$prompt)' "$prompt_json")"
 
 printf '%s' "$prompt_text" | pbcopy
@@ -114,7 +116,7 @@ if [[ "$answer" != "Y" ]]; then
   exit 0
 fi
 
-Rscript "$script_dir/ingest_llm_digest_json.R" \
+Rscript "$script_root/ingest_llm_digest_json.R" \
   --ref-id "$ref_id" \
   --json-path "$json_path" \
   --mode "$mode" \

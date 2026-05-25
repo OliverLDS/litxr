@@ -160,24 +160,24 @@ read_bib_entries <- function(path) {
 }
 
 find_rows_by_ref_ids <- function(ref_ids, cfg) {
-  rows <- litxr::litxr_find_refs(ref_id = ref_ids, config = cfg)
-  rows <- as.data.table(rows)
-  if (!nrow(rows)) {
-    return(rows)
-  }
-
-  rows[, source_id_chr__ := if ("source_id" %in% names(rows)) as.character(source_id) else NA_character_]
-  ordered_idx <- integer()
   missing <- character()
+  resolved_rows <- list()
 
   for (ref in ref_ids) {
+    rows <- as.data.table(litxr::litxr_find_refs(ref_id = ref, config = cfg))
+    if (!nrow(rows)) {
+      missing <- c(missing, ref)
+      next
+    }
+
+    rows[, source_id_chr__ := if ("source_id" %in% names(rows)) as.character(source_id) else NA_character_]
     expanded <- unique(as.character(litxr:::.litxr_expand_reference_keys(ref)))
     hit <- which(rows$ref_id %in% expanded | rows$source_id_chr__ %in% expanded)
     if (!length(hit)) {
       missing <- c(missing, ref)
       next
     }
-    ordered_idx <- c(ordered_idx, hit[[1]])
+    resolved_rows[[length(resolved_rows) + 1L]] <- rows[hit[[1]], ]
   }
 
   if (length(missing)) {
@@ -188,7 +188,7 @@ find_rows_by_ref_ids <- function(ref_ids, cfg) {
     )
   }
 
-  rows <- rows[ordered_idx, ]
+  rows <- data.table::rbindlist(resolved_rows, fill = TRUE)
   rows[, source_id_chr__ := NULL]
   rows <- prefer_published_rows(rows, cfg)
   rows
@@ -286,6 +286,16 @@ if (!length(ref_ids)) {
 }
 
 cfg <- litxr::litxr_read_config()
+config_path <- attr(cfg, "config_path", exact = TRUE)
+config_root <- attr(cfg, "config_root", exact = TRUE)
+log_line(sprintf(
+  "litxr_config_path=%s",
+  if (!is.null(config_path) && nzchar(config_path)) config_path else "[unknown]"
+))
+log_line(sprintf(
+  "litxr_project_root=%s",
+  if (!is.null(config_root) && nzchar(config_root)) config_root else "[unknown]"
+))
 rows <- find_rows_by_ref_ids(ref_ids, cfg)
 if (!nrow(rows)) {
   stop("No matching references were found for the supplied ref_id(s).", call. = FALSE)
