@@ -2,6 +2,17 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 
+log_line <- function(...) {
+  cat(..., "\n", file = stderr(), sep = "")
+}
+
+emit_json <- function(x) {
+  writeLines(
+    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE),
+    con = stdout()
+  )
+}
+
 parse_args <- function(args) {
   out <- list(
     show_help = FALSE,
@@ -43,6 +54,13 @@ parse_args <- function(args) {
   out
 }
 
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  emit_json(list(status = "error", error = err))
+  quit(save = "no", status = 1L)
+})
+
 usage <- function() {
   cat(
     paste(
@@ -59,6 +77,7 @@ usage <- function() {
       "Notes:",
       "  - This script uses `litxr_embed_collection_delta()` rather than full compaction.",
       "  - It prints before/after embedding coverage from `litxr_read_embedding_state()`.",
+      "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
   )
@@ -96,8 +115,8 @@ before <- litxr::litxr_read_embedding_state(
   model = embed_model
 )
 
-cat(sprintf(
-  "before: total=%s embedded_main=%s embedded_delta=%s embedded_unique=%s missing=%s coverage=%.6f\n",
+log_line(sprintf(
+  "before: total=%s embedded_main=%s embedded_delta=%s embedded_unique=%s missing=%s coverage=%.6f",
   before$records_total[[1]],
   before$embedded_main[[1]],
   before$embedded_delta[[1]],
@@ -124,8 +143,8 @@ after <- litxr::litxr_read_embedding_state(
   model = embed_model
 )
 
-cat(sprintf(
-  "after: total=%s embedded_main=%s embedded_delta=%s embedded_unique=%s missing=%s coverage=%.6f\n",
+log_line(sprintf(
+  "after: total=%s embedded_main=%s embedded_delta=%s embedded_unique=%s missing=%s coverage=%.6f",
   after$records_total[[1]],
   after$embedded_main[[1]],
   after$embedded_delta[[1]],
@@ -134,8 +153,19 @@ cat(sprintf(
   after$coverage_pct[[1]]
 ))
 
-cat(sprintf(
-  "delta_run: rows_visible_after_run=%s requested_limit=%s\n",
+log_line(sprintf(
+  "delta_run: rows_visible_after_run=%s requested_limit=%s",
   nrow(embedded),
   limit
+))
+
+emit_json(list(
+  status = "ok",
+  collection_id = collection_id,
+  model = embed_model,
+  batch_size = batch_size,
+  limit = limit,
+  before = as.list(before[1]),
+  after = as.list(after[1]),
+  rows_visible_after_run = nrow(embedded)
 ))

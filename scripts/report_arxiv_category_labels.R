@@ -20,7 +20,7 @@ parse_args <- function(args) {
     local_inq = "ai_category_query_set_v1",
     top_n = "3",
     threshold = "0.45",
-    output_format = "md"
+    output_format = "json"
   )
   i <- 1L
 
@@ -92,7 +92,7 @@ if (show_help) {
       "  --top_n N          Keep only the top N refs per category by score. Default: 3.",
       "  --top-n N          Alias of --top_n.",
       "  --threshold X      Keep only refs with score >= X. Default: 0.45.",
-      "  --output-format F  Output format: md, json, or ref_ids. Default: md.",
+      "  --output-format F  Output format: json or md. Default: json.",
       "  -h, --help         Show this help message.",
       "",
       "Selection rule:",
@@ -100,7 +100,6 @@ if (show_help) {
       "    rank_in_category <= top_n and score_max >= threshold.",
       "  - Default values are top_n = 3 and threshold = 0.45.",
       "  - Use --output-format json for machine-readable category output.",
-      "  - Use --output-format ref_ids to emit a unique JSON array of ref_ids only.",
       "  - By default, the script does not call litxr_embed_collection_delta().",
       "    Use --embed-missing when you want to embed uncovered corpus refs first.",
       "  - Without --inquiry, the script uses the cached query set id",
@@ -143,8 +142,8 @@ if (is.na(top_n) || top_n < 0L) {
 if (is.na(threshold)) {
   stop("`--threshold` must be numeric.", call. = FALSE)
 }
-if (!(output_format %in% c("md", "json", "ref_ids"))) {
-  stop("`--output-format` must be either md, json, or ref_ids.", call. = FALSE)
+if (!(output_format %in% c("md", "json"))) {
+  stop("`--output-format` must be either md or json.", call. = FALSE)
 }
 if (is.na(local_inq) || !nzchar(local_inq)) {
   stop("`--local-inq` must be non-empty.", call. = FALSE)
@@ -327,6 +326,7 @@ if (!nrow(selected)) {
       list(
         status = "ok",
         output_format = output_format,
+        meta = list(ref_ids = character()),
         selection_rule = list(
           top_n = top_n,
           threshold = threshold,
@@ -342,8 +342,6 @@ if (!nrow(selected)) {
       null = "null",
       pretty = FALSE
     ))
-  } else if (identical(output_format, "ref_ids")) {
-    cat(jsonlite::toJSON(character(), auto_unbox = TRUE, null = "null", pretty = FALSE))
   } else {
     cat("No refs met the selection rule.\n")
   }
@@ -371,6 +369,7 @@ if (identical(output_format, "json")) {
     list(
       status = "ok",
       output_format = output_format,
+      meta = list(ref_ids = unique(as.character(selected$ref_id))),
       selection_rule = list(
         top_n = top_n,
         threshold = threshold,
@@ -386,9 +385,6 @@ if (identical(output_format, "json")) {
     null = "null",
     pretty = FALSE
   ))
-} else if (identical(output_format, "ref_ids")) {
-  ref_ids_out <- unique(as.character(selected$ref_id))
-  cat(jsonlite::toJSON(ref_ids_out, auto_unbox = TRUE, null = "null", pretty = FALSE))
 } else {
   for (cat_id in unique(as.character(selected$category_id))) {
     chunk <- selected[category_id == cat_id, ]

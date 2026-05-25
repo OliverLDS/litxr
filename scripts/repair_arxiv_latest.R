@@ -2,6 +2,17 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 
+log_line <- function(...) {
+  cat(..., "\n", file = stderr(), sep = "")
+}
+
+emit_json <- function(x) {
+  writeLines(
+    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE),
+    con = stdout()
+  )
+}
+
 parse_args <- function(args) {
   out <- list()
   i <- 1L
@@ -62,10 +73,18 @@ usage <- function() {
       "  - This script computes the next repair window and calls",
       "    `scripts/repair_arxiv_range.R` through an absolute path.",
       "  - `--journal-id` still works as a compatibility alias.",
+      "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
   )
 }
+
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  emit_json(list(status = "error", error = err))
+  quit(save = "no", status = 1L)
+})
 
 script_arg <- commandArgs(trailingOnly = FALSE)
 script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1])
@@ -106,12 +125,22 @@ state <- litxr_next_arxiv_repair_range(
 )
 
 if (!isTRUE(state$needs_repair[[1]])) {
-  cat(sprintf(
-    "latest repair not needed: collection_id=%s basis=%s latest_date=%s date_to=%s\n",
+  log_line(sprintf(
+    "latest repair not needed: collection_id=%s basis=%s latest_date=%s date_to=%s",
     collection_id,
     basis,
     as.character(state$latest_date[[1]]),
     as.character(state$date_to[[1]])
+  ))
+  emit_json(list(
+    status = "ok",
+    collection_id = collection_id,
+    basis = basis,
+    latest_date = as.character(state$latest_date[[1]]),
+    date_to = as.character(state$date_to[[1]]),
+    needs_repair = FALSE,
+    ran_range_repair = FALSE,
+    repair_result = NULL
   ))
   quit(save = "no", status = 0L)
 }
@@ -135,15 +164,36 @@ for (name in c("force", "flush-each-day", "refresh-project-index")) {
   }
 }
 
-cat(sprintf(
-  "latest repair: collection_id=%s basis=%s date_from=%s date_to=%s\n",
+log_line(sprintf(
+  "latest repair: collection_id=%s basis=%s date_from=%s date_to=%s",
   collection_id,
   basis,
   as.character(state$date_from[[1]]),
   as.character(state$date_to[[1]])
 ))
 
-status <- system2("Rscript", cmd_args)
-if (!identical(status, 0L)) {
-  quit(save = "no", status = status)
+child_stdout <- system2("Rscript", cmd_args, stdout = TRUE)
+child_status <- attr(child_stdout, "status")
+if (is.null(child_status)) {
+  child_status <- 0L
 }
+if (!identical(child_status, 0L)) {
+  quit(save = "no", status = child_status)
+}
+
+child_text <- paste(child_stdout, collapse = "\n")
+child_result <- tryCatch(
+  jsonlite::fromJSON(child_text, simplifyVector = FALSE),
+  error = function(e) list(raw = child_text)
+)
+
+emit_json(list(
+  status = "ok",
+  collection_id = collection_id,
+  basis = basis,
+  latest_date = as.character(state$latest_date[[1]]),
+  date_to = as.character(state$date_to[[1]]),
+  needs_repair = TRUE,
+  ran_range_repair = TRUE,
+  repair_result = child_result
+))

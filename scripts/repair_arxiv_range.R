@@ -2,6 +2,17 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 
+log_line <- function(...) {
+  cat(..., "\n", file = stderr(), sep = "")
+}
+
+emit_json <- function(x) {
+  writeLines(
+    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE),
+    con = stdout()
+  )
+}
+
 parse_args <- function(args) {
   out <- list()
   i <- 1L
@@ -49,6 +60,13 @@ parse_args <- function(args) {
   out
 }
 
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  emit_json(list(status = "error", error = err))
+  quit(save = "no", status = 1L)
+})
+
 usage <- function() {
   cat(
     paste(
@@ -67,6 +85,7 @@ usage <- function() {
       "    `--refresh-project-index` when project-level reference indexes must",
       "    be refreshed during the repair run.",
       "  - `--journal-id` still works as a compatibility alias.",
+      "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
   )
@@ -183,7 +202,7 @@ for (i in seq_along(day_seq)) {
     )
 
   if (day_done) {
-    cat(sprintf("date=%s skipped=already_completed\n", day_text))
+    log_line(sprintf("date=%s skipped=already_completed", day_text))
     next
   }
 
@@ -213,8 +232,8 @@ for (i in seq_along(day_seq)) {
     first_live_request <- FALSE
     page_n <- nrow(incoming)
 
-    cat(sprintf(
-      "date=%s start=%s fetched=%s\n",
+    log_line(sprintf(
+      "date=%s start=%s fetched=%s",
       day_text, start, page_n
     ))
 
@@ -302,10 +321,21 @@ litxr:::.litxr_append_sync_state(cfg, litxr:::.litxr_make_sync_state_row(
   notes = if (isTRUE(parsed$force)) "force=TRUE" else ""
 ))
 
-cat(sprintf(
-  "range repair complete: collection_id=%s date_from=%s date_to=%s total_incoming=%s\n",
+log_line(sprintf(
+  "range repair complete: collection_id=%s date_from=%s date_to=%s total_incoming=%s",
   collection_id,
   format(date_from, "%Y-%m-%d"),
   format(date_to, "%Y-%m-%d"),
   total_incoming
+))
+
+emit_json(list(
+  status = "ok",
+  collection_id = collection_id,
+  date_from = format(date_from, "%Y-%m-%d"),
+  date_to = format(date_to, "%Y-%m-%d"),
+  total_incoming = total_incoming,
+  records_after = records_after_range,
+  overall_fetched_from = overall_fetched_from,
+  overall_fetched_to = overall_fetched_to
 ))

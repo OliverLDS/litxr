@@ -9,7 +9,7 @@ prompt_version_default="v4.0"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/build_llm_digest_interactive.sh --ref-id REF_ID [--json_path ~/Downloads/litxr_schema.json] [--prompt-version v4.0]
+  scripts/human/build_llm_digest_interactive.sh --ref-id REF_ID [--json_path ~/Downloads/litxr_schema.json] [--prompt-version v4.0]
 
 Options:
   --ref-id REF_ID       Canonical litxr ref_id to build or revise.

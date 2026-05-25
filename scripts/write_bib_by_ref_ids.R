@@ -6,6 +6,17 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 
+log_line <- function(...) {
+  cat(..., "\n", file = stderr(), sep = "")
+}
+
+emit_json <- function(x) {
+  writeLines(
+    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE),
+    con = stdout()
+  )
+}
+
 parse_args <- function(args) {
   out <- list(
     show_help = FALSE,
@@ -53,6 +64,13 @@ parse_args <- function(args) {
   out
 }
 
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  emit_json(list(status = "error", error = err))
+  quit(save = "no", status = 1L)
+})
+
 usage <- function() {
   cat(
     paste(
@@ -72,6 +90,7 @@ usage <- function() {
       "  - Validation uses exact ref_id lookup only and stops if any requested ref_id is missing.",
       "  - Duplicate detection in the target .bib file is based on the BibTeX citekey generated",
       "    from each reference row.",
+      "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
   )
@@ -287,20 +306,27 @@ if (!isTRUE(parsed$append)) {
   }
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   writeLines(format_bib_file_lines(new_entries), output_path)
-  cat(sprintf("created=%s\n", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
-  cat(sprintf("written_ref_ids=%s\n", paste(new_ref_ids, collapse = ", ")))
+  log_line(sprintf("created=%s", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
+  log_line(sprintf("written_ref_ids=%s", paste(new_ref_ids, collapse = ", ")))
+  emit_json(list(
+    status = "ok",
+    action = "create",
+    output = normalizePath(output_path, winslash = "/", mustWork = FALSE),
+    written_ref_ids = new_ref_ids
+  ))
   quit(save = "no", status = 0L)
 }
 
 existing <- read_bib_entries(output_path)
 existing_keys <- existing$keys
 existing_entries <- existing$entries
+initial_existing_keys <- existing_keys
 
 duplicate_idx <- which(new_keys %in% existing_keys)
 duplicate_ref_ids <- new_ref_ids[duplicate_idx]
 
 if (length(duplicate_ref_ids)) {
-  cat(sprintf("existing_ref_ids=%s\n", paste(duplicate_ref_ids, collapse = ", ")))
+  log_line(sprintf("existing_ref_ids=%s", paste(duplicate_ref_ids, collapse = ", ")))
 }
 
 if (isTRUE(parsed$overwrite)) {
@@ -317,7 +343,7 @@ if (isTRUE(parsed$overwrite)) {
     }
   }
   if (length(overwritten_ref_ids)) {
-    cat(sprintf("overwritten_ref_ids=%s\n", paste(overwritten_ref_ids, collapse = ", ")))
+    log_line(sprintf("overwritten_ref_ids=%s", paste(overwritten_ref_ids, collapse = ", ")))
   }
 } else {
   skipped_ref_ids <- character()
@@ -331,10 +357,20 @@ if (isTRUE(parsed$overwrite)) {
     }
   }
   if (length(skipped_ref_ids)) {
-    cat(sprintf("skipped_ref_ids=%s\n", paste(skipped_ref_ids, collapse = ", ")))
+    log_line(sprintf("skipped_ref_ids=%s", paste(skipped_ref_ids, collapse = ", ")))
   }
 }
 
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
 writeLines(format_bib_file_lines(existing_entries), output_path)
-cat(sprintf("updated=%s\n", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
+log_line(sprintf("updated=%s", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
+
+emit_json(list(
+  status = "ok",
+  action = if (isTRUE(parsed$overwrite)) "append_overwrite" else "append",
+  output = normalizePath(output_path, winslash = "/", mustWork = FALSE),
+  written_ref_ids = if (isTRUE(parsed$overwrite)) new_ref_ids else new_ref_ids[!new_keys %in% initial_existing_keys],
+  existing_ref_ids = duplicate_ref_ids,
+  skipped_ref_ids = if (isTRUE(parsed$overwrite)) character() else skipped_ref_ids,
+  overwritten_ref_ids = if (isTRUE(parsed$overwrite)) overwritten_ref_ids else character()
+))

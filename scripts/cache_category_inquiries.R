@@ -6,6 +6,17 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 
+log_line <- function(...) {
+  cat(..., "\n", file = stderr(), sep = "")
+}
+
+emit_json <- function(x) {
+  writeLines(
+    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE),
+    con = stdout()
+  )
+}
+
 parse_args <- function(args) {
   out <- list(
     show_help = FALSE,
@@ -41,6 +52,13 @@ parse_args <- function(args) {
   out
 }
 
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  emit_json(list(status = "error", error = err))
+  quit(save = "no", status = 1L)
+})
+
 parsed <- parse_args(args)
 
 if (isTRUE(parsed$show_help)) {
@@ -60,6 +78,7 @@ if (isTRUE(parsed$show_help)) {
       "    project.data_root/embeddings/label_queries/.",
       "  - If --query-set-id is supplied, that cache is overwritten.",
       "  - If --query-set-id is omitted, a new tmp_inquiry_* cache id is created.",
+      "  - Progress logs are written to stderr; machine-readable output is JSON on stdout.",
       sep = "\n"
     )
   )
@@ -113,7 +132,16 @@ index <- litxr::litxr_build_label_query_index(
 
 paths <- litxr:::.litxr_label_query_index_paths(cfg, query_set_id, embed_model)
 
-cat(sprintf("query_set_id=%s\n", query_set_id))
-cat(sprintf("records=%s\n", nrow(index$metadata)))
-cat(sprintf("model=%s\n", embed_model))
-cat(sprintf("cache_dir=%s\n", paths$dir))
+log_line(sprintf("query_set_id=%s", query_set_id))
+log_line(sprintf("records=%s", nrow(index$metadata)))
+log_line(sprintf("model=%s", embed_model))
+log_line(sprintf("cache_dir=%s", paths$dir))
+
+emit_json(list(
+  status = "ok",
+  query_set_id = query_set_id,
+  records = nrow(index$metadata),
+  model = embed_model,
+  cache_dir = paths$dir,
+  inquiry = inquiry_path
+))

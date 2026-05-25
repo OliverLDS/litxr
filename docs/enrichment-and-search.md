@@ -260,12 +260,12 @@ Current reasons:
 
 For manual schema-v4 extraction with ChatGPT, use:
 
-- `scripts/build_llm_digest_interactive.sh`
+- `scripts/human/build_llm_digest_interactive.sh`
 
 Example:
 
 ```sh
-scripts/build_llm_digest_interactive.sh \
+scripts/human/build_llm_digest_interactive.sh \
   --ref-id arxiv:2505.07087
 ```
 
@@ -280,7 +280,7 @@ The prompt text is assembled from Markdown fragments under
 `inst/prompts/llm_digest_v4/fragments/`, while the shell wrapper remains a thin
 orchestration layer.
 
-To inspect a reference quickly, use `scripts/get_ref_summary.sh`. By default it
+To inspect a reference quickly, use `scripts/human/get_ref_summary.sh`. By default it
 prints only the key schema sections. Pass `--complete` or `--report complete`
 to render the full digest.
 

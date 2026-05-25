@@ -5,8 +5,8 @@ set -eu
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   cat <<'EOF'
 Usage:
-  scripts/get_ref_summary.sh <ref-id-or-bare-arxiv-id> [--report key|complete]
-  scripts/get_ref_summary.sh <ref-id-or-bare-arxiv-id> [--key|--complete]
+  scripts/human/get_ref_summary.sh <ref-id-or-bare-arxiv-id> [--report key|complete]
+  scripts/human/get_ref_summary.sh <ref-id-or-bare-arxiv-id> [--key|--complete]
 
 Options:
   --report MODE  Report mode: key or complete. Default: key.
