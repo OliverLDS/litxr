@@ -62,6 +62,21 @@ parse_args <- function(args) {
   ref_id
 }
 
+normalize_inline_json <- function(text) {
+  text <- as.character(text)
+  if (!length(text) || is.na(text[[1]])) {
+    return(text)
+  }
+  text <- paste(text, collapse = "\n")
+  text <- trimws(text)
+  if (grepl("^```", text) && grepl("```\\s*$", text)) {
+    text <- sub("^```json\\s*", "", text)
+    text <- sub("^```\\s*", "", text)
+    text <- sub("\\s*```\\s*$", "", text)
+  }
+  text
+}
+
 usage <- function() {
   cat(
     paste(
@@ -116,7 +131,7 @@ result <- tryCatch(
     cfg <- litxr::litxr_read_config()
 
     if (!is.null(json_raw) && nzchar(json_raw)) {
-      digest <- jsonlite::fromJSON(json_raw, simplifyVector = FALSE)
+      digest <- jsonlite::fromJSON(normalize_inline_json(json_raw), simplifyVector = FALSE)
     } else {
       if (!file.exists(json_path)) {
         stop("Downloaded JSON file not found: ", json_path, call. = FALSE)

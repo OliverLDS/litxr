@@ -25,6 +25,9 @@ Options:
                         Default asks for a downloadable JSON file.
                         `inline_raw_json` asks for raw JSON to be pasted from
                         the clipboard at ingest time.
+                        `markdown_fenced_json` asks for a fenced JSON block
+                        in chat; you must paste that raw content manually at
+                        ingest time.
   -h, --help            Show this help message.
 
 Workflow:
@@ -95,7 +98,7 @@ if [[ -z "$ref_id" ]]; then
   exit 1
 fi
 
-if [[ "$return_format" != "download_json_file" && "$return_format" != "inline_raw_json" ]]; then
+if [[ "$return_format" != "download_json_file" && "$return_format" != "inline_raw_json" && "$return_format" != "markdown_fenced_json" ]]; then
   usage
   print -u2 "Missing or invalid --return-format: $return_format"
   exit 1
@@ -123,7 +126,7 @@ prompt_text="$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[
 
 printf '%s' "$prompt_text" | pbcopy
 print "Prompt copied to clipboard with pbcopy."
-if [[ "$return_format" == "inline_raw_json" ]]; then
+if [[ "$return_format" == "inline_raw_json" || "$return_format" == "markdown_fenced_json" ]]; then
   print "After copying the raw JSON from chat into the clipboard:"
   print -r -- "  it will be ingested directly from pbpaste"
 else
@@ -148,7 +151,7 @@ ingest_args=(
   --prompt-version "$prompt_version"
 )
 
-if [[ "$return_format" == "inline_raw_json" ]]; then
+if [[ "$return_format" == "inline_raw_json" || "$return_format" == "markdown_fenced_json" ]]; then
   json_raw="$(pbpaste)"
   if [[ -z "$json_raw" ]]; then
     print -u2 "Clipboard is empty. Copy the raw JSON from chat before ingesting."

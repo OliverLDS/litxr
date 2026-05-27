@@ -9,7 +9,8 @@ litxr_llm_digest_prompt(
   config = NULL,
   mode = c("create", "revise"),
   schema_version = "v4",
-  prompt_version = "v4.0"
+  prompt_version = "v4.0",
+  return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")
 )
 }
 \arguments{
@@ -24,6 +25,9 @@ and \code{"v4"}.}
 
 \item{prompt_version}{Prompt-template version metadata to include in the
 prompt.}
+
+\item{return_format}{Expected response format from the external LLM. Either
+\code{"download_json_file"}, \code{"inline_raw_json"}, or \code{"markdown_fenced_json"}.}
 }
 \value{
 A single character string containing the full prompt.

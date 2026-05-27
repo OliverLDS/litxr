@@ -63,7 +63,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/build_llm_digest_prompt.R --ref-id REF_ID [--mode create|revise] [--prompt-version v4.0] [--return-format download_json_file|inline_raw_json]",
+      "  Rscript scripts/build_llm_digest_prompt.R --ref-id REF_ID [--mode create|revise] [--prompt-version v4.0] [--return-format download_json_file|inline_raw_json|markdown_fenced_json]",
       "",
       "Options:",
       "  --ref-id REF_ID     Canonical litxr ref_id to build a digest prompt for.",
@@ -73,9 +73,14 @@ usage <- function() {
       "                      Default: v4.0",
       "  --return-format F   Expected returned format from the external LLM.",
       "                      `download_json_file` asks for a downloadable",
-      "                      litxr_schema.json file. `inline_raw_json` asks for",
-      "                      full raw JSON inline in chat without a markdown",
-      "                      wrapper. Default: download_json_file",
+      "                      litxr_schema.json file.",
+      "                      `inline_raw_json` asks for raw JSON only, with no",
+      "                      Markdown fence, no explanation, and no surrounding",
+      "                      text.",
+      "                      `markdown_fenced_json` asks for JSON inside a fenced",
+      "                      Markdown code block with `json` after the opening",
+      "                      backticks.",
+      "                      Default: download_json_file",
       "  -h, --help          Show this help message.",
       "",
       "Output:",
@@ -103,8 +108,8 @@ if (!(mode %in% c("create", "revise"))) {
   stop("`--mode` must be either `create` or `revise`.", call. = FALSE)
 }
 return_format <- trimws(as.character(parsed$return_format))
-if (!(return_format %in% c("download_json_file", "inline_raw_json"))) {
-  stop("`--return-format` must be either `download_json_file` or `inline_raw_json`.", call. = FALSE)
+if (!(return_format %in% c("download_json_file", "inline_raw_json", "markdown_fenced_json"))) {
+  stop("`--return-format` must be one of `download_json_file`, `inline_raw_json`, or `markdown_fenced_json`.", call. = FALSE)
 }
 
 cfg <- litxr::litxr_read_config()
@@ -127,14 +132,22 @@ result <- tryCatch(
       schema_version = "v4",
       prompt_version = parsed$prompt_version
     )
-    if (identical(return_format, "inline_raw_json")) {
-      prompt <- gsub(
+    prompt <- switch(
+      return_format,
+      download_json_file = prompt,
+      inline_raw_json = gsub(
         "Return a downloadable JSON file named litxr_schema.json.",
-        "Return the full raw JSON inline directly in the chat as a JSON code block. Do not wrap it in a Markdown code block and do not create a downloadable file.",
+        "Return raw JSON only, with no Markdown fence, no explanation, and no surrounding text.",
+        prompt,
+        fixed = TRUE
+      ),
+      markdown_fenced_json = gsub(
+        "Return a downloadable JSON file named litxr_schema.json.",
+        "Return the JSON inside a fenced Markdown code block with json after the opening backticks.",
         prompt,
         fixed = TRUE
       )
-    }
+    )
     list(status = "ok", prompt = prompt)
   },
   error = function(e) {

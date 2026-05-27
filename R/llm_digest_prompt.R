@@ -109,16 +109,16 @@
 .litxr_llm_digest_return_format_instruction <- function(return_format = "download_json_file") {
   return_format <- match.arg(
     as.character(return_format),
-    c("download_json_file", "inline_raw_json")
+    c("download_json_file", "inline_raw_json", "markdown_fenced_json")
   )
 
   switch(
     return_format,
     download_json_file = "Return a downloadable JSON file named litxr_schema.json.",
     inline_raw_json = paste(
-      "Return the full raw JSON inline directly in the chat as a JSON code block.",
-      "Do not wrap it in a Markdown code block and do not create a downloadable file."
-    )
+      "Return raw JSON only, with no Markdown fence, no explanation, and no surrounding text."
+    ),
+    markdown_fenced_json = "Return the JSON inside a fenced Markdown code block with json after the opening backticks."
   )
 }
 
@@ -137,11 +137,11 @@
 #' @param prompt_version Prompt-template version metadata to include in the
 #'   prompt.
 #' @param return_format Expected response format from the external LLM. Either
-#'   `"download_json_file"` or `"inline_raw_json"`.
+#'   `"download_json_file"`, `"inline_raw_json"`, or `"markdown_fenced_json"`.
 #'
 #' @return A single character string containing the full prompt.
 #' @export
-litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "revise"), schema_version = "v4", prompt_version = "v4.0", return_format = c("download_json_file", "inline_raw_json")) {
+litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "revise"), schema_version = "v4", prompt_version = "v4.0", return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")) {
   ref_id <- as.character(ref_id)
   if (!length(ref_id) || is.na(ref_id[[1]]) || !nzchar(ref_id[[1]])) {
     stop("`ref_id` is required.", call. = FALSE)
