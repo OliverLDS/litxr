@@ -93,17 +93,30 @@
   paste(lines, collapse = "\n")
 }
 
-.litxr_llm_digest_prompt_source_hint <- function(ref_id) {
-  if (!startsWith(ref_id, "arxiv:")) {
-    return("Use reliable full-text sources for this paper. Prefer publisher or official repository pages when available.")
+.litxr_llm_digest_prompt_source_hint <- function(ref_id, ref = NULL) {
+  doi <- if (!is.null(ref) && "doi" %in% names(ref)) .litxr_prompt_scalar(ref$doi) else NA_character_
+
+  if (startsWith(ref_id, "arxiv:")) {
+    arxiv_id <- sub("^arxiv:", "", ref_id)
+    return(paste(c(
+      "ArXiv-specific hint:",
+      sprintf("- HTML full text: https://arxiv.org/html/%s", arxiv_id),
+      sprintf("- PDF full text: https://arxiv.org/pdf/%s", arxiv_id),
+      "Use these direct links first before exploring other resources."
+    ), collapse = "\n"))
   }
-  arxiv_id <- sub("^arxiv:", "", ref_id)
-  paste(c(
-    "ArXiv-specific hint:",
-    sprintf("- HTML full text: https://arxiv.org/html/%s", arxiv_id),
-    sprintf("- PDF full text: https://arxiv.org/pdf/%s", arxiv_id),
-    "Use these direct links first before exploring other resources."
-  ), collapse = "\n")
+
+  if (!is.na(doi) && nzchar(doi)) {
+    return(paste(c(
+      "DOI-specific hint:",
+      sprintf("- Search this DOI first: https://doi.org/%s", doi),
+      "- Try to find the full text in HTML form on the publisher page or an official repository.",
+      "- If HTML full text is not available, try to find a PDF version.",
+      "- Use DOI landing pages and official repository pages first before exploring other resources."
+    ), collapse = "\n"))
+  }
+
+  "Use reliable full-text sources for this paper. Prefer publisher or official repository pages when available."
 }
 
 .litxr_llm_digest_return_format_instruction <- function(return_format = "download_json_file") {
@@ -189,7 +202,7 @@ litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "r
 
   values <- list(
     paper_metadata = .litxr_llm_digest_prompt_metadata(ref_id, ref),
-    source_lookup_hint = .litxr_llm_digest_prompt_source_hint(ref_id),
+    source_lookup_hint = .litxr_llm_digest_prompt_source_hint(ref_id, ref),
     paper_type_vocab = paste(litxr_paper_type_levels(), collapse = ", "),
     citation_logic_type_vocab = paste(paste0("- ", .litxr_citation_logic_type_levels()), collapse = "\n"),
     mode = mode,

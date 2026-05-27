@@ -4219,7 +4219,21 @@ litxr_add_refs <- function(
     return(NULL)
   }
 
-  .litxr_index_decode(fst::read_fst(index_path, as.data.table = TRUE))
+  tryCatch(
+    .litxr_index_decode(fst::read_fst(index_path, as.data.table = TRUE)),
+    error = function(e) {
+      warning(
+        "Collection index is damaged and will be rebuilt from ref_json: ",
+        index_path,
+        ". ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+      records <- .litxr_read_journal_records_from_json(local_path)
+      .litxr_write_journal_index(records, local_path)
+      records
+    }
+  )
 }
 
 .litxr_read_journal_records_by_keys <- function(local_path, keys) {
