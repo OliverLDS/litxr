@@ -4130,24 +4130,45 @@ litxr_add_refs <- function(
 .litxr_index_encode <- function(records) {
   out <- data.table::copy(records)
 
-  if ("authors_list" %in% names(out)) {
-    out[["authors_list_json"]] <- vapply(out[["authors_list"]], function(x) {
-      jsonlite::toJSON(unname(x), auto_unbox = TRUE, null = "null")
-    }, character(1))
-    out[["authors_list"]] <- NULL
+  encode_json_value <- function(x) {
+    if (is.null(x)) return(NA_character_)
+    if (!length(x)) return(NA_character_)
+    if (is.atomic(x) && length(x) == 1L && is.na(x[[1]])) return(NA_character_)
+    if (inherits(x, c("xml_node", "xml_document"))) {
+      return(as.character(x))
+    }
+    if (is.factor(x)) {
+      return(as.character(x))
+    }
+    if (is.list(x)) {
+      x <- lapply(x, encode_json_value)
+      return(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null"))
+    }
+    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null")
   }
 
-  if ("raw_entry" %in% names(out)) {
-    out[["raw_entry_json"]] <- rep(NA_character_, nrow(out))
-    out[["raw_entry"]] <- NULL
-  }
+  for (name in names(out)) {
+    column <- out[[name]]
 
-  if ("pub_date" %in% names(out)) {
-    out[["pub_date"]] <- ifelse(
-      is.na(out[["pub_date"]]),
-      NA_character_,
-      format(out[["pub_date"]], tz = "UTC", usetz = TRUE)
-    )
+    if (inherits(column, c("POSIXct", "POSIXt", "Date"))) {
+      out[[name]] <- ifelse(
+        is.na(column),
+        NA_character_,
+        format(column, tz = "UTC", usetz = TRUE)
+      )
+      next
+    }
+
+    if (is.factor(column)) {
+      out[[name]] <- as.character(column)
+      next
+    }
+
+    if (is.list(column)) {
+      out[[paste0(name, "_json")]] <- vapply(column, encode_json_value, character(1))
+      out[[name]] <- NULL
+      next
+    }
   }
 
   out
