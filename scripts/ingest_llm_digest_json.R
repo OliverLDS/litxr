@@ -77,6 +77,20 @@ normalize_inline_json <- function(text) {
   text
 }
 
+first_or_null <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(NULL)
+  }
+  x[[1]]
+}
+
+or_na_character <- function(x) {
+  if (is.null(x) || !length(x) || is.na(x[[1]]) || !nzchar(as.character(x[[1]]))) {
+    return(NA_character_)
+  }
+  as.character(x[[1]])
+}
+
 usage <- function() {
   cat(
     paste(
@@ -122,6 +136,14 @@ mode <- tolower(trimws(as.character(parsed$mode)))
 if (!(mode %in% c("create", "revise"))) {
   stop("`--mode` must be either `create` or `revise`.", call. = FALSE)
 }
+pkg_version <- as.character(utils::packageVersion("litxr"))
+if (utils::compareVersion(pkg_version, "0.0.8.6") < 0) {
+  stop(
+    "Installed litxr version is ", pkg_version,
+    ", but this CLI requires litxr >= 0.0.8.6. Reinstall the package from the current workspace first.",
+    call. = FALSE
+  )
+}
 if (!is.null(json_raw) && nzchar(json_raw) && file.exists(json_path)) {
   warning("Both `--json-path` and `--json-raw` were provided; `--json-raw` will be used.", call. = FALSE)
 }
@@ -129,6 +151,12 @@ if (!is.null(json_raw) && nzchar(json_raw) && file.exists(json_path)) {
 result <- tryCatch(
   {
     cfg <- litxr::litxr_read_config()
+    existing <- litxr::litxr_read_llm_digest(ref_id, cfg)
+    existing_revision <- if (is.null(existing) || is.null(existing$digest_revision)) {
+      NA_integer_
+    } else {
+      suppressWarnings(as.integer(first_or_null(existing$digest_revision)))
+    }
 
     if (!is.null(json_raw) && nzchar(json_raw)) {
       digest <- jsonlite::fromJSON(normalize_inline_json(json_raw), simplifyVector = FALSE)
@@ -163,8 +191,31 @@ result <- tryCatch(
       keep_history = TRUE,
       bump_revision = identical(mode, "revise")
     )
+    written <- litxr::litxr_read_llm_digest(ref_id, cfg)
+    written_revision <- if (is.null(written) || is.null(written$digest_revision)) {
+      NA_integer_
+    } else {
+      suppressWarnings(as.integer(first_or_null(written$digest_revision)))
+    }
+    if (identical(mode, "revise") && !is.na(existing_revision) && !is.na(written_revision) &&
+        written_revision <= existing_revision) {
+      stop(
+        "Revise ingest did not advance digest_revision. Existing revision: ",
+        existing_revision,
+        "; stored revision after write: ",
+        written_revision,
+        call. = FALSE
+      )
+    }
 
-    list(status = "ok", digest_written = ref_id, mode = mode)
+    list(
+      status = "ok",
+      digest_written = ref_id,
+      mode = mode,
+      stored_revision = written_revision,
+      stored_updated_at = or_na_character(written$updated_at),
+      stored_generated_at = or_na_character(written$generated_at)
+    )
   },
   error = function(e) {
     message(conditionMessage(e))
