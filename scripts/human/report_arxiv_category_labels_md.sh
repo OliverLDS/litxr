@@ -1,6 +1,7 @@
 #!/bin/zsh
 
 set -eu
+set -o pipefail
 
 script_dir="${0:A:h}"
 repo_root="${script_dir:h:h}"
@@ -11,12 +12,14 @@ Usage:
   scripts/human/report_arxiv_category_labels_md.sh [report_args...]
 
 Purpose:
-  Human-readable wrapper around scripts/report_arxiv_category_labels.R.
-  This wrapper forces `--output-format md`.
+  Human-readable wrapper around scripts/report_arxiv_category_labels.R and
+  scripts/report_arxiv_category_labels_md.R.
+  This wrapper pipes JSON output from the reporter into the markdown converter.
 
 Notes:
   - All non-help arguments are forwarded to the reporter.
-  - The reporter itself remains the JSON node for machine workflows.
+  - The reporter is forced to `--output-format json` and the converter renders
+    markdown from stdin.
 EOF
 }
 
@@ -27,4 +30,5 @@ for arg in "$@"; do
   fi
 done
 
-Rscript "$repo_root/scripts/report_arxiv_category_labels.R" "$@" --output-format md
+Rscript "$repo_root/scripts/report_arxiv_category_labels.R" "$@" --output-format json |
+  Rscript "$repo_root/scripts/report_arxiv_category_labels_md.R"
