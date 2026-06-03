@@ -113,6 +113,7 @@ if (show_help) {
       sep = "\n"
     )
   )
+  cleanup_temp_query_cache()
   quit(save = "no", status = 0)
 }
 
@@ -177,6 +178,10 @@ embed_fun <- function(texts) {
   inferencer::embed_openrouter(texts, model = embed_model)
 }
 
+cleanup_temp_query_cache <- function() {
+  invisible(NULL)
+}
+
 normalize_arxiv_ref_id <- function(x) {
   x <- as.character(x)
   x <- trimws(x)
@@ -203,7 +208,11 @@ if (!is.null(inquiry_path)) {
     Sys.getpid()
   )
   temp_paths <- litxr:::.litxr_label_query_index_paths(cfg, query_set_id, embed_model)
-  on.exit(unlink(temp_paths$dir, recursive = TRUE, force = TRUE), add = TRUE)
+  cleanup_temp_query_cache <- function() {
+    if (!is.null(temp_paths$dir) && dir.exists(temp_paths$dir)) {
+      unlink(temp_paths$dir, recursive = TRUE, force = TRUE)
+    }
+  }
   litxr::litxr_build_label_query_index(
     query_set = inquiry_path,
     query_set_id = query_set_id,
@@ -280,6 +289,7 @@ scores <- if (isTRUE(delta_only)) {
 }
 
 if (!nrow(scores)) {
+  cleanup_temp_query_cache()
   cat("No category scores were produced.\n")
   quit(save = "no", status = 0)
 }
@@ -322,6 +332,7 @@ if (file.exists(article_log_path)) {
 
 if (!nrow(selected)) {
   if (identical(output_format, "json")) {
+    cleanup_temp_query_cache()
     cat(jsonlite::toJSON(
       list(
         status = "ok",
@@ -343,6 +354,7 @@ if (!nrow(selected)) {
       pretty = FALSE
     ))
   } else {
+    cleanup_temp_query_cache()
     cat("No refs met the selection rule.\n")
   }
   quit(save = "no", status = 0)
@@ -401,3 +413,5 @@ if (identical(output_format, "json")) {
     cat("\n")
   }
 }
+
+cleanup_temp_query_cache()
