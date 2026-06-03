@@ -6,6 +6,7 @@ suppressPackageStartupMessages({
 })
 
 article_log_path <- "/Users/oliver/Documents/2025/_2025-06-17_Zelina/zl_agentr/tasks/write_new_blog_article/state/article_record_log.tsv"
+article_revision_log_path <- "/Users/oliver/Documents/2025/_2025-06-17_Zelina/zl_agentr/tasks/revise_existing_blog_article/state/article_revision_log.tsv"
 
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -36,7 +37,7 @@ usage <- function() {
       "",
       "Purpose:",
       "  Filter the JSON output of scripts/report_arxiv_category_labels.R by",
-      "  removing refs already recorded in the article log.",
+      "  removing refs already recorded in the article or revision logs.",
       "",
       "Input:",
       "  Reads compact JSON from stdin.",
@@ -47,6 +48,7 @@ usage <- function() {
       "",
       "Notes:",
       "  - The article log path is fixed to the zl_agentr state file.",
+      "  - The revision log path is also consulted.",
       "  - If a row contains multiple comma-separated arXiv ids, all are treated",
       "    as already recorded.",
       "  - -h, --help shows this message and exits.",
@@ -83,20 +85,23 @@ normalize_arxiv_ref_id <- function(x) {
   paste0("arxiv:", x)
 }
 
-read_logged_ref_ids <- function(path) {
-  if (!file.exists(path)) {
-    return(character())
+read_logged_ref_ids <- function(paths) {
+  ids <- character()
+  for (path in paths) {
+    if (!file.exists(path)) {
+      next
+    }
+    article_log <- data.table::fread(path, sep = "\t", header = TRUE, na.strings = c("", "NA"))
+    if (!("arxiv_id" %in% names(article_log))) {
+      next
+    }
+    article_log <- article_log[!is.na(arxiv_id) & nzchar(trimws(arxiv_id))]
+    if (!nrow(article_log)) {
+      next
+    }
+    ids <- c(ids, unique(unlist(lapply(article_log$arxiv_id, split_logged_arxiv_ids), use.names = FALSE)))
   }
-  article_log <- data.table::fread(path, sep = "\t", header = TRUE, na.strings = c("", "NA"))
-  if (!all(c("arxiv_id", "blog_article_filename") %in% names(article_log))) {
-    return(character())
-  }
-  article_log <- article_log[!is.na(arxiv_id) & nzchar(trimws(arxiv_id))]
-  if (!nrow(article_log)) {
-    return(character())
-  }
-  ids <- unique(unlist(lapply(article_log$arxiv_id, split_logged_arxiv_ids), use.names = FALSE))
-  normalize_arxiv_ref_id(ids)
+  unique(normalize_arxiv_ref_id(ids))
 }
 
 filter_payload <- function(payload, excluded_ref_ids) {
@@ -150,7 +155,7 @@ if (isTRUE(parsed$show_help)) {
 result <- tryCatch(
   {
     payload <- jsonlite::fromJSON(read_stdin_text(), simplifyVector = FALSE)
-    excluded_ref_ids <- read_logged_ref_ids(article_log_path)
+    excluded_ref_ids <- read_logged_ref_ids(c(article_log_path, article_revision_log_path))
     filter_payload(payload, excluded_ref_ids)
   },
   error = function(e) {
