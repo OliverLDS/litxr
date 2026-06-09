@@ -61,7 +61,11 @@ parse_args <- function(args) {
       stop("Missing value for argument: ", key, call. = FALSE)
     }
 
-    out[[name]] <- args[[i + 1L]]
+    if (identical(name, "collection-id")) {
+      out$collection_id <- args[[i + 1L]]
+    } else if (identical(name, "journal-id")) {
+      out$journal_id <- args[[i + 1L]]
+    }
     i <- i + 2L
   }
 
@@ -134,4 +138,3 @@ emit_json(list(
   project_index_path = project_index_path,
   project_links_path = collection_links_path
 ))
-
