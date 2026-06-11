@@ -1,5 +1,8 @@
-# litxr 0.0.8.7
+# litxr 0.0.8.8
 
+- Extended schema-v4 LLM digests and prompts with `tables` for recognized
+  structured table data and `research_target_github_links` for GitHub
+  repositories that are the paper's research target or artifact.
 - Split the interactive schema-generation workflow into a shell wrapper plus
   separate prompt-build, status-check, and JSON-ingest helpers.
 - Added key, complete, JSON, and ref-id-only output modes to the category

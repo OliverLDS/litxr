@@ -44,6 +44,21 @@ Reader and business fields:
 - likely_reader_misconceptions: several common ways an average reader might misunderstand, overgeneralize, or misuse the paper.
 - business_relevance_pathway: several concrete pathways connecting the paper's contribution to business decisions, operations, governance, product design, market strategy, risk management, or organizational workflows.
 
+Structured extraction fields:
+- tables: recognized structured tables from the paper as an array of table objects. Use an empty array when no table can be represented reliably. Each table object must include:
+  - table_id: short stable id such as "table_1".
+  - title: table caption or inferred short title.
+  - source_location: table number, section, page, appendix, or other location.
+  - columns: column names or column descriptors.
+  - rows: array of row objects preserving the table's structured values.
+  - notes: table notes, caveats, or extraction limitations.
+- research_target_github_links: GitHub repositories that are the paper's research target or artifact. Use an empty array for incidental links or when no such repository exists. Each object must include:
+  - url: the detected https://github.com/... URL.
+  - category_tags: short tags describing what the repository is about, such as model, framework, system, dataset, benchmark, mechanism, package, implementation, or evaluation target.
+  - research_role: how the repository functions in the paper.
+  - description: concise description of the repository.
+  - evidence_context: where or how the paper indicates this GitHub link.
+
 Inline retrieval blocks:
 - anchor_references: up to three prior works that anchor, motivate, compare with, or frame the paper.
 - citation_logic_nodes: reusable citation-ready semantic claims this paper can support in future writing.

@@ -99,6 +99,15 @@ Required top-level fields:
   overgeneralize, or misuse the paper.
 - `business_relevance_pathway`: concrete ways the paper can matter for business
   decisions, operations, governance, products, strategy, risk, or workflows.
+- `tables`: recognized structured tables from the paper as an array of table
+  objects. Use an empty array when no table can be represented reliably. Each
+  object should include `table_id`, `title`, `source_location`, `columns`,
+  `rows`, and `notes`.
+- `research_target_github_links`: GitHub repositories that are the paper's
+  research target or artifact, such as a model, framework, system, dataset,
+  benchmark, mechanism, package, or implementation. Incidental GitHub citations
+  should not be included. Each object should include `url`, `category_tags`,
+  `research_role`, `description`, and `evidence_context`.
 - `evidence_strength`: legacy short evidence-strength field. Prefer
   `very_low`, `low`, `medium`, `high`, `very_high`, `not_applicable`, or
   `unknown`; a short explanatory string remains accepted for backward

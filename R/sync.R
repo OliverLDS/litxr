@@ -2514,6 +2514,8 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL) {
       ranked_contributions = list(x$ranked_contributions %||% list()),
       likely_reader_misconceptions = list(unlist(x$likely_reader_misconceptions %||% character(), use.names = FALSE)),
       business_relevance_pathway = list(unlist(x$business_relevance_pathway %||% character(), use.names = FALSE)),
+      tables = list(x$tables %||% list()),
+      research_target_github_links = list(x$research_target_github_links %||% list()),
       evidence_strength = x$evidence_strength %||% NA_character_,
       evidence_shape = list(x$evidence_shape %||% NULL),
       anchor_references = list(x$anchor_references %||% list()),
@@ -2590,6 +2592,8 @@ litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, co
           flatten_cell(row$ranked_contributions[[1]]),
           flatten_cell(row$likely_reader_misconceptions[[1]]),
           flatten_cell(row$business_relevance_pathway[[1]]),
+          flatten_cell(row$tables[[1]]),
+          flatten_cell(row$research_target_github_links[[1]]),
           flatten_cell(row$evidence_strength[[1]]),
           flatten_cell(row$evidence_shape[[1]]),
           flatten_cell(row$keywords[[1]])
@@ -2837,6 +2841,8 @@ litxr_validate_llm_digest <- function(digest) {
         c("likely_reader_misconceptions", "business_relevance_pathway")
       )
       .litxr_validate_ranked_contributions(digest$ranked_contributions)
+      .litxr_validate_digest_tables(digest$tables)
+      .litxr_validate_research_target_github_links(digest$research_target_github_links)
       .litxr_validate_evidence_shape(digest$evidence_shape)
     }
     if ("anchor_references" %in% names(digest)) {

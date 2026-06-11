@@ -350,6 +350,8 @@ digest <- litxr::litxr_read_llm_digest(ref_id)
       structured_lines("## Ranked Contributions", digest$ranked_contributions),
       vector_lines("## Likely Reader Misconceptions", digest$likely_reader_misconceptions),
       vector_lines("## Business Relevance Pathway", digest$business_relevance_pathway),
+      structured_lines("## Tables", digest$tables),
+      structured_lines("## Research Target GitHub Links", digest$research_target_github_links),
       structured_lines("## Evidence Shape", digest$evidence_shape),
       vector_lines("## Keywords", digest$keywords),
       inline_lines("## Anchor References", digest$anchor_references),

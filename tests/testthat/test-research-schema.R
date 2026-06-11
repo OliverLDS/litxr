@@ -93,6 +93,8 @@ stopifnot(all(c(
   "ranked_contributions",
   "likely_reader_misconceptions",
   "business_relevance_pathway",
+  "tables",
+  "research_target_github_links",
   "evidence_shape"
 ) %in% names(digest_template_v4)))
 digest_template_v4$ranked_contributions <- list(list(
@@ -103,6 +105,21 @@ digest_template_v4$ranked_contributions <- list(list(
 ))
 digest_template_v4$likely_reader_misconceptions <- c("A reader might overgeneralize the result.")
 digest_template_v4$business_relevance_pathway <- c("The method can inform workflow design.")
+digest_template_v4$tables <- list(list(
+  table_id = "table_1",
+  title = "Fixture table",
+  source_location = "Table 1",
+  columns = c("variable", "value"),
+  rows = list(list(variable = "accuracy", value = "0.9")),
+  notes = "Fixture structured table."
+))
+digest_template_v4$research_target_github_links <- list(list(
+  url = "https://github.com/example/research-artifact",
+  category_tags = c("framework", "implementation"),
+  research_role = "artifact introduced by the paper",
+  description = "Fixture repository.",
+  evidence_context = "Mentioned in the artifact section."
+))
 digest_template_v4$evidence_shape <- list(
   evidence_mode = "conceptual_argument",
   evidence_basis = c("The fixture uses conceptual support."),
@@ -137,6 +154,9 @@ stopifnot(grepl("likely_reader_misconceptions", prompt_create, fixed = TRUE))
 stopifnot(grepl("business_relevance_pathway", prompt_create, fixed = TRUE))
 stopifnot(grepl("ranked_contributions", prompt_create, fixed = TRUE))
 stopifnot(grepl("evidence_shape", prompt_create, fixed = TRUE))
+stopifnot(grepl("tables", prompt_create, fixed = TRUE))
+stopifnot(grepl("research_target_github_links", prompt_create, fixed = TRUE))
+stopifnot(grepl("research target or artifact", prompt_create, fixed = TRUE))
 stopifnot(!grepl("{{", prompt_create, fixed = TRUE))
 
 prompt_digest <- litxr::litxr_llm_digest_template("arxiv:2501.00001", schema_version = "v3")

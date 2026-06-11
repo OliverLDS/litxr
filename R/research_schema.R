@@ -297,6 +297,8 @@ litxr_validate_paper_type <- function(x) {
   x$ranked_contributions <- list()
   x$likely_reader_misconceptions <- character()
   x$business_relevance_pathway <- character()
+  x$tables <- list()
+  x$research_target_github_links <- list()
   x$evidence_shape <- list(
     evidence_mode = "unknown",
     evidence_basis = character(),
@@ -401,6 +403,8 @@ litxr_validate_paper_type <- function(x) {
     "ranked_contributions",
     "likely_reader_misconceptions",
     "business_relevance_pathway",
+    "tables",
+    "research_target_github_links",
     "evidence_shape"
   ) %in% names(digest))
 }
@@ -787,6 +791,66 @@ litxr_validate_paper_type <- function(x) {
   invisible(TRUE)
 }
 
+.litxr_validate_digest_tables <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(invisible(TRUE))
+  }
+  if (!is.list(x)) {
+    stop("LLM digest field `tables` must be a list of table objects.", call. = FALSE)
+  }
+  for (i in seq_along(x)) {
+    table <- x[[i]]
+    if (!is.list(table)) {
+      stop("Each `tables` item must be a named list.", call. = FALSE)
+    }
+    missing <- setdiff(c("table_id", "title", "source_location", "columns", "rows", "notes"), names(table))
+    if (length(missing)) {
+      stop("Each `tables` item is missing fields: ", paste(missing, collapse = ", "), call. = FALSE)
+    }
+    table_id <- table$table_id
+    if (is.list(table_id) && length(table_id)) table_id <- table_id[[1]]
+    table_id <- as.character(table_id %||% NA_character_)
+    if (!length(table_id) || is.na(table_id[[1]]) || !nzchar(trimws(table_id[[1]]))) {
+      stop("Each `tables$table_id` must be non-empty.", call. = FALSE)
+    }
+    if (!(is.list(table$rows) || is.data.frame(table$rows))) {
+      stop("Each `tables$rows` value must be an array/list of row objects.", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+.litxr_validate_research_target_github_links <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(invisible(TRUE))
+  }
+  if (!is.list(x)) {
+    stop("LLM digest field `research_target_github_links` must be a list of GitHub-link objects.", call. = FALSE)
+  }
+  for (i in seq_along(x)) {
+    link <- x[[i]]
+    if (!is.list(link)) {
+      stop("Each `research_target_github_links` item must be a named list.", call. = FALSE)
+    }
+    missing <- setdiff(c("url", "category_tags", "research_role", "description", "evidence_context"), names(link))
+    if (length(missing)) {
+      stop("Each `research_target_github_links` item is missing fields: ", paste(missing, collapse = ", "), call. = FALSE)
+    }
+    url <- link$url
+    if (is.list(url) && length(url)) url <- url[[1]]
+    url <- as.character(url %||% NA_character_)
+    if (!length(url) || is.na(url[[1]]) || !nzchar(trimws(url[[1]])) || !grepl("^https://github\\.com/", url[[1]])) {
+      stop("Each `research_target_github_links$url` must be a non-empty https://github.com/ URL.", call. = FALSE)
+    }
+    tags <- link$category_tags
+    if (is.list(tags)) tags <- unlist(tags, use.names = FALSE)
+    if (!(is.character(tags) || is.null(tags))) {
+      stop("Each `research_target_github_links$category_tags` value must be a character array.", call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
 .litxr_validate_evidence_shape <- function(x) {
   if (!is.list(x)) {
     stop("LLM digest field `evidence_shape` must be a named list.", call. = FALSE)
@@ -938,6 +1002,7 @@ litxr_validate_paper_type <- function(x) {
       "limitations", "theoretical_mechanism",
       "contribution_type", "ranked_contributions",
       "likely_reader_misconceptions", "business_relevance_pathway",
+      "tables", "research_target_github_links",
       "evidence_strength", "evidence_shape", "keywords", "notes",
       "generated_at", "updated_at"
     ))

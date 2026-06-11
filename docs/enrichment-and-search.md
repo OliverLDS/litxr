@@ -177,6 +177,8 @@ Core latest fields:
 - `ranked_contributions`
 - `likely_reader_misconceptions`
 - `business_relevance_pathway`
+- `tables`
+- `research_target_github_links`
 - `evidence_strength`
 - `evidence_shape`
 - `anchor_references`
@@ -209,9 +211,9 @@ The `paper_type` field uses the canonical vocabulary returned by
 Schema `v3` digests may carry optional inline `anchor_references` and
 `citation_logic_nodes` fields. Schema `v4` keeps those blocks and adds
 `ranked_contributions`, `likely_reader_misconceptions`,
-`business_relevance_pathway`, and `evidence_shape`. The same anchor and
-citation-node information can also be stored as separate project-level tables
-under `project.data_root/findings/`.
+`business_relevance_pathway`, `tables`, `research_target_github_links`, and
+`evidence_shape`. The same anchor and citation-node information can also be
+stored as separate project-level tables under `project.data_root/findings/`.
 
 ## Building Digests
 
