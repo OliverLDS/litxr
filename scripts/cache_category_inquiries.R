@@ -76,6 +76,8 @@ if (isTRUE(parsed$show_help)) {
       "Notes:",
       "  - The script writes a persistent local inquiry embedding cache under",
       "    project.data_root/embeddings/label_queries/.",
+      "  - Each cache also includes a query_set.json file describing the category",
+      "    ids and inquiry sentences that were embedded.",
       "  - If --query-set-id is supplied, that cache is overwritten.",
       "  - If --query-set-id is omitted, a new tmp_inquiry_* cache id is created.",
       "  - Progress logs are written to stderr; machine-readable output is JSON on stdout.",
@@ -136,6 +138,7 @@ log_line(sprintf("query_set_id=%s", query_set_id))
 log_line(sprintf("records=%s", nrow(index$metadata)))
 log_line(sprintf("model=%s", embed_model))
 log_line(sprintf("cache_dir=%s", paths$dir))
+log_line(sprintf("query_set_path=%s", paths$query_set))
 
 emit_json(list(
   status = "ok",
@@ -143,5 +146,6 @@ emit_json(list(
   records = nrow(index$metadata),
   model = embed_model,
   cache_dir = paths$dir,
+  query_set_path = paths$query_set,
   inquiry = inquiry_path
 ))

@@ -208,9 +208,10 @@ if (!is.null(inquiry_path)) {
     Sys.getpid()
   )
   temp_paths <- litxr:::.litxr_label_query_index_paths(cfg, query_set_id, embed_model)
+  temp_query_root <- dirname(temp_paths$dir)
   cleanup_temp_query_cache <- function() {
-    if (!is.null(temp_paths$dir) && dir.exists(temp_paths$dir)) {
-      unlink(temp_paths$dir, recursive = TRUE, force = TRUE)
+    if (!is.null(temp_query_root) && dir.exists(temp_query_root)) {
+      unlink(temp_query_root, recursive = TRUE, force = TRUE)
     }
   }
   litxr::litxr_build_label_query_index(

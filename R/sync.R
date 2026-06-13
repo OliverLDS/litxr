@@ -1840,6 +1840,21 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   data.table::rbindlist(rows, fill = TRUE)
 }
 
+.litxr_label_query_spec_from_metadata <- function(metadata) {
+  metadata <- data.table::as.data.table(metadata)
+  if (!nrow(metadata)) {
+    return(list())
+  }
+  category_ids <- unique(as.character(metadata$category_id))
+  category_ids <- category_ids[nzchar(category_ids)]
+  out <- setNames(lapply(category_ids, function(category_id) {
+    dt <- metadata[metadata$category_id == category_id, ]
+    dt <- dt[order(dt$query_order), ]
+    as.character(dt[["query_text"]])
+  }), category_ids)
+  out
+}
+
 .litxr_label_query_index_paths <- function(cfg, query_set_id, model) {
   base_dir <- file.path(
     .litxr_project_embeddings_dir(cfg),
@@ -1852,7 +1867,8 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     metadata = file.path(base_dir, "metadata.fst"),
     matrix = file.path(base_dir, "matrix.rds"),
     matrix_f32 = file.path(base_dir, "matrix.f32"),
-    manifest = file.path(base_dir, "manifest.json")
+    manifest = file.path(base_dir, "manifest.json"),
+    query_set = file.path(base_dir, "query_set.json")
   )
 }
 
@@ -1911,6 +1927,9 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   .litxr_write_float32_matrix_atomic(matrix, paths$matrix_f32)
   if (file.exists(paths$matrix)) unlink(paths$matrix)
   .litxr_write_json_atomic(manifest, paths$manifest)
+  if (!is.null(paths$query_set)) {
+    .litxr_write_json_atomic(.litxr_label_query_spec_from_metadata(metadata), paths$query_set)
+  }
   invisible(paths)
 }
 

@@ -86,6 +86,11 @@ The intended pattern is:
    `litxr_score_collection_categories()`.
 4. Apply threshold rules with `litxr_label_collection_by_category()`.
 
+Cached category-query embedding directories now include a `query_set.json`
+file that shows the category ids and inquiry sentences used to build the
+cache, so the semantic meaning of the inquiries is visible without opening
+the original source YAML or JSON.
+
 Example:
 
 ```r

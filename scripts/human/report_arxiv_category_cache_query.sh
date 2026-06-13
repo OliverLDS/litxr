@@ -27,11 +27,11 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/report_arxiv_category_labels_md.R < input.json",
+      "  Rscript scripts/human/report_arxiv_category_cache_query.sh < input.json",
       "",
       "Purpose:",
       "  Convert the compact JSON output of scripts/report_arxiv_category_labels.R",
-      "  into human-readable markdown.",
+      "  into human-readable markdown for a cached category query.",
       "",
       "Input:",
       "  Reads JSON from stdin.",
@@ -41,7 +41,7 @@ usage <- function() {
       "",
       "Notes:",
       "  - This node is intended to be used in a pipe:",
-      "    scripts/report_arxiv_category_labels.R --output-format json | Rscript scripts/report_arxiv_category_labels_md.R",
+      "    scripts/report_arxiv_category_labels.R --output-format json | Rscript scripts/human/report_arxiv_category_cache_query.sh",
       "  - When the JSON contains no selected refs, it prints a short no-results message.",
       "  - -h, --help shows this message and exits.",
       sep = "\n"
