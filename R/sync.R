@@ -1855,11 +1855,22 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   out
 }
 
-.litxr_label_query_index_paths <- function(cfg, query_set_id, model) {
-  base_dir <- file.path(
+.litxr_label_query_root_paths <- function(cfg, query_set_id) {
+  root_dir <- file.path(
     .litxr_project_embeddings_dir(cfg),
     "label_queries",
-    .litxr_embedding_slug(query_set_id),
+    .litxr_embedding_slug(query_set_id)
+  )
+  list(
+    dir = root_dir,
+    query_set = file.path(root_dir, "query_set.yaml")
+  )
+}
+
+.litxr_label_query_index_paths <- function(cfg, query_set_id, model) {
+  root_paths <- .litxr_label_query_root_paths(cfg, query_set_id)
+  base_dir <- file.path(
+    root_paths$dir,
     .litxr_embedding_slug(model)
   )
   list(
@@ -1868,7 +1879,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     matrix = file.path(base_dir, "matrix.rds"),
     matrix_f32 = file.path(base_dir, "matrix.f32"),
     manifest = file.path(base_dir, "manifest.json"),
-    query_set = file.path(base_dir, "query_set.json")
+    query_set = root_paths$query_set
   )
 }
 
@@ -1928,7 +1939,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   if (file.exists(paths$matrix)) unlink(paths$matrix)
   .litxr_write_json_atomic(manifest, paths$manifest)
   if (!is.null(paths$query_set)) {
-    .litxr_write_json_atomic(.litxr_label_query_spec_from_metadata(metadata), paths$query_set)
+    .litxr_write_yaml_atomic(.litxr_label_query_spec_from_metadata(metadata), paths$query_set)
   }
   invisible(paths)
 }
@@ -4750,6 +4761,17 @@ litxr_add_refs <- function(
   if (!file.rename(tmp_path, path)) {
     unlink(tmp_path)
     stop("Failed to atomically write JSON file: ", path, call. = FALSE)
+  }
+  invisible(path)
+}
+
+.litxr_write_yaml_atomic <- function(object, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp_path <- paste0(path, ".tmp")
+  yaml::write_yaml(object, tmp_path)
+  if (!file.rename(tmp_path, path)) {
+    unlink(tmp_path)
+    stop("Failed to atomically write YAML file: ", path, call. = FALSE)
   }
   invisible(path)
 }

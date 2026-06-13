@@ -8,16 +8,16 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/human/export_label_query_set_json.R --cache-dir PATH [--output PATH]",
+      "  Rscript scripts/human/export_label_query_set_yaml.R --cache-dir PATH [--output PATH]",
       "",
       "Options:",
-      "  --cache-dir PATH   Existing label-query cache directory containing metadata.fst.",
-      "  --output PATH      Output query_set.json path. Default: <cache-dir>/query_set.json",
+      "  --cache-dir PATH   Existing label-query model cache directory containing metadata.fst.",
+      "  --output PATH      Output query_set.yaml path. Default: <parent>/query_set.yaml",
       "  -h, --help         Show this help message.",
       "",
       "Behavior:",
       "  - Reconstructs the category->inquiry sentence mapping from metadata.fst.",
-      "  - Writes a query_set.json file alongside the cache.",
+      "  - Writes a query_set.yaml file at the query-set root.",
       "  - Progress logs are written to stderr.",
       sep = "\n"
     )
@@ -95,7 +95,7 @@ if (!file.exists(metadata_path)) {
 }
 
 output_path <- if (is.null(parsed$output) || !nzchar(trimws(parsed$output))) {
-  file.path(cache_dir, "query_set.json")
+  file.path(dirname(cache_dir), "query_set.yaml")
 } else {
   path.expand(parsed$output)
 }
@@ -104,7 +104,7 @@ metadata <- fst::read_fst(metadata_path, as.data.table = TRUE)
 query_set <- query_set_from_metadata(metadata)
 
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-jsonlite::write_json(query_set, output_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+yaml::write_yaml(query_set, output_path)
 
 log_line(sprintf("cache_dir=%s", cache_dir))
 log_line(sprintf("metadata_path=%s", metadata_path))

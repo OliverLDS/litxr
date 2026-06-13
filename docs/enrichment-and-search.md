@@ -86,15 +86,16 @@ The intended pattern is:
    `litxr_score_collection_categories()`.
 4. Apply threshold rules with `litxr_label_collection_by_category()`.
 
-Cached category-query embedding directories now include a `query_set.json`
-file that shows the category ids and inquiry sentences used to build the
-cache, so the semantic meaning of the inquiries is visible without opening
-the original source YAML or JSON.
+Cached category-query embedding roots now include a `query_set.yaml` file
+at `project.data_root/embeddings/label_queries/<query_set_id>/query_set.yaml`.
+It shows the category ids and inquiry sentences used to build the cache, so
+the semantic meaning of the inquiries is visible without opening the original
+source YAML.
 For an older cache that only has `metadata.fst`, you can backfill the
-descriptor with:
+descriptor from a model subdirectory with:
 
 ```bash
-Rscript scripts/human/export_label_query_set_json.R \
+Rscript scripts/human/export_label_query_set_yaml.R \
   --cache-dir /path/to/ai_category_query_set_v1/nvidia_llama_nemotron_embed_vl_1b_v2_free
 ```
 

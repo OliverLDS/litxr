@@ -1,8 +1,8 @@
-# litxr 0.0.8.9
+# litxr 0.0.8.10
 
 - Added a legacy exporter for cached category-query sets and now write
-  `query_set.json` alongside new label-query caches so the inquiry sentences
-  are visible from disk.
+  `query_set.yaml` at the query-set root so the inquiry sentences are visible
+  from disk and shared across embedding-model subdirectories.
 - Extended schema-v4 LLM digests and prompts with `tables` for recognized
   structured table data and `research_target_github_links` for GitHub
   repositories that are the paper's research target or artifact.
@@ -13,6 +13,12 @@
   collection.
 - Extended `scripts/get_ref_summary.sh` to render schema-v4 research-analysis
   fields in complete mode.
+
+# litxr 0.0.8.9
+
+- Added a legacy exporter for cached category-query sets and now write
+  `query_set.json` alongside new label-query caches so the inquiry sentences
+  are visible from disk.
 
 # litxr 0.0.8.6
 
