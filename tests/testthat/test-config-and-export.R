@@ -292,6 +292,12 @@ label_query_index <- litxr::litxr_build_label_query_index(
   overwrite = TRUE
 )
 stopifnot(nrow(label_query_index$metadata) == 4L)
+label_query_paths <- litxr:::.litxr_label_query_index_paths(cfg_export, "mock-categories", "mock-embedding-v1")
+stopifnot(file.exists(label_query_paths$query_set))
+label_query_spec <- jsonlite::fromJSON(label_query_paths$query_set, simplifyVector = FALSE)
+stopifnot(identical(sort(names(label_query_spec)), c("finance_workflows", "neural_methods")))
+stopifnot(identical(label_query_spec$neural_methods[[1]], "This paper studies neural retrieval methods."))
+stopifnot(identical(label_query_spec$finance_workflows[[2]], "This paper focuses on finance applications and workflow automation."))
 category_scores <- litxr::litxr_score_collection_categories(
   arxiv_collection$collection_id,
   query_set_id = "mock-categories",

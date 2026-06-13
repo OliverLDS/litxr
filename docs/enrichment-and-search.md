@@ -90,6 +90,13 @@ Cached category-query embedding directories now include a `query_set.json`
 file that shows the category ids and inquiry sentences used to build the
 cache, so the semantic meaning of the inquiries is visible without opening
 the original source YAML or JSON.
+For an older cache that only has `metadata.fst`, you can backfill the
+descriptor with:
+
+```bash
+Rscript scripts/human/export_label_query_set_json.R \
+  --cache-dir /path/to/ai_category_query_set_v1/nvidia_llama_nemotron_embed_vl_1b_v2_free
+```
 
 Example:
 
