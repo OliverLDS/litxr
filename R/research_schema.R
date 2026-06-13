@@ -1002,7 +1002,6 @@ litxr_validate_paper_type <- function(x) {
       "limitations", "theoretical_mechanism",
       "contribution_type", "ranked_contributions",
       "likely_reader_misconceptions", "business_relevance_pathway",
-      "tables", "research_target_github_links",
       "evidence_strength", "evidence_shape", "keywords", "notes",
       "generated_at", "updated_at"
     ))

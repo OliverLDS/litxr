@@ -1,3 +1,8 @@
+# litxr 0.0.8.11
+
+- Made the v4 LLM digest validator backward-compatible with older stored
+  digests that do not yet have `tables` or `research_target_github_links`.
+
 # litxr 0.0.8.10
 
 - Added a legacy exporter for cached category-query sets and now write

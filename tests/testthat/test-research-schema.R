@@ -132,6 +132,21 @@ bad_v4 <- digest_template_v4
 bad_v4$evidence_shape$evidence_mode <- "bad_mode"
 stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v4), silent = TRUE), "try-error"))
 
+legacy_v4 <- litxr::litxr_llm_digest_template("doi:10.1000/v4-legacy", schema_version = "v4")
+legacy_v4$tables <- NULL
+legacy_v4$research_target_github_links <- NULL
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(legacy_v4))))
+legacy_v4_path <- litxr::litxr_write_llm_digest(
+  "doi:10.1000/v4-legacy",
+  legacy_v4,
+  cfg,
+  keep_history = FALSE,
+  bump_revision = FALSE
+)
+stopifnot(file.exists(legacy_v4_path))
+legacy_v4_read <- litxr::litxr_read_llm_digest("doi:10.1000/v4-legacy", cfg)
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(legacy_v4_read))))
+
 prompt_ref <- data.table::data.table(
   ref_id = "arxiv:2501.00001",
   source = "arxiv",
