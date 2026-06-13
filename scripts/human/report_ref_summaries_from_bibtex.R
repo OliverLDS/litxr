@@ -9,15 +9,18 @@ usage <- function() {
     paste(
       "Usage:",
       "  Rscript scripts/human/report_ref_summaries_from_bibtex.R --bibtex PATH [--output PATH]",
+      "  Rscript scripts/human/report_ref_summaries_from_bibtex.R --ref-ids ID1,ID2 [--output PATH]",
       "  Rscript scripts/human/report_ref_summaries_from_bibtex.R PATH [--output PATH]",
       "",
       "Options:",
       "  --bibtex PATH   Input BibTeX file path.",
+      "  --ref-ids LIST  Comma-separated litxr ref_ids, arXiv ids, or DOIs.",
       "  --output PATH   Output markdown file path. Default: same path with .md suffix.",
       "  -h, --help      Show this help message.",
       "",
       "Behavior:",
       "  - Reads each BibTeX entry, resolves it to a local litxr ref.",
+      "  - Or reads each provided ref_id directly when --ref-ids is used.",
       "  - Resolution tries citekey/source_id/ref_id first, then DOI if present.",
       "  - Generates a markdown file listing ref_id, summary, and Theoretical Mechanism.",
       "  - Progress logs are written to stderr.",
@@ -30,6 +33,7 @@ parse_args <- function(args) {
   out <- list(
     help = FALSE,
     bibtex = NULL,
+    ref_ids = NULL,
     output = NULL
   )
   positional <- character()
@@ -48,6 +52,12 @@ parse_args <- function(args) {
       i <- i + 2L
       next
     }
+    if (identical(arg, "--ref-ids")) {
+      if (i == length(args)) stop("Missing value for --ref-ids", call. = FALSE)
+      out$ref_ids <- args[[i + 1L]]
+      i <- i + 2L
+      next
+    }
     if (identical(arg, "--output")) {
       if (i == length(args)) stop("Missing value for --output", call. = FALSE)
       out$output <- args[[i + 1L]]
@@ -61,17 +71,30 @@ parse_args <- function(args) {
     i <- i + 1L
   }
 
-  if (!is.null(out$bibtex) && length(positional)) {
-    stop("Use either a positional BibTeX path or --bibtex, not both.", call. = FALSE)
+  if ((!is.null(out$bibtex) || !is.null(out$ref_ids)) && length(positional)) {
+    stop("Use either a positional BibTeX path or --bibtex/--ref-ids, not both.", call. = FALSE)
   }
   if (is.null(out$bibtex) && length(positional)) {
     out$bibtex <- positional[[1L]]
+  }
+  if (!is.null(out$bibtex) && !is.null(out$ref_ids)) {
+    stop("Use either --bibtex or --ref-ids, not both.", call. = FALSE)
   }
   if (length(positional) > 1L) {
     stop("Unexpected positional argument: ", positional[[2L]], call. = FALSE)
   }
 
   out
+}
+
+parse_ref_ids <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(character())
+  }
+  ids <- unlist(strsplit(as.character(x[[1L]]), "[,;[:space:]]+", perl = TRUE), use.names = FALSE)
+  ids <- trimws(ids)
+  ids <- ids[nzchar(ids)]
+  unique(ids)
 }
 
 read_bibtex_entries <- function(path) {
@@ -159,6 +182,20 @@ normalize_lookup_value <- function(x) {
   x
 }
 
+lookup_candidates <- function(x) {
+  x <- normalize_lookup_value(x)
+  if (is.na(x) || !nzchar(x)) {
+    return(character())
+  }
+  candidates <- c(x)
+  if (grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", x)) {
+    candidates <- c(candidates, paste0("arxiv:", x))
+  } else if (grepl("/", x, fixed = TRUE) && !startsWith(x, "doi:")) {
+    candidates <- c(candidates, paste0("doi:", x))
+  }
+  unique(stats::na.omit(candidates))
+}
+
 scalar_text <- function(x) {
   if (is.null(x) || !length(x)) return(NA_character_)
   vals <- as.character(unlist(x, use.names = FALSE))
@@ -197,11 +234,10 @@ pick_preferred_row <- function(rows, doi = NA_character_) {
 resolve_reference <- function(entry_lines, bib_key, cfg) {
   doi <- extract_bib_field(entry_lines, "doi")
   doi <- normalize_lookup_value(doi)
-  key_candidates <- unique(stats::na.omit(c(
-    normalize_lookup_value(bib_key),
-    if (!is.na(doi) && nzchar(doi)) paste0("doi:", doi) else NA_character_,
-    if (!is.na(doi) && nzchar(doi)) doi else NA_character_
-  )))
+  key_candidates <- unique(c(
+    lookup_candidates(bib_key),
+    if (!is.na(doi) && nzchar(doi)) lookup_candidates(doi) else character()
+  ))
 
   for (candidate in key_candidates) {
     rows <- data.table::as.data.table(litxr::litxr_find_refs(ref_id = candidate, config = cfg))
@@ -260,37 +296,64 @@ if (isTRUE(parsed$help)) {
   quit(save = "no", status = 0L)
 }
 
-if (is.null(parsed$bibtex) || !nzchar(trimws(parsed$bibtex))) {
-  usage()
-  stop("Missing BibTeX input path.", call. = FALSE)
-}
-
-bibtex_path <- path.expand(parsed$bibtex)
-if (!file.exists(bibtex_path)) {
-  stop("BibTeX file not found: ", bibtex_path, call. = FALSE)
-}
-
-if (is.null(parsed$output) || !nzchar(trimws(parsed$output))) {
-  output_path <- paste0(tools::file_path_sans_ext(bibtex_path), ".md")
-} else {
-  output_path <- path.expand(parsed$output)
-}
-
 cfg <- litxr::litxr_read_config()
-entries <- read_bibtex_entries(bibtex_path)
-if (!length(entries$entries)) {
-  stop("No BibTeX entries found in: ", bibtex_path, call. = FALSE)
+input_mode <- if (!is.null(parsed$ref_ids)) "ref_ids" else "bibtex"
+
+if (identical(input_mode, "bibtex")) {
+  if (is.null(parsed$bibtex) || !nzchar(trimws(parsed$bibtex))) {
+    usage()
+    stop("Missing BibTeX input path.", call. = FALSE)
+  }
+
+  bibtex_path <- path.expand(parsed$bibtex)
+  if (!file.exists(bibtex_path)) {
+    stop("BibTeX file not found: ", bibtex_path, call. = FALSE)
+  }
+  if (is.null(parsed$output) || !nzchar(trimws(parsed$output))) {
+    output_path <- paste0(tools::file_path_sans_ext(bibtex_path), ".md")
+  } else {
+    output_path <- path.expand(parsed$output)
+  }
+  entries <- read_bibtex_entries(bibtex_path)
+  if (!length(entries$entries)) {
+    stop("No BibTeX entries found in: ", bibtex_path, call. = FALSE)
+  }
+} else {
+  bibtex_path <- NA_character_
+  ref_ids <- parse_ref_ids(parsed$ref_ids)
+  if (!length(ref_ids)) {
+    usage()
+    stop("Missing --ref-ids values.", call. = FALSE)
+  }
+  if (is.null(parsed$output) || !nzchar(trimws(parsed$output))) {
+    output_path <- "report_ref_summaries.md"
+  } else {
+    output_path <- path.expand(parsed$output)
+  }
+  entries <- list(entries = as.list(ref_ids), keys = ref_ids)
 }
 
 report_lines <- c(
-  "# BibTeX Reference Summaries",
+  "# Reference Summaries",
   "",
-  sprintf("- Source BibTeX: `%s`", bibtex_path),
+  if (identical(input_mode, "bibtex")) {
+    sprintf("- Source BibTeX: `%s`", bibtex_path)
+  } else {
+    sprintf("- Source ref_ids: `%s`", paste(entries$keys, collapse = ", "))
+  },
   sprintf("- Generated at: `%s`", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z", tz = "UTC")),
   sprintf("- Entry count: `%d`", length(entries$entries)),
   "",
-  "This report resolves each BibTeX entry to a local `litxr` reference when possible.",
-  "BibTeX citekeys may differ from `ref_id`; when that happens, the script falls back to DOI-based lookup.",
+  if (identical(input_mode, "bibtex")) {
+    "This report resolves each BibTeX entry to a local `litxr` reference when possible."
+  } else {
+    "This report resolves each provided ref_id to a local `litxr` reference when possible."
+  },
+  if (identical(input_mode, "bibtex")) {
+    "BibTeX citekeys may differ from `ref_id`; when that happens, the script falls back to DOI-based lookup."
+  } else {
+    "Direct ref_ids are resolved against the local cache; DOI strings are also accepted."
+  },
   ""
 )
 
@@ -299,12 +362,20 @@ resolved_entries <- vector("list", length(entries$entries))
 resolved_ref_ids <- character()
 
 for (i in seq_along(entries$entries)) {
-  entry_lines <- strsplit(entries$entries[[i]], "\n", fixed = TRUE)[[1L]]
+  entry_lines <- if (identical(input_mode, "bibtex")) {
+    strsplit(entries$entries[[i]], "\n", fixed = TRUE)[[1L]]
+  } else {
+    character()
+  }
   bib_key <- entries$keys[[i]]
   resolved <- resolve_reference(entry_lines, bib_key, cfg)
-  title <- extract_bib_field(entry_lines, "title")
-  title <- collapse_ws(title)
-  if (is.null(title) || !nzchar(title)) title <- NA_character_
+  title <- if (identical(input_mode, "bibtex")) {
+    title <- extract_bib_field(entry_lines, "title")
+    title <- collapse_ws(title)
+    if (is.null(title) || !nzchar(title)) NA_character_ else title
+  } else {
+    NA_character_
+  }
 
   if (isTRUE(resolved$resolved) && nrow(resolved$ref)) {
     ref <- resolved$ref
@@ -360,5 +431,6 @@ writeLines(report_lines, output_path)
 
 log_line(sprintf("written=%s", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
 if (length(missing)) {
-  log_line(sprintf("unresolved_bib_keys=%s", paste(unique(missing), collapse = ", ")))
+  label <- if (identical(input_mode, "bibtex")) "unresolved_bib_keys" else "unresolved_ref_ids"
+  log_line(sprintf("%s=%s", label, paste(unique(missing), collapse = ", ")))
 }
