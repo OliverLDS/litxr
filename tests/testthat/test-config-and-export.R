@@ -303,6 +303,16 @@ stopifnot(identical(
   label_query_paths$query_set,
   litxr:::.litxr_label_query_index_paths(cfg_export, "mock-categories", "other-model")$query_set
 ))
+yaml_lines <- litxr:::.litxr_format_label_query_yaml(list(
+  alpha = c(
+    "This is a deliberately long inquiry sentence that should remain on one line when written to YAML so the semantic meaning stays visually intact.",
+    "Short sentence"
+  ),
+  beta = c("Another sentence")
+))
+stopifnot(identical(yaml_lines[[1]], "alpha:"))
+stopifnot(identical(yaml_lines[[4]], ""))
+stopifnot(nchar(yaml_lines[[2]]) == nchar("This is a deliberately long inquiry sentence that should remain on one line when written to YAML so the semantic meaning stays visually intact.") + 6L)
 category_scores <- litxr::litxr_score_collection_categories(
   arxiv_collection$collection_id,
   query_set_id = "mock-categories",

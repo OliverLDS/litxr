@@ -104,7 +104,7 @@ metadata <- fst::read_fst(metadata_path, as.data.table = TRUE)
 query_set <- query_set_from_metadata(metadata)
 
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-yaml::write_yaml(query_set, output_path)
+litxr:::.litxr_write_yaml_atomic(query_set, output_path)
 
 log_line(sprintf("cache_dir=%s", cache_dir))
 log_line(sprintf("metadata_path=%s", metadata_path))

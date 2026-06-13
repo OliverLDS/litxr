@@ -4768,12 +4768,45 @@ litxr_add_refs <- function(
 .litxr_write_yaml_atomic <- function(object, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   tmp_path <- paste0(path, ".tmp")
-  yaml::write_yaml(object, tmp_path)
+  writeLines(.litxr_format_label_query_yaml(object), tmp_path, useBytes = TRUE)
   if (!file.rename(tmp_path, path)) {
     unlink(tmp_path)
     stop("Failed to atomically write YAML file: ", path, call. = FALSE)
   }
   invisible(path)
+}
+
+.litxr_format_label_query_yaml <- function(query_set) {
+  if (!is.list(query_set) || !length(query_set)) {
+    return(character())
+  }
+  if (is.null(names(query_set)) || any(!nzchar(names(query_set)))) {
+    stop("Label query YAML requires a named list.", call. = FALSE)
+  }
+
+  escape_scalar <- function(x) {
+    x <- as.character(x)
+    x[is.na(x)] <- ""
+    x <- gsub("'", "''", x, fixed = TRUE)
+    paste0("'", x, "'")
+  }
+
+  lines <- character()
+  category_ids <- names(query_set)
+  for (i in seq_along(category_ids)) {
+    category_id <- category_ids[[i]]
+    queries <- as.character(unlist(query_set[[i]], use.names = FALSE))
+    lines <- c(lines, paste0(category_id, ":"))
+    if (length(queries)) {
+      lines <- c(lines, paste0("  - ", escape_scalar(queries)))
+    } else {
+      lines <- c(lines, "  []")
+    }
+    if (i < length(category_ids)) {
+      lines <- c(lines, "")
+    }
+  }
+  lines
 }
 
 .litxr_write_fst_atomic <- function(object, path) {
