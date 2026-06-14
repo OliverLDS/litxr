@@ -1,3 +1,8 @@
+# litxr 0.0.8.12
+
+- Added human-facing BibTeX/ref-id reporters for the `Methods` and
+  `identification_strategy` fields in the latest research schema.
+
 # litxr 0.0.8.11
 
 - Made the v4 LLM digest validator backward-compatible with older stored
