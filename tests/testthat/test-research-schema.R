@@ -114,7 +114,7 @@ digest_template_v4$tables <- list(list(
   notes = "Fixture structured table."
 ))
 digest_template_v4$research_target_github_links <- list(list(
-  url = "https://github.com/example/research-artifact",
+  url = "https://gist.github.com/example/research-artifact",
   category_tags = c("framework", "implementation"),
   research_role = "artifact introduced by the paper",
   description = "Fixture repository.",
