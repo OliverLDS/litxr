@@ -290,7 +290,7 @@ read_digests_by_ref_ids <- function(ref_ids, cfg) {
 
 scalar_methods <- function(x) {
   val <- scalar_text(x)
-  if (is.na(val)) character() else val
+  if (is.na(val)) NA_character_ else val
 }
 
 args <- commandArgs(trailingOnly = TRUE)

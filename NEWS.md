@@ -1,3 +1,8 @@
+# litxr 0.0.8.13
+
+- Fixed the human-facing identification-strategy reporter so missing values
+  no longer crash markdown rendering.
+
 # litxr 0.0.8.12
 
 - Added human-facing BibTeX/ref-id reporters for the `Methods` and
