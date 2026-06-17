@@ -1,0 +1,7 @@
+schema_version: v4
+prompt_version: v4.0
+schema_release_date: 2026-06-13
+schema_release_tag: v0.0.8.10
+schema_release_notes: >
+  Added tables and research_target_github_links to schema-v4 digests and
+  updated the active prompt contract to extract those fields.

@@ -74,6 +74,24 @@ stopifnot(identical(
 stopifnot(isTRUE(invisible(litxr::litxr_validate_paper_type(c("empirical archival", "narrative review", NA_character_, "")))))
 stopifnot(inherits(try(litxr::litxr_validate_paper_type("bad_type_value"), silent = TRUE), "try-error"))
 
+schema_release_info <- litxr::litxr_llm_schema_release_info()
+stopifnot(identical(
+  names(schema_release_info),
+  c(
+    "schema_version",
+    "prompt_version",
+    "schema_release_date",
+    "schema_release_tag",
+    "schema_release_notes"
+  )
+))
+stopifnot(identical(schema_release_info$schema_version, "v4"))
+stopifnot(identical(schema_release_info$prompt_version, "v4.0"))
+stopifnot(identical(schema_release_info$schema_release_date, "2026-06-13"))
+stopifnot(identical(schema_release_info$schema_release_tag, "v0.0.8.10"))
+stopifnot(grepl("tables", schema_release_info$schema_release_notes, fixed = TRUE))
+stopifnot(grepl("research_target_github_links", schema_release_info$schema_release_notes, fixed = TRUE))
+
 digest_template <- litxr::litxr_llm_digest_template("doi:10.1000/v2")
 stopifnot(identical(digest_template$schema_version, "v2"))
 stopifnot(identical(digest_template$digest_revision, 1L))
