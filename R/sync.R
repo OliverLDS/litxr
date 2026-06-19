@@ -3153,6 +3153,198 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   data.table::rbindlist(out, fill = TRUE)
 }
 
+.litxr_normalize_arxiv_ref_id <- function(ref_id) {
+  ref_id <- as.character(ref_id)
+  if (!length(ref_id) || is.na(ref_id[[1]])) {
+    return(NA_character_)
+  }
+  ref_id <- trimws(ref_id[[1]])
+  if (!nzchar(ref_id)) {
+    return(NA_character_)
+  }
+  if (!grepl("^arxiv:", ref_id, ignore.case = TRUE)) {
+    ref_id <- paste0("arxiv:", ref_id)
+  }
+  base <- sub("^arxiv:", "", ref_id, ignore.case = TRUE)
+  base <- sub("v[0-9]+$", "", base)
+  paste0("arxiv:", base)
+}
+
+.litxr_normalize_doi_ref_id <- function(doi) {
+  doi <- as.character(doi)
+  if (!length(doi) || is.na(doi[[1]])) {
+    return(NA_character_)
+  }
+  doi <- trimws(doi[[1]])
+  if (!nzchar(doi)) {
+    return(NA_character_)
+  }
+  if (grepl("^https?://(dx\\.)?doi\\.org/", doi, ignore.case = TRUE)) {
+    doi <- sub("^https?://(dx\\.)?doi\\.org/", "", doi, ignore.case = TRUE)
+  }
+  doi <- sub("^doi:", "", doi, ignore.case = TRUE)
+  if (!nzchar(doi)) {
+    return(NA_character_)
+  }
+  paste0("doi:", doi)
+}
+
+.litxr_scalar_chr <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(NA_character_)
+  }
+  if (is.list(x)) {
+    if (!length(x)) {
+      return(NA_character_)
+    }
+    x <- x[[1]]
+  } else {
+    x <- x[[1]]
+  }
+  if (is.null(x) || !length(x) || is.na(x)) {
+    return(NA_character_)
+  }
+  x <- as.character(x)
+  if (!length(x) || is.na(x[[1]]) || !nzchar(x[[1]])) {
+    return(NA_character_)
+  }
+  x[[1]]
+}
+
+.litxr_find_unique_collection_row <- function(cfg, ref_id, expected_source = NULL) {
+  rows <- .litxr_find_collection_refs_by_keys(cfg, ref_id)
+  if (!nrow(rows)) {
+    stop("Reference not found in local collection records: ", ref_id, call. = FALSE)
+  }
+  if (!is.null(expected_source)) {
+    rows <- rows[rows$source == expected_source, ]
+  }
+  if (!nrow(rows)) {
+    stop("Reference found, but not as source `", expected_source, "`: ", ref_id, call. = FALSE)
+  }
+  if (nrow(rows) != 1L) {
+    stop("Expected exactly one local collection row for ", ref_id, " but found ", nrow(rows), ".", call. = FALSE)
+  }
+  rows
+}
+
+.litxr_update_collection_row <- function(cfg, row) {
+  collection_id <- .litxr_scalar_chr(row$collection_id)
+  if (is.na(collection_id) || !nzchar(collection_id)) {
+    stop("Updated reference row is missing collection_id.", call. = FALSE)
+  }
+  collection <- .litxr_get_journal(cfg, collection_id)
+  local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+  existing <- .litxr_read_journal_records(local_path)
+  .litxr_write_journal_upserted_records(existing, row, local_path, collection, cfg = cfg)
+}
+
+#' Link a published DOI record to an existing arXiv reference
+#'
+#' Keeps `ref_id` canonical keys unchanged while establishing an explicit link
+#' between an existing arXiv record and a DOI-backed published record. The arXiv
+#' row receives the DOI value plus `linked_doi_ref_id`; the DOI row receives
+#' `linked_arxiv_ref_id`.
+#'
+#' @param arxiv_ref_id Canonical arXiv ref id or bare arXiv id.
+#' @param doi DOI string, DOI URL, or canonical `doi:` ref id.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param add_doi Whether to ingest the DOI from Crossref when it is not already
+#'   present locally.
+#' @param auto_register Whether missing Crossref collections may be
+#'   auto-registered when `add_doi = TRUE`.
+#'
+#' @return Named list with `arxiv_ref_id`, `doi_ref_id`, `arxiv_title`, and
+#'   `doi_title`.
+#' @export
+litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_doi = TRUE, auto_register = TRUE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  config_path <- if (is.character(config)) {
+    config
+  } else {
+    attr(cfg, "config_path", exact = TRUE)
+  }
+
+  arxiv_ref_id <- .litxr_normalize_arxiv_ref_id(arxiv_ref_id)
+  doi_ref_id <- .litxr_normalize_doi_ref_id(doi)
+  if (is.na(arxiv_ref_id) || !nzchar(arxiv_ref_id)) {
+    stop("`arxiv_ref_id` must be a non-empty arXiv ref id.", call. = FALSE)
+  }
+  if (is.na(doi_ref_id) || !nzchar(doi_ref_id)) {
+    stop("`doi` must be a non-empty DOI value.", call. = FALSE)
+  }
+  doi_value <- sub("^doi:", "", doi_ref_id)
+
+  arxiv_row <- .litxr_find_unique_collection_row(cfg, arxiv_ref_id, expected_source = "arxiv")
+  existing_doi <- .litxr_scalar_chr(arxiv_row$doi)
+  existing_link <- .litxr_scalar_chr(arxiv_row$linked_doi_ref_id)
+
+  if (!is.na(existing_doi) && nzchar(existing_doi) && !identical(existing_doi, doi_value)) {
+    stop(
+      "ArXiv record already has a different DOI: ",
+      existing_doi,
+      ". Refusing to overwrite with ",
+      doi_value,
+      call. = FALSE
+    )
+  }
+  if (!is.na(existing_link) && nzchar(existing_link) && !identical(existing_link, doi_ref_id)) {
+    stop(
+      "ArXiv record already links to a different DOI ref_id: ",
+      existing_link,
+      ". Refusing to overwrite with ",
+      doi_ref_id,
+      call. = FALSE
+    )
+  }
+
+  doi_row <- .litxr_find_collection_refs_by_keys(cfg, doi_ref_id)
+  doi_row <- doi_row[doi_row$ref_id == doi_ref_id & doi_row$source != "arxiv", ]
+  if (!nrow(doi_row) && isTRUE(add_doi)) {
+    litxr_add_dois(doi_value, config = cfg, auto_register = auto_register)
+    cfg <- if (!is.null(config_path) && nzchar(config_path)) litxr_read_config(config_path) else litxr_read_config()
+    doi_row <- .litxr_find_collection_refs_by_keys(cfg, doi_ref_id)
+    doi_row <- doi_row[doi_row$ref_id == doi_ref_id & doi_row$source != "arxiv", ]
+  }
+  if (!nrow(doi_row)) {
+    stop("Published DOI record is not available locally: ", doi_ref_id, call. = FALSE)
+  }
+  if (nrow(doi_row) != 1L) {
+    stop("Expected exactly one DOI collection row for ", doi_ref_id, " but found ", nrow(doi_row), ".", call. = FALSE)
+  }
+
+  doi_existing_link <- .litxr_scalar_chr(doi_row$linked_arxiv_ref_id)
+  if (!is.na(doi_existing_link) && nzchar(doi_existing_link) && !identical(doi_existing_link, arxiv_ref_id)) {
+    stop(
+      "DOI record already links to a different arXiv ref_id: ",
+      doi_existing_link,
+      ". Refusing to overwrite with ",
+      arxiv_ref_id,
+      call. = FALSE
+    )
+  }
+
+  if (!("doi" %in% names(arxiv_row))) arxiv_row[["doi"]] <- NA_character_
+  if (!("linked_doi_ref_id" %in% names(arxiv_row))) arxiv_row[["linked_doi_ref_id"]] <- NA_character_
+  if (!("linked_arxiv_ref_id" %in% names(doi_row))) doi_row[["linked_arxiv_ref_id"]] <- NA_character_
+
+  arxiv_row$doi[[1]] <- doi_value
+  arxiv_row$linked_doi_ref_id[[1]] <- doi_ref_id
+  doi_row$linked_arxiv_ref_id[[1]] <- arxiv_ref_id
+
+  .litxr_update_collection_row(cfg, arxiv_row)
+  .litxr_update_collection_row(cfg, doi_row)
+
+  list(
+    arxiv_ref_id = arxiv_ref_id,
+    doi_ref_id = doi_ref_id,
+    arxiv_title = .litxr_scalar_chr(arxiv_row$title),
+    doi_title = .litxr_scalar_chr(doi_row$title)
+  )
+}
+
 #' Add manually supplied references to a collection
 #'
 #' Accepts a normalized reference table and writes the rows into the target
@@ -3356,6 +3548,8 @@ litxr_add_refs <- function(
   if (!("arxiv_categories_raw" %in% names(out))) out[["arxiv_categories_raw"]] <- rep("", nrow(out))
   if (!("arxiv_comment" %in% names(out))) out[["arxiv_comment"]] <- rep(NA_character_, nrow(out))
   if (!("arxiv_journal_ref" %in% names(out))) out[["arxiv_journal_ref"]] <- rep(NA_character_, nrow(out))
+  if (!("linked_doi_ref_id" %in% names(out))) out[["linked_doi_ref_id"]] <- rep(NA_character_, nrow(out))
+  if (!("linked_arxiv_ref_id" %in% names(out))) out[["linked_arxiv_ref_id"]] <- rep(NA_character_, nrow(out))
   if (!("raw_entry" %in% names(out))) out[["raw_entry"]] <- rep(list(NULL), nrow(out))
 
   if (!("pub_date" %in% names(out))) {

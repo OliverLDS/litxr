@@ -1,3 +1,14 @@
+# litxr 0.0.8.14
+
+- Added machine-readable LLM schema release metadata via
+  `litxr_llm_schema_release_info()` backed by
+  `inst/extdata/llm_schema_release.yaml`.
+- Added link-first arXiv publication enrichment via
+  `litxr_enrich_arxiv_with_doi()`, plus a human-facing helper script for
+  manually linking an existing arXiv record to a published DOI record.
+- Updated DOI digest prompting to prefer linked arXiv full-text hints when a
+  DOI record is explicitly linked to an arXiv preprint.
+
 # litxr 0.0.8.13
 
 - Fixed the human-facing identification-strategy reporter so missing values

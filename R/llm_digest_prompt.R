@@ -95,6 +95,7 @@
 
 .litxr_llm_digest_prompt_source_hint <- function(ref_id, ref = NULL) {
   doi <- if (!is.null(ref) && "doi" %in% names(ref)) .litxr_prompt_scalar(ref$doi) else NA_character_
+  linked_arxiv_ref_id <- if (!is.null(ref) && "linked_arxiv_ref_id" %in% names(ref)) .litxr_prompt_scalar(ref$linked_arxiv_ref_id) else NA_character_
 
   if (startsWith(ref_id, "arxiv:")) {
     arxiv_id <- sub("^arxiv:", "", ref_id)
@@ -103,6 +104,18 @@
       sprintf("- HTML full text: https://arxiv.org/html/%s", arxiv_id),
       sprintf("- PDF full text: https://arxiv.org/pdf/%s", arxiv_id),
       "Use these direct links first before exploring other resources."
+    ), collapse = "\n"))
+  }
+
+  if (!is.na(linked_arxiv_ref_id) && nzchar(linked_arxiv_ref_id)) {
+    arxiv_id <- sub("^arxiv:", "", linked_arxiv_ref_id)
+    return(paste(c(
+      "Linked arXiv preprint hint:",
+      sprintf("- linked_arxiv_ref_id: %s", linked_arxiv_ref_id),
+      sprintf("- HTML full text: https://arxiv.org/html/%s", arxiv_id),
+      sprintf("- PDF full text: https://arxiv.org/pdf/%s", arxiv_id),
+      if (!is.na(doi) && nzchar(doi)) sprintf("- Published DOI landing page: https://doi.org/%s", doi) else NULL,
+      "Use the linked arXiv full-text links first. Use the DOI landing page for published metadata and bibliographic context."
     ), collapse = "\n"))
   }
 

@@ -146,6 +146,31 @@ litxr:::.litxr_write_journal_records(
   cfg = cfg_export
 )
 
+doi_link_record <- data.table::copy(record)
+doi_link_record$ref_id[[1]] <- "doi:10.1000/published-example"
+doi_link_record$source[[1]] <- "crossref"
+doi_link_record$source_id[[1]] <- "10.1000/published-example"
+doi_link_record$title[[1]] <- "Published Example Paper"
+doi_link_record$doi[[1]] <- "10.1000/published-example"
+doi_link_record$url_landing[[1]] <- "https://doi.org/10.1000/published-example"
+litxr:::.litxr_write_journal_records(doi_link_record, local_path, journal, cfg = cfg_export)
+
+link_result <- litxr::litxr_enrich_arxiv_with_doi(
+  arxiv_ref_id = "arxiv:2501.00001",
+  doi = "10.1000/published-example",
+  config = cfg_export,
+  add_doi = FALSE
+)
+stopifnot(identical(link_result$arxiv_ref_id, "arxiv:2501.00001"))
+stopifnot(identical(link_result$doi_ref_id, "doi:10.1000/published-example"))
+
+linked_arxiv <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg_export)
+stopifnot(identical(as.character(linked_arxiv$doi[[1]]), "10.1000/published-example"))
+stopifnot(identical(as.character(linked_arxiv$linked_doi_ref_id[[1]]), "doi:10.1000/published-example"))
+
+linked_doi <- litxr::litxr_find_refs(ref_id = "doi:10.1000/published-example", config = cfg_export)
+stopifnot(identical(as.character(linked_doi$linked_arxiv_ref_id[[1]]), "arxiv:2501.00001"))
+
 arxiv_window_index <- litxr::litxr_next_arxiv_repair_range(
   arxiv_collection$collection_id,
   cfg_export,
@@ -710,7 +735,7 @@ new_record$year[[1]] <- 2024L
 new_record$month[[1]] <- 2L
 new_record$day[[1]] <- 1L
 litxr:::.litxr_write_journal_record_files(new_record, local_path, journal)
-stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) == 1L)
+stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) == 2L)
 refreshed_path <- litxr::litxr_refresh_collection_index(journal$journal_id, cfg_export)
 stopifnot(file.exists(refreshed_path))
 refreshed_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)

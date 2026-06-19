@@ -181,6 +181,8 @@ parse_crossref_entry_unified <- function(cr_message) {
     arxiv_categories_raw   = arxiv_categories_raw,
     arxiv_comment          = arxiv_comment,
     arxiv_journal_ref      = arxiv_journal_ref,
+    linked_doi_ref_id      = NA_character_,
+    linked_arxiv_ref_id    = NA_character_,
     raw_entry              = list(cr_message)
   )
 }

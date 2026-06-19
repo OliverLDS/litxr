@@ -111,6 +111,8 @@ parse_arxiv_entry_unified <- function(entry) {
     arxiv_categories_raw   = arxiv_categories_raw,
     arxiv_comment          = arxiv_comment,
     arxiv_journal_ref      = journal_ref,
+    linked_doi_ref_id      = if (!is.na(doi) && nzchar(doi)) paste0("doi:", doi) else NA_character_,
+    linked_arxiv_ref_id    = NA_character_,
     
     raw_entry = list(entry)
   )

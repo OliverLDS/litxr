@@ -192,6 +192,22 @@ stopifnot(grepl("research_target_github_links", prompt_create, fixed = TRUE))
 stopifnot(grepl("research target or artifact", prompt_create, fixed = TRUE))
 stopifnot(!grepl("{{", prompt_create, fixed = TRUE))
 
+prompt_ref_doi <- data.table::data.table(
+  ref_id = "doi:10.1000/prompt-doi",
+  source = "crossref",
+  source_id = "10.1000/prompt-doi",
+  title = "Prompt Builder DOI Test Paper",
+  abstract = "Prompt builder DOI abstract.",
+  doi = "10.1000/prompt-doi",
+  linked_arxiv_ref_id = "arxiv:2501.00001",
+  year = 2025L
+)
+litxr:::.litxr_write_project_references_index(cfg, data.table::rbindlist(list(prompt_ref, prompt_ref_doi), fill = TRUE))
+prompt_create_doi <- litxr::litxr_llm_digest_prompt("doi:10.1000/prompt-doi", cfg, mode = "create")
+stopifnot(grepl("linked_arxiv_ref_id: arxiv:2501.00001", prompt_create_doi, fixed = TRUE))
+stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create_doi, fixed = TRUE))
+stopifnot(grepl("https://doi.org/10.1000/prompt-doi", prompt_create_doi, fixed = TRUE))
+
 prompt_digest <- litxr::litxr_llm_digest_template("arxiv:2501.00001", schema_version = "v3")
 prompt_digest$summary <- "Existing summary"
 prompt_digest$motivation <- "Existing motivation"
