@@ -91,12 +91,7 @@ litxr_read_collection <- function(collection_id, config = NULL) {
   if (is.null(cfg)) cfg <- litxr_read_config()
   journal <- .litxr_get_journal(cfg, collection_id)
   local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  records <- .litxr_read_journal_records(local_path)
-  delta <- .litxr_read_collection_delta(local_path)
-  if (nrow(delta)) {
-    return(.litxr_upsert_records(records, delta))
-  }
-  records
+  .litxr_read_journal_records_authoritative(local_path)
 }
 
 #' Summarize publication-date coverage for one collection
@@ -766,16 +761,11 @@ litxr_compact_collection_index <- function(collection_id, config = NULL, refresh
   journal <- .litxr_get_journal(cfg, collection_id)
   local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
 
-  records <- .litxr_read_journal_records(local_path)
+  records <- .litxr_read_journal_records_authoritative(local_path)
   delta <- .litxr_read_collection_delta(local_path)
   delta_keys <- character()
   if (nrow(delta)) {
     delta_keys <- .litxr_upsert_key(delta)
-    records <- .litxr_upsert_records(
-      records,
-      delta,
-      conflict_path = file.path(.litxr_journal_paths(local_path)$json, "_upsert_conflicts.jsonl")
-    )
   }
 
   index_path <- .litxr_write_journal_index(records, local_path)
@@ -3487,7 +3477,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     journal <- .litxr_get_journal(cfg, journal_id)
     local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
     incoming <- data.table::as.data.table(by_journal[[journal_id]])
-    existing <- .litxr_read_journal_records(local_path)
+    existing <- .litxr_read_journal_records_authoritative(local_path)
     .litxr_write_journal_upserted_records(existing, incoming, local_path, journal, cfg = cfg)
     incoming
   })
@@ -3572,6 +3562,17 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
 
 .litxr_update_collection_row <- function(cfg, row) {
   collection_id <- .litxr_scalar_chr(row$collection_id)
+  if (is.na(collection_id) || !nzchar(collection_id)) {
+    links <- .litxr_read_project_reference_collections_index(cfg)
+    ref_id <- .litxr_scalar_chr(row$ref_id)
+    if (nrow(links) && !is.na(ref_id) && nzchar(ref_id)) {
+      matches <- unique(as.character(links$collection_id[links$ref_id == ref_id]))
+      matches <- matches[!is.na(matches) & nzchar(matches)]
+      if (length(matches)) {
+        collection_id <- matches[[1L]]
+      }
+    }
+  }
   if (is.na(collection_id) || !nzchar(collection_id)) {
     stop("Updated reference row is missing collection_id.", call. = FALSE)
   }
@@ -4819,6 +4820,50 @@ litxr_add_refs <- function(
   out
 }
 
+.litxr_reference_projection_columns <- function() {
+  c(
+    "ref_id",
+    "source",
+    "source_id",
+    "entry_type",
+    "title",
+    "authors",
+    "pub_date",
+    "year",
+    "month",
+    "day",
+    "journal",
+    "container_title",
+    "publisher",
+    "volume",
+    "issue",
+    "pages",
+    "doi",
+    "isbn",
+    "issn",
+    "url",
+    "url_landing",
+    "url_pdf",
+    "note",
+    "subject_primary",
+    "arxiv_version",
+    "arxiv_primary_category",
+    "arxiv_categories_raw",
+    "arxiv_journal_ref",
+    "linked_doi_ref_id",
+    "linked_arxiv_ref_id"
+  )
+}
+
+.litxr_reference_projection <- function(records) {
+  records <- data.table::as.data.table(records)
+  if (!nrow(records)) {
+    return(data.table::data.table())
+  }
+  keep <- intersect(.litxr_reference_projection_columns(), names(records))
+  data.table::copy(records)[, keep, with = FALSE]
+}
+
 .litxr_index_decode <- function(records) {
   if (!nrow(records)) {
     return(data.table::as.data.table(records))
@@ -4853,7 +4898,7 @@ litxr_add_refs <- function(
 .litxr_write_journal_index <- function(records, local_path) {
   paths <- .litxr_ensure_journal_dirs(local_path)
   index_path <- .litxr_index_path(local_path)
-  encoded <- .litxr_index_encode(records)
+  encoded <- .litxr_index_encode(.litxr_reference_projection(records))
   fst::write_fst(as.data.frame(encoded), index_path)
   invisible(index_path)
 }
@@ -4888,6 +4933,132 @@ litxr_add_refs <- function(
   )
 }
 
+.litxr_hydrate_collection_projection_rows <- function(local_path, rows) {
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    return(rows)
+  }
+
+  needed_fields <- c("abstract", "authors_list")
+  needs_hydration <- !all(needed_fields %in% names(rows))
+  if (!isTRUE(needs_hydration)) {
+    return(rows)
+  }
+
+  paths <- .litxr_journal_paths(local_path)
+  json_dir <- .litxr_existing_collection_dir(paths$json, paths$legacy_json)
+  if (!dir.exists(json_dir)) {
+    return(rows)
+  }
+
+  out <- data.table::copy(rows)
+  for (i in seq_len(nrow(out))) {
+    row <- out[i, ]
+    json_path <- file.path(json_dir, paste0(.litxr_record_slug(row), ".json"))
+    if (!file.exists(json_path)) {
+      next
+    }
+    full_row <- tryCatch(.litxr_storage_payload_to_row(json_path), error = function(e) data.table::data.table())
+    if (!nrow(full_row)) {
+      next
+    }
+    for (field in setdiff(names(full_row), names(out))) {
+      if (is.list(full_row[[field]])) {
+        out[[field]] <- rep(list(NULL), nrow(out))
+      } else if (inherits(full_row[[field]], c("POSIXct", "POSIXt"))) {
+        out[[field]] <- rep(as.POSIXct(NA, tz = "UTC"), nrow(out))
+      } else if (is.integer(full_row[[field]])) {
+        out[[field]] <- rep(NA_integer_, nrow(out))
+      } else if (is.numeric(full_row[[field]])) {
+        out[[field]] <- rep(NA_real_, nrow(out))
+      } else {
+        out[[field]] <- rep(NA_character_, nrow(out))
+      }
+    }
+    for (field in intersect(needed_fields, names(full_row))) {
+      value <- if (is.list(full_row[[field]])) {
+        list(full_row[[field]][[1]])
+      } else {
+        full_row[[field]][[1]]
+      }
+      data.table::set(out, i = i, j = field, value = value)
+    }
+  }
+
+  out
+}
+
+.litxr_hydrate_project_projection_rows <- function(cfg, rows) {
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    return(rows)
+  }
+
+  needed_fields <- c("abstract", "authors_list")
+  needs_hydration <- !all(needed_fields %in% names(rows))
+  if (!isTRUE(needs_hydration)) {
+    return(rows)
+  }
+
+  links <- .litxr_read_project_reference_collections_index(cfg)
+  if (!nrow(links)) {
+    return(rows)
+  }
+
+  out <- data.table::copy(rows)
+  collection_map <- split(as.character(links$collection_id), as.character(links$ref_id))
+  collections <- .litxr_config_collections(cfg)
+  collection_paths <- stats::setNames(
+    vapply(collections, function(collection) {
+      .litxr_resolve_local_path(cfg, collection$local_path)
+    }, character(1)),
+    vapply(collections, `[[`, character(1), "collection_id")
+  )
+
+  for (i in seq_len(nrow(out))) {
+    row <- out[i, ]
+    ref_id <- as.character(row$ref_id[[1]])
+    collection_ids <- unique(collection_map[[ref_id]] %||% character())
+    if (!length(collection_ids)) {
+      next
+    }
+    full_row <- data.table::data.table()
+    for (collection_id in collection_ids) {
+      local_path <- collection_paths[[collection_id]]
+      if (is.null(local_path) || !nzchar(local_path)) next
+      hydrated <- .litxr_hydrate_collection_projection_rows(local_path, row)
+      if (nrow(hydrated) && all(needed_fields %in% names(hydrated))) {
+        full_row <- hydrated
+        break
+      }
+    }
+    if (!nrow(full_row)) next
+    for (field in setdiff(names(full_row), names(out))) {
+      if (is.list(full_row[[field]])) {
+        out[[field]] <- rep(list(NULL), nrow(out))
+      } else if (inherits(full_row[[field]], c("POSIXct", "POSIXt"))) {
+        out[[field]] <- rep(as.POSIXct(NA, tz = "UTC"), nrow(out))
+      } else if (is.integer(full_row[[field]])) {
+        out[[field]] <- rep(NA_integer_, nrow(out))
+      } else if (is.numeric(full_row[[field]])) {
+        out[[field]] <- rep(NA_real_, nrow(out))
+      } else {
+        out[[field]] <- rep(NA_character_, nrow(out))
+      }
+    }
+    for (field in intersect(needed_fields, names(full_row))) {
+      value <- if (is.list(full_row[[field]])) {
+        list(full_row[[field]][[1]])
+      } else {
+        full_row[[field]][[1]]
+      }
+      data.table::set(out, i = i, j = field, value = value)
+    }
+  }
+
+  out
+}
+
 .litxr_read_journal_records_by_keys <- function(local_path, keys) {
   index_path <- .litxr_index_path(local_path)
   if (!file.exists(index_path)) {
@@ -4896,7 +5067,8 @@ litxr_add_refs <- function(
       return(records)
     }
     source_id <- if ("source_id" %in% names(records)) records$source_id else rep(NA_character_, nrow(records))
-    return(records[records$ref_id %in% keys | source_id %in% keys, ])
+    out <- records[records$ref_id %in% keys | source_id %in% keys, ]
+    return(.litxr_hydrate_collection_projection_rows(local_path, out))
   }
 
   index_columns <- .litxr_read_index_columns_safe(index_path)
@@ -4909,7 +5081,8 @@ litxr_add_refs <- function(
     records <- .litxr_read_journal_records_from_json(local_path)
     .litxr_write_journal_index(records, local_path)
     source_id <- if ("source_id" %in% names(records)) records$source_id else rep(NA_character_, nrow(records))
-    return(records[records$ref_id %in% keys | source_id %in% keys, ])
+    out <- records[records$ref_id %in% keys | source_id %in% keys, ]
+    return(.litxr_hydrate_collection_projection_rows(local_path, out))
   }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
     records <- .litxr_read_journal_index(local_path)
@@ -4917,7 +5090,8 @@ litxr_add_refs <- function(
       return(data.table::data.table())
     }
     source_id <- if ("source_id" %in% names(records)) records$source_id else rep(NA_character_, nrow(records))
-    return(records[records$ref_id %in% keys | source_id %in% keys, ])
+    out <- records[records$ref_id %in% keys | source_id %in% keys, ]
+    return(.litxr_hydrate_collection_projection_rows(local_path, out))
   }
 
   idx <- integer()
@@ -4938,7 +5112,8 @@ litxr_add_refs <- function(
   })
   out <- data.table::rbindlist(rows, fill = TRUE)
   key <- .litxr_upsert_key(out)
-  out[!duplicated(key), ]
+  out <- out[!duplicated(key), ]
+  .litxr_hydrate_collection_projection_rows(local_path, out)
 }
 
 .litxr_read_collection_delta <- function(local_path) {
@@ -4956,7 +5131,7 @@ litxr_add_refs <- function(
   }
 
   existing <- .litxr_read_collection_delta(local_path)
-  delta <- .litxr_upsert_records(existing, records)
+  delta <- .litxr_upsert_records(existing, .litxr_reference_projection(records))
   fst::write_fst(
     as.data.frame(.litxr_index_encode(delta)),
     .litxr_delta_index_path(local_path)
@@ -6132,7 +6307,7 @@ litxr_add_refs <- function(
 }
 
 .litxr_project_reference_columns <- function(records) {
-  setdiff(names(records), c("collection_id", "collection_title"))
+  intersect(.litxr_reference_projection_columns(), setdiff(names(records), c("collection_id", "collection_title")))
 }
 
 .litxr_project_references_from_collection_records <- function(records) {
@@ -6295,7 +6470,8 @@ litxr_add_refs <- function(
   if (file.exists(delta_path)) {
     refs <- .litxr_read_project_references_index(cfg)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    return(refs[refs$ref_id %in% keys | source_id %in% keys, ])
+    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
+    return(.litxr_hydrate_project_projection_rows(cfg, out))
   }
   if (!file.exists(path)) {
     return(data.table::data.table())
@@ -6311,12 +6487,14 @@ litxr_add_refs <- function(
     .litxr_rebuild_project_reference_indexes(cfg)
     refs <- .litxr_read_project_references_index(cfg)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    return(refs[refs$ref_id %in% keys | source_id %in% keys, ])
+    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
+    return(.litxr_hydrate_project_projection_rows(cfg, out))
   }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
     refs <- .litxr_read_project_references_index(cfg)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    return(refs[refs$ref_id %in% keys | source_id %in% keys, ])
+    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
+    return(.litxr_hydrate_project_projection_rows(cfg, out))
   }
 
   idx <- integer()
@@ -6337,7 +6515,8 @@ litxr_add_refs <- function(
   })
   out <- data.table::rbindlist(rows, fill = TRUE)
   key <- .litxr_upsert_key(out)
-  out[!duplicated(key), ]
+  out <- out[!duplicated(key), ]
+  .litxr_hydrate_project_projection_rows(cfg, out)
 }
 
 .litxr_entity_index_maybe_refresh <- function(cfg) {
@@ -6427,19 +6606,23 @@ litxr_add_refs <- function(
     return(out)
   }
   key <- .litxr_upsert_key(out)
-  out[!duplicated(key), ]
+  out <- out[!duplicated(key), ]
+  .litxr_hydrate_project_projection_rows(cfg, out)
 }
 
 .litxr_write_project_references_index <- function(cfg, records) {
   .litxr_ensure_project_index_dir(cfg)
-  fst::write_fst(as.data.frame(.litxr_index_encode(records)), .litxr_project_references_index_path(cfg))
+  fst::write_fst(
+    as.data.frame(.litxr_index_encode(.litxr_reference_projection(records))),
+    .litxr_project_references_index_path(cfg)
+  )
   invisible(.litxr_project_references_index_path(cfg))
 }
 
 .litxr_append_project_references_delta <- function(cfg, records) {
   .litxr_ensure_project_index_dir(cfg)
   existing <- .litxr_read_project_references_delta_index(cfg)
-  delta <- .litxr_upsert_records(existing, records)
+  delta <- .litxr_upsert_records(existing, .litxr_reference_projection(records))
   fst::write_fst(as.data.frame(.litxr_index_encode(delta)), .litxr_project_references_delta_index_path(cfg))
   invisible(.litxr_project_references_delta_index_path(cfg))
 }

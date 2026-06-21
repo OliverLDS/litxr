@@ -182,7 +182,14 @@ row_to_bibtex <- function(row) {
   key   <- .make_citekey(row[["doi"]], row[["source_id"]], row[["ref_id"]])
   title <- .bibtex_escape(row[["title"]])
   authors_list <- row[["authors_list"]]
-  if (is.null(authors_list)) authors_list <- list(character())
+  if (is.null(authors_list) || !length(authors_list) || !length(authors_list[[1]])) {
+    authors_chr <- row[["authors"]]
+    if (!is.null(authors_chr) && !is.na(authors_chr) && nzchar(authors_chr)) {
+      authors_list <- list(trimws(strsplit(as.character(authors_chr), ";", fixed = TRUE)[[1]]))
+    } else {
+      authors_list <- list(character())
+    }
+  }
   auth  <- .bibtex_escape(.format_authors_bib(authors_list[[1]]))
   year  <- as.character(row[["year"]])
 

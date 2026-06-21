@@ -101,6 +101,10 @@ stopifnot(file.exists(file.path(local_path, "index", "references.fst")))
 stopifnot(dir.exists(file.path(local_path, "llm_json")))
 stopifnot(file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "references.fst")))
 stopifnot(file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "reference_collections.fst")))
+collection_index_columns <- fst::metadata_fst(file.path(local_path, "index", "references.fst"))$columnNames
+stopifnot(!("authors_list_json" %in% collection_index_columns))
+stopifnot(!("raw_entry_json" %in% collection_index_columns))
+stopifnot(!("abstract" %in% collection_index_columns))
 
 read_back <- litxr::litxr_read_journal(journal$journal_id, cfg_export)
 stopifnot(nrow(read_back) == 1L)
@@ -170,6 +174,8 @@ stopifnot(identical(link_result$preferred_citation_ref_id, "doi:10.1000/publishe
 linked_arxiv <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg_export)
 stopifnot(identical(as.character(linked_arxiv$doi[[1]]), "10.1000/published-example"))
 stopifnot(identical(as.character(linked_arxiv$linked_doi_ref_id[[1]]), "doi:10.1000/published-example"))
+stopifnot(identical(as.character(linked_arxiv$abstract[[1]]), "Neural search over local article abstracts."))
+stopifnot(identical(linked_arxiv$authors_list[[1]], c("Jane Doe", "John Smith")))
 
 linked_doi <- litxr::litxr_find_refs(ref_id = "doi:10.1000/published-example", config = cfg_export)
 stopifnot(identical(as.character(linked_doi$linked_arxiv_ref_id[[1]]), "arxiv:2501.00001"))
@@ -744,7 +750,7 @@ new_record$year[[1]] <- 2024L
 new_record$month[[1]] <- 2L
 new_record$day[[1]] <- 1L
 litxr:::.litxr_write_journal_record_files(new_record, local_path, journal)
-stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) == 2L)
+stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) == 3L)
 refreshed_path <- litxr::litxr_refresh_collection_index(journal$journal_id, cfg_export)
 stopifnot(file.exists(refreshed_path))
 refreshed_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
@@ -1067,6 +1073,14 @@ project_refs_delta_path <- file.path(litxr:::.litxr_project_root(cfg_manual), "i
 stopifnot(file.exists(project_refs_delta_path))
 stopifnot(!any(project_refs_main_after_add$title == "Manual Report"))
 stopifnot(any(project_refs_merged_after_add$title == "Manual Report"))
+project_main_columns <- fst::metadata_fst(file.path(litxr:::.litxr_project_root(cfg_manual), "index", "references.fst"))$columnNames
+project_delta_columns <- fst::metadata_fst(project_refs_delta_path)$columnNames
+stopifnot(!("authors_list_json" %in% project_main_columns))
+stopifnot(!("raw_entry_json" %in% project_main_columns))
+stopifnot(!("abstract" %in% project_main_columns))
+stopifnot(!("authors_list_json" %in% project_delta_columns))
+stopifnot(!("raw_entry_json" %in% project_delta_columns))
+stopifnot(!("abstract" %in% project_delta_columns))
 cache_audit <- litxr::litxr_audit_reference_cache_state(cfg_manual)
 stopifnot(is.list(cache_audit))
 stopifnot(all(c("collection_reference_cache", "project_reference_cache") %in% names(cache_audit)))
