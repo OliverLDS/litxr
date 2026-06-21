@@ -959,6 +959,35 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   .litxr_preferred_export_ref_rows(cfg, resolved$entity_ids)
 }
 
+.litxr_task_ref_row_for_keys <- function(cfg, keys, task = c("citation", "digest", "fulltext"), journal_ids = NULL) {
+  task <- match.arg(task)
+  rows <- .litxr_preferred_rows_for_keys(cfg, keys = keys, journal_ids = journal_ids)
+  if (!nrow(rows)) {
+    return(rows)
+  }
+  if (identical(task, "citation")) {
+    return(rows[1L, ])
+  }
+
+  ref_id <- as.character(rows$ref_id[[1L]])
+  preferred_ref_id <- .litxr_task_ref_id(cfg, ref_id, task = task)
+  if (is.na(preferred_ref_id) || !nzchar(preferred_ref_id)) {
+    return(rows[1L, ])
+  }
+
+  hit <- rows[rows$ref_id == preferred_ref_id, ]
+  if (nrow(hit)) {
+    return(hit[1L, ])
+  }
+
+  fallback <- .litxr_read_project_references_by_keys(cfg, preferred_ref_id)
+  if (nrow(fallback)) {
+    return(fallback[1L, ])
+  }
+
+  rows[1L, ]
+}
+
 .litxr_entity_alias_ref_ids <- function(cfg, ref_id) {
   .litxr_entity_index_maybe_refresh(cfg)
   aliases <- .litxr_read_project_ref_aliases_index(cfg)
@@ -1000,6 +1029,32 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   updated_at <- if ("updated_at" %in% names(digests)) as.character(digests$updated_at) else rep("", nrow(digests))
   ord <- order(revisions, updated_at, seq_len(nrow(digests)), decreasing = TRUE)
   as.character(digests$ref_id[[ord[[1L]]]])
+}
+
+.litxr_task_ref_id <- function(cfg, ref_id, task = c("citation", "digest", "fulltext")) {
+  task <- match.arg(task)
+  ref_id <- as.character(ref_id %||% NA_character_)
+  if (is.na(ref_id) || !nzchar(ref_id)) {
+    return(NA_character_)
+  }
+
+  if (identical(task, "citation")) {
+    rows <- .litxr_preferred_rows_for_keys(cfg, ref_id)
+    if (!nrow(rows)) return(NA_character_)
+    return(as.character(rows$ref_id[[1L]]))
+  }
+  if (identical(task, "digest")) {
+    out <- .litxr_entity_best_digest_ref_id(cfg, ref_id)
+    if (is.na(out) || !nzchar(out)) return(ref_id)
+    return(out)
+  }
+  if (identical(task, "fulltext")) {
+    out <- .litxr_entity_best_arxiv_ref_id(cfg, ref_id)
+    if (is.na(out) || !nzchar(out)) return(ref_id)
+    return(out)
+  }
+
+  NA_character_
 }
 
 #' Read the canonical project-level reference index
@@ -3746,6 +3801,40 @@ litxr_add_refs <- function(
   arxiv_like <- grepl("^[0-9]{4}\\.[0-9]{4,5}$", arxiv_base) |
     grepl("^[a-z.-]+/[0-9]{7}$", arxiv_base, ignore.case = TRUE)
   unique(c(keys, arxiv_base[arxiv_like], paste0("arxiv:", arxiv_base[arxiv_like])))
+}
+
+.litxr_normalize_lookup_value <- function(x) {
+  x <- as.character(x)
+  if (!length(x) || is.na(x[[1L]])) return(NA_character_)
+  x <- trimws(x[[1L]])
+  if (!nzchar(x)) return(NA_character_)
+
+  if (grepl("^https?://(dx\\.)?doi\\.org/", x, ignore.case = TRUE)) {
+    x <- sub("^https?://(dx\\.)?doi\\.org/", "", x, ignore.case = TRUE)
+  }
+  if (grepl("^doi:", x, ignore.case = TRUE)) {
+    x <- sub("^doi:", "", x, ignore.case = TRUE)
+  }
+  if (grepl("^[0-9]{4}_[0-9]{4,5}(v[0-9]+)?$", x)) {
+    x <- paste0("arxiv:", sub("_", ".", x, fixed = TRUE))
+  } else if (grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", x)) {
+    x <- paste0("arxiv:", x)
+  }
+  x
+}
+
+.litxr_lookup_candidates <- function(x) {
+  x <- .litxr_normalize_lookup_value(x)
+  if (is.na(x) || !nzchar(x)) {
+    return(character())
+  }
+  candidates <- c(x)
+  if (grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", x)) {
+    candidates <- c(candidates, paste0("arxiv:", x))
+  } else if (grepl("/", x, fixed = TRUE) && !startsWith(x, "doi:")) {
+    candidates <- c(candidates, paste0("doi:", x))
+  }
+  unique(stats::na.omit(candidates))
 }
 
 .litxr_keys_include_arxiv <- function(keys) {

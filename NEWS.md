@@ -1,3 +1,16 @@
+# litxr 0.0.8.16
+
+- Finished the `0.0.8.16` read-policy migration slice from the
+  `v0.1.0` refactor plan by moving the remaining human lookup/report script
+  paths onto the shared alias/entity resolver.
+- Extracted shared lookup normalization helpers so BibTeX-adjacent human
+  scripts no longer duplicate DOI/arXiv alias-candidate logic.
+- Added explicit task-policy alias helpers for citation, digest, and full-text
+  resolution, and wired prompt building, summary rendering, and BibTeX-adjacent
+  readers onto that shared policy layer.
+- Updated the refactor design note with a versioned roadmap and marked the
+  `0.0.8.16` checklist complete.
+
 # litxr 0.0.8.15
 
 - Added the first thin entity-index layer for the v0.1.0 refactor, including

@@ -164,7 +164,7 @@ find_rows_by_ref_ids <- function(ref_ids, cfg) {
   resolved_rows <- list()
 
   for (ref in ref_ids) {
-    rows <- as.data.table(litxr:::.litxr_preferred_rows_for_keys(cfg, ref))
+    rows <- as.data.table(litxr:::.litxr_task_ref_row_for_keys(cfg, ref, task = "citation"))
     if (!nrow(rows)) {
       missing <- c(missing, ref)
       next

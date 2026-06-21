@@ -133,7 +133,10 @@ if (is_doi_input(ref_id)) {
   }
 
   cat(sprintf("Adding DOI reference via Crossref: %s\n", doi))
-  before <- tryCatch(litxr::litxr_find_refs(ref_id = paste0("doi:", doi), config = cfg), error = function(e) data.frame())
+  before <- tryCatch(
+    as.data.frame(litxr:::.litxr_task_ref_row_for_keys(cfg, paste0("doi:", doi), task = "citation")),
+    error = function(e) data.frame()
+  )
   if (inherits(before, "data.frame") && nrow(before)) {
     cat(sprintf("Local match before ingest: %d\n", nrow(before)))
   }
@@ -167,7 +170,7 @@ if (!nzchar(arxiv_id)) {
   stop("Invalid arXiv ref id: ", ref_id, call. = FALSE)
 }
 
-existing <- litxr::litxr_find_refs(ref_id = ref_id, config = cfg)
+existing <- as.data.frame(litxr:::.litxr_task_ref_row_for_keys(cfg, ref_id, task = "citation"))
 if (nrow(existing)) {
   cat(sprintf("Ref already exists locally: %s\n", ref_id))
   cat(sprintf("matches: %d\n", nrow(existing)))

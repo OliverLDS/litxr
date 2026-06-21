@@ -162,40 +162,6 @@ extract_bib_field <- function(entry_lines, field) {
   value
 }
 
-normalize_lookup_value <- function(x) {
-  x <- as.character(x)
-  if (!length(x) || is.na(x[[1L]])) return(NA_character_)
-  x <- trimws(x[[1L]])
-  if (!nzchar(x)) return(NA_character_)
-
-  if (grepl("^https?://(dx\\.)?doi\\.org/", x, ignore.case = TRUE)) {
-    x <- sub("^https?://(dx\\.)?doi\\.org/", "", x, ignore.case = TRUE)
-  }
-  if (grepl("^doi:", x, ignore.case = TRUE)) {
-    x <- sub("^doi:", "", x, ignore.case = TRUE)
-  }
-  if (grepl("^[0-9]{4}_[0-9]{4,5}(v[0-9]+)?$", x)) {
-    x <- paste0("arxiv:", sub("_", ".", x, fixed = TRUE))
-  } else if (grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", x)) {
-    x <- paste0("arxiv:", x)
-  }
-  x
-}
-
-lookup_candidates <- function(x) {
-  x <- normalize_lookup_value(x)
-  if (is.na(x) || !nzchar(x)) {
-    return(character())
-  }
-  candidates <- c(x)
-  if (grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", x)) {
-    candidates <- c(candidates, paste0("arxiv:", x))
-  } else if (grepl("/", x, fixed = TRUE) && !startsWith(x, "doi:")) {
-    candidates <- c(candidates, paste0("doi:", x))
-  }
-  unique(stats::na.omit(candidates))
-}
-
 scalar_text <- function(x) {
   if (is.null(x) || !length(x)) return(NA_character_)
   vals <- as.character(unlist(x, use.names = FALSE))
@@ -211,13 +177,13 @@ collapse_ws <- function(x) {
 
 resolve_reference <- function(entry_lines, bib_key, cfg) {
   doi <- extract_bib_field(entry_lines, "doi")
-  doi <- normalize_lookup_value(doi)
+  doi <- litxr:::.litxr_normalize_lookup_value(doi)
   key_candidates <- unique(c(
-    lookup_candidates(bib_key),
-    if (!is.na(doi) && nzchar(doi)) lookup_candidates(doi) else character()
+    litxr:::.litxr_lookup_candidates(bib_key),
+    if (!is.na(doi) && nzchar(doi)) litxr:::.litxr_lookup_candidates(doi) else character()
   ))
 
-  rows <- data.table::as.data.table(litxr:::.litxr_preferred_rows_for_keys(cfg, key_candidates))
+  rows <- data.table::as.data.table(litxr:::.litxr_task_ref_row_for_keys(cfg, key_candidates, task = "citation"))
   if (nrow(rows)) {
     matched_by <- if (length(key_candidates)) key_candidates[[1L]] else NA_character_
     return(list(
@@ -244,7 +210,7 @@ read_digests_by_ref_ids <- function(ref_ids, cfg) {
   }
 
   digest_ref_ids <- unique(vapply(ref_ids, function(x) {
-    out <- litxr:::.litxr_entity_best_digest_ref_id(cfg, x)
+    out <- litxr:::.litxr_task_ref_id(cfg, x, task = "digest")
     if (is.na(out) || !nzchar(out)) x else out
   }, character(1)))
   digests <- litxr::litxr_read_llm_digests(cfg, ref_ids = digest_ref_ids)
@@ -254,7 +220,7 @@ read_digests_by_ref_ids <- function(ref_ids, cfg) {
 
   out <- list()
   for (ref_id in ref_ids) {
-    digest_ref_id <- litxr:::.litxr_entity_best_digest_ref_id(cfg, ref_id)
+    digest_ref_id <- litxr:::.litxr_task_ref_id(cfg, ref_id, task = "digest")
     if (is.na(digest_ref_id) || !nzchar(digest_ref_id)) next
     hit <- digests[digests$ref_id == digest_ref_id, ]
     if (nrow(hit)) out[[ref_id]] <- hit

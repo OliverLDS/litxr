@@ -109,7 +109,7 @@
 
   if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
     if (!is.null(cfg)) {
-      linked_arxiv_ref_id <- .litxr_entity_best_arxiv_ref_id(cfg, ref_id)
+      linked_arxiv_ref_id <- .litxr_task_ref_id(cfg, ref_id, task = "fulltext")
       if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
         refs <- tryCatch(.litxr_read_project_references_index(cfg), error = function(e) data.table::data.table())
         if (nrow(refs) && "linked_doi_ref_id" %in% names(refs)) {

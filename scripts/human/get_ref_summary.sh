@@ -96,7 +96,7 @@ if (!grepl("^[A-Za-z0-9_]+:", ref_key) && grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)
 }
 
 cfg <- litxr::litxr_read_config()
-hits <- litxr:::.litxr_preferred_rows_for_keys(cfg, ref_key)
+hits <- litxr:::.litxr_task_ref_row_for_keys(cfg, ref_key, task = "citation")
 if (!nrow(hits)) {
   stop("No record found for ", ref_key, ".", call. = FALSE)
 }
@@ -117,7 +117,7 @@ if (is.na(abstract) || !nzchar(trimws(abstract))) {
   cat(abstract, "\n", sep = "")
 }
 
-digest_ref_id <- litxr:::.litxr_entity_best_digest_ref_id(cfg, ref_id)
+digest_ref_id <- litxr:::.litxr_task_ref_id(cfg, ref_id, task = "digest")
 if (is.na(digest_ref_id) || !nzchar(digest_ref_id)) {
   stop("No LLM digest found for ", ref_id, ".", call. = FALSE)
 }
