@@ -15,7 +15,7 @@ litxr_enrich_arxiv_with_doi(
 \arguments{
 \item{arxiv_ref_id}{Canonical arXiv ref id or bare arXiv id.}
 
-\item{doi}{DOI string, DOI URL, or canonical \code{doi:} ref id.}
+\item{doi}{DOI string, DOI URL, or canonical \verb{doi:} ref id.}
 
 \item{config}{Optional parsed config list or a direct config path. When
 omitted, \code{litxr} reads \code{LITXR_CONFIG}.}

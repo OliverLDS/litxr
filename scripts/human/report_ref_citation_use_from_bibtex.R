@@ -205,28 +205,6 @@ scalar_text <- function(x) {
   vals[[1L]]
 }
 
-pick_preferred_row <- function(rows, doi = NA_character_) {
-  if (!nrow(rows)) {
-    return(rows)
-  }
-
-  if ("source" %in% names(rows)) {
-    non_arxiv <- rows[rows$source != "arxiv", ]
-    if (nrow(non_arxiv)) {
-      rows <- non_arxiv
-    }
-  }
-
-  if (!is.na(doi) && nzchar(doi) && "doi" %in% names(rows)) {
-    exact <- rows[rows$doi == doi, ]
-    if (nrow(exact)) {
-      rows <- exact
-    }
-  }
-
-  rows[1L, ]
-}
-
 resolve_reference <- function(entry_lines, bib_key, cfg) {
   doi <- extract_bib_field(entry_lines, "doi")
   doi <- normalize_lookup_value(doi)
@@ -235,27 +213,21 @@ resolve_reference <- function(entry_lines, bib_key, cfg) {
     if (!is.na(doi) && nzchar(doi)) lookup_candidates(doi) else character()
   ))
 
-  for (candidate in key_candidates) {
-    rows <- data.table::as.data.table(litxr::litxr_find_refs(ref_id = candidate, config = cfg))
-    if (nrow(rows)) {
-      rows <- pick_preferred_row(rows, doi = doi)
-      return(list(resolved = TRUE, ref = rows, matched_by = candidate))
-    }
-  }
-
-  if (!is.na(doi) && nzchar(doi)) {
-    rows <- data.table::as.data.table(litxr::litxr_find_refs(doi = doi, config = cfg))
-    if (nrow(rows)) {
-      rows <- pick_preferred_row(rows, doi = doi)
-      return(list(resolved = TRUE, ref = rows, matched_by = paste0("doi:", doi)))
-    }
+  rows <- data.table::as.data.table(litxr:::.litxr_preferred_rows_for_keys(cfg, key_candidates))
+  if (nrow(rows)) {
+    matched_by <- if (length(key_candidates)) key_candidates[[1L]] else NA_character_
+    return(list(resolved = TRUE, ref = rows[1L, ], matched_by = matched_by))
   }
 
   list(resolved = FALSE, ref = data.frame(), matched_by = NA_character_)
 }
 
 read_citation_use <- function(ref_id, cfg) {
-  digest <- tryCatch(litxr::litxr_read_llm_digest(ref_id, cfg), error = function(e) NULL)
+  digest_ref_id <- litxr:::.litxr_entity_best_digest_ref_id(cfg, ref_id)
+  if (is.na(digest_ref_id) || !nzchar(digest_ref_id)) {
+    return(character())
+  }
+  digest <- tryCatch(litxr::litxr_read_llm_digest(digest_ref_id, cfg), error = function(e) NULL)
   if (is.null(digest) || !length(digest$citation_logic_nodes)) {
     return(character())
   }

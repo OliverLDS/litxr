@@ -23,10 +23,8 @@ litxr_sync_collection <- function(collection_id, config = NULL) {
     stop("Unsupported remote channel: ", journal$remote_channel, call. = FALSE)
   )
 
-  existing <- .litxr_read_journal_records(local_path)
-  records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
-
-  .litxr_write_journal_records(records, local_path, journal, cfg = cfg)
+  existing <- .litxr_read_journal_records_authoritative(local_path)
+  records <- .litxr_write_journal_upserted_records(existing, incoming, local_path, journal, cfg = cfg)
   .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
     collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
     remote_channel = journal$remote_channel,
@@ -620,7 +618,7 @@ litxr_repair_collection <- function(
     stop("Unsupported remote channel: ", journal$remote_channel, call. = FALSE)
   )
 
-  existing <- .litxr_read_journal_records(local_path)
+  existing <- .litxr_read_journal_records_authoritative(local_path)
   records <- .litxr_write_journal_upserted_records(existing, incoming, local_path, journal, cfg = cfg)
   .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
     collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
@@ -825,36 +823,8 @@ litxr_rebuild_journal_index <- function(journal_id, config = NULL) {
 litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  selected <- .litxr_config_collections(cfg)
-
-  if (!is.null(journal_ids)) {
-    keep <- vapply(selected, function(x) x$collection_id %in% journal_ids, logical(1))
-    selected <- selected[keep]
-  }
-
-  if (!length(selected)) {
-    writeLines(character(), output)
-    return(invisible(output))
-  }
-
-  rows <- data.table::rbindlist(lapply(selected, function(journal) {
-    .litxr_read_journal_records(.litxr_resolve_local_path(cfg, journal$local_path))
-  }), fill = TRUE)
-
-  if (!is.null(keys) && length(keys)) {
-    key_values <- unique(as.character(keys))
-    filtered <- .litxr_filter_records_by_keys(rows, key_values)
-    missing_keys <- setdiff(key_values, filtered$litxr_matched_key__)
-    if (length(missing_keys)) {
-      warning(
-        "The following record keys were not found and were ignored: ",
-        paste(missing_keys, collapse = ", "),
-        call. = FALSE
-      )
-    }
-    filtered[["litxr_matched_key__"]] <- NULL
-    rows <- filtered
-  }
+  .litxr_entity_index_maybe_refresh(cfg)
+  rows <- .litxr_export_bib_rows(cfg, journal_ids = journal_ids, keys = keys)
 
   if (!nrow(rows)) {
     writeLines(character(), output)
@@ -867,6 +837,169 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
 
   writeLines(bib_lines, output)
   invisible(output)
+}
+
+.litxr_resolve_export_entity_ids <- function(cfg, journal_ids = NULL, keys = NULL) {
+  entities <- .litxr_read_project_entities_index(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  entity_links <- .litxr_read_project_entity_collections_index(cfg)
+
+  candidate_ids <- if (nrow(entities)) unique(as.character(entities$entity_id)) else character()
+  if (!is.null(journal_ids) && length(journal_ids)) {
+    keep_collections <- unique(as.character(journal_ids))
+    if (nrow(entity_links)) {
+      candidate_ids <- unique(as.character(entity_links$entity_id[entity_links$collection_id %in% keep_collections]))
+    } else {
+      candidate_ids <- character()
+    }
+  }
+
+  missing_keys <- character()
+  if (!is.null(keys) && length(keys)) {
+    original_keys <- unique(as.character(keys))
+    original_keys <- original_keys[!is.na(original_keys) & nzchar(original_keys)]
+    alias_rows <- .litxr_match_alias_rows_by_keys(cfg, original_keys)
+    key_entity_ids <- if (nrow(alias_rows)) unique(as.character(alias_rows$entity_id)) else character()
+    if (!is.null(journal_ids) && length(journal_ids)) {
+      candidate_ids <- intersect(candidate_ids, key_entity_ids)
+    } else {
+      candidate_ids <- key_entity_ids
+    }
+    matched_keys <- if (nrow(alias_rows) && "litxr_matched_key__" %in% names(alias_rows)) {
+      unique(as.character(alias_rows$litxr_matched_key__))
+    } else {
+      character()
+    }
+    missing_keys <- original_keys[!vapply(original_keys, function(k) {
+      any(.litxr_expand_reference_keys(k) %in% matched_keys)
+    }, logical(1))]
+  }
+
+  list(
+    entity_ids = unique(candidate_ids),
+    missing_keys = missing_keys
+  )
+}
+
+.litxr_preferred_export_ref_rows <- function(cfg, entity_ids) {
+  entity_ids <- unique(as.character(entity_ids))
+  entity_ids <- entity_ids[!is.na(entity_ids) & nzchar(entity_ids)]
+  if (!length(entity_ids)) {
+    return(data.table::data.table())
+  }
+
+  entities <- .litxr_read_project_entities_index(cfg)
+  refs <- .litxr_read_project_references_index(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (!nrow(entities) || !nrow(refs)) {
+    return(data.table::data.table())
+  }
+
+  entity_rows <- entities[entities$entity_id %in% entity_ids, ]
+  if (!nrow(entity_rows)) {
+    return(data.table::data.table())
+  }
+
+  chosen_ref_ids <- as.character(entity_rows$preferred_citation_ref_id)
+  chosen_ref_ids[is.na(chosen_ref_ids) | !nzchar(chosen_ref_ids)] <- as.character(entity_rows$primary_ref_id[is.na(chosen_ref_ids) | !nzchar(chosen_ref_ids)])
+
+  rows <- refs[refs$ref_id %in% chosen_ref_ids, ]
+  if (nrow(rows) < nrow(entity_rows) && nrow(aliases)) {
+    alias_subset <- aliases[aliases$entity_id %in% entity_rows$entity_id, ]
+    alias_split <- split(as.character(alias_subset$ref_id), as.character(alias_subset$entity_id))
+    fallback_ids <- vapply(as.character(entity_rows$entity_id), function(entity_id) {
+      preferred <- chosen_ref_ids[[match(entity_id, as.character(entity_rows$entity_id))]]
+      if (preferred %in% rows$ref_id) {
+        return(preferred)
+      }
+      candidates <- alias_split[[entity_id]]
+      if (is.null(candidates) || !length(candidates)) {
+        return(NA_character_)
+      }
+      hit <- candidates[candidates %in% refs$ref_id]
+      if (!length(hit)) NA_character_ else hit[[1]]
+    }, character(1))
+    fallback_ids <- fallback_ids[!is.na(fallback_ids) & nzchar(fallback_ids)]
+    rows <- refs[refs$ref_id %in% unique(fallback_ids), ]
+    chosen_ref_ids <- fallback_ids
+  }
+
+  out <- merge(
+    data.table::data.table(entity_id = as.character(entity_rows$entity_id), ref_id = chosen_ref_ids),
+    rows,
+    by = "ref_id",
+    all.x = FALSE,
+    all.y = FALSE,
+    sort = FALSE
+  )
+  out[!duplicated(as.character(out$entity_id)), ]
+}
+
+.litxr_export_bib_rows <- function(cfg, journal_ids = NULL, keys = NULL) {
+  resolved <- .litxr_resolve_export_entity_ids(cfg, journal_ids = journal_ids, keys = keys)
+  if (length(resolved$missing_keys)) {
+    warning(
+      "The following record keys were not found and were ignored: ",
+      paste(resolved$missing_keys, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  rows <- .litxr_preferred_export_ref_rows(cfg, resolved$entity_ids)
+  if (!nrow(rows)) {
+    return(rows)
+  }
+  if ("entity_id" %in% names(rows)) {
+    rows$entity_id <- NULL
+  }
+  rows
+}
+
+.litxr_preferred_rows_for_keys <- function(cfg, keys, journal_ids = NULL) {
+  resolved <- .litxr_resolve_export_entity_ids(cfg, journal_ids = journal_ids, keys = keys)
+  .litxr_preferred_export_ref_rows(cfg, resolved$entity_ids)
+}
+
+.litxr_entity_alias_ref_ids <- function(cfg, ref_id) {
+  .litxr_entity_index_maybe_refresh(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  entity_ids <- .litxr_entity_ids_for_ref_ids(cfg, ref_id, aliases = aliases)
+  if (!length(entity_ids)) {
+    return(character())
+  }
+  unique(as.character(aliases$ref_id[aliases$entity_id %in% entity_ids]))
+}
+
+.litxr_entity_best_arxiv_ref_id <- function(cfg, ref_id) {
+  alias_ref_ids <- .litxr_entity_alias_ref_ids(cfg, ref_id)
+  if (!length(alias_ref_ids)) {
+    return(NA_character_)
+  }
+  arxiv_ids <- alias_ref_ids[grepl("^arxiv:", alias_ref_ids)]
+  if (!length(arxiv_ids)) {
+    return(NA_character_)
+  }
+  bare_ids <- sub("^arxiv:", "", arxiv_ids)
+  base_ids <- sub("v[0-9]+$", "", bare_ids)
+  versions <- suppressWarnings(as.integer(sub("^.*v([0-9]+)$", "\\1", bare_ids)))
+  versions[is.na(versions)] <- 0L
+  order_idx <- order(base_ids, -versions, arxiv_ids)
+  arxiv_ids[[order_idx[[1L]]]]
+}
+
+.litxr_entity_best_digest_ref_id <- function(cfg, ref_id) {
+  alias_ref_ids <- .litxr_entity_alias_ref_ids(cfg, ref_id)
+  if (!length(alias_ref_ids)) {
+    return(NA_character_)
+  }
+  digests <- tryCatch(litxr_read_llm_digests(cfg, ref_ids = alias_ref_ids), error = function(e) data.table::data.table())
+  if (!nrow(digests)) {
+    return(NA_character_)
+  }
+  revisions <- suppressWarnings(as.integer(digests$digest_revision))
+  revisions[is.na(revisions)] <- 0L
+  updated_at <- if ("updated_at" %in% names(digests)) as.character(digests$updated_at) else rep("", nrow(digests))
+  ord <- order(revisions, updated_at, seq_len(nrow(digests)), decreasing = TRUE)
+  as.character(digests$ref_id[[ord[[1L]]]])
 }
 
 #' Read the canonical project-level reference index
@@ -893,6 +1026,130 @@ litxr_read_reference_collections <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
   .litxr_read_project_reference_collections_index(cfg)
+}
+
+#' Read the thin alias-to-entity index
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` mapping surface `ref_id` aliases to internal
+#'   `entity_id`s.
+#' @export
+litxr_read_ref_aliases <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_project_ref_aliases_index(cfg)
+}
+
+#' Read the thin entity projection index
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of entity-level search and status projections.
+#' @export
+litxr_read_entities <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_project_entities_index(cfg)
+}
+
+#' Read the thin entity-to-collection membership index
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of `entity_id` to `collection_id` links.
+#' @export
+litxr_read_entity_collections <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_project_entity_collections_index(cfg)
+}
+
+#' Read the thin entity artifact-status index
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return `data.table` of entity-level artifact and digest status flags.
+#' @export
+litxr_read_entity_status <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_read_project_entity_status_index(cfg)
+}
+
+#' Build the thin entity indexes from current project stores
+#'
+#' This creates the first-stage v0.1.0 identity layer without changing current
+#' reference read or search behavior. Existing scripts can continue using
+#' `ref_id`, while internal migration work starts from `entity_id`-aware thin
+#' indexes.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Named list describing the written index paths and row counts.
+#' @export
+litxr_build_entity_indexes <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_build_entity_indexes(cfg)
+}
+
+#' Audit reference cache state against authoritative JSON-backed storage
+#'
+#' Compares collection and project fst cache layers against the authoritative
+#' JSON plus delta-backed record state used by the v0.1.0 refactor. This helps
+#' identify stale or oversized caches before the old fst layers are fully
+#' retired.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Named list of `data.table` audit reports.
+#' @export
+litxr_audit_reference_cache_state <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_audit_reference_cache_state(cfg)
+}
+
+#' Audit entity-status freshness against current project artifacts
+#'
+#' Compares `index/entity_status.fst` against the current md/digest/findings
+#' artifact state derived from the authoritative alias/entity layer.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Named list of `data.table` audit reports.
+#' @export
+litxr_audit_entity_status_state <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_audit_entity_status_state(cfg)
+}
+
+#' Audit current stores against the thin entity-index design
+#'
+#' Reports current alias splits, ambiguous arXiv/DOI joins, orphan artifacts,
+#' and index health. This is intended to guide the migration toward the v0.1.0
+#' identity-first storage model.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param oversized_mb Size threshold in megabytes used to flag index files as
+#'   oversized in the health report.
+#'
+#' @return Named list of `data.table` audit reports.
+#' @export
+litxr_audit_entity_indexes <- function(config = NULL, oversized_mb = 25) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_audit_entity_indexes(cfg, oversized_mb = oversized_mb)
 }
 
 #' Find references in the canonical project-level store
@@ -946,6 +1203,9 @@ litxr_find_refs <- function(
     is.null(issn)
   if (isTRUE(exact_ref_only)) {
     exact <- .litxr_read_project_references_by_keys(cfg, ref_keys)
+    if (!nrow(exact)) {
+      exact <- .litxr_read_project_references_by_alias_keys(cfg, ref_keys)
+    }
     if (nrow(exact)) {
       return(exact)
     }
@@ -977,7 +1237,13 @@ litxr_find_refs <- function(
   }
   if (!is.null(ref_id) && any(nzchar(as.character(ref_id)))) {
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    refs <- refs[refs$ref_id %in% ref_keys | source_id %in% ref_keys, ]
+    direct_refs <- refs[refs$ref_id %in% ref_keys | source_id %in% ref_keys, ]
+    if (nrow(direct_refs)) {
+      refs <- direct_refs
+    } else {
+      alias_rows <- .litxr_match_alias_rows_by_keys(cfg, ref_keys)
+      refs <- .litxr_filter_refs_by_alias_rows(refs, alias_rows, ref_keys)
+    }
     if (!nrow(refs)) {
       return(.litxr_find_collection_refs_by_keys(cfg, ref_keys, collection_id = collection_id))
     }
@@ -2368,6 +2634,7 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history =
   }
   .litxr_write_json_atomic(payload, path)
   .litxr_update_enrichment_status_ref(cfg, ref_id)
+  .litxr_update_entity_status_refs(cfg, ref_id)
   invisible(path)
 }
 
@@ -2767,6 +3034,7 @@ litxr_write_md <- function(ref_id, text, config = NULL) {
   path <- .litxr_md_path(cfg, ref_id)
   writeLines(as.character(text), path, useBytes = TRUE)
   .litxr_update_enrichment_status_ref(cfg, ref_id)
+  .litxr_update_entity_status_refs(cfg, ref_id)
   invisible(path)
 }
 
@@ -3008,9 +3276,11 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
+  .litxr_entity_index_maybe_refresh(cfg)
   refs <- litxr_read_references(cfg)
-  status <- litxr_read_enrichment_status(cfg)
-  links <- litxr_read_reference_collections(cfg)
+  aliases <- litxr_read_ref_aliases(cfg)
+  entity_status <- litxr_read_entity_status(cfg)
+  entity_links <- litxr_read_entity_collections(cfg)
 
   if (!nrow(refs)) {
     return(data.table::data.table(
@@ -3025,10 +3295,19 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
     ))
   }
 
-  collection_map <- if (nrow(links)) {
-    split_ids <- split(as.character(links$collection_id), as.character(links$ref_id))
+  alias_map <- if (nrow(aliases)) {
     data.table::data.table(
-      ref_id = names(split_ids),
+      ref_id = as.character(aliases$ref_id),
+      entity_id = as.character(aliases$entity_id)
+    )
+  } else {
+    data.table::data.table(ref_id = character(), entity_id = character())
+  }
+
+  collection_map <- if (nrow(entity_links)) {
+    split_ids <- split(as.character(entity_links$collection_id), as.character(entity_links$entity_id))
+    data.table::data.table(
+      entity_id = names(split_ids),
       collection_ids = vapply(
         split_ids,
         function(x) paste(sort(unique(x)), collapse = ","),
@@ -3036,7 +3315,7 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
       )
     )
   } else {
-    data.table::data.table(ref_id = character(), collection_ids = character())
+    data.table::data.table(entity_id = character(), collection_ids = character())
   }
 
   ref_view <- data.table::data.table(
@@ -3044,14 +3323,19 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
     title = as.character(refs$title),
     entry_type = as.character(refs$entry_type)
   )
-  status_view <- data.table::data.table(
-    ref_id = as.character(status$ref_id),
-    has_md = as.logical(status$has_md),
-    has_llm_digest = as.logical(status$has_llm_digest)
-  )
-
-  out <- merge(ref_view, status_view, by = "ref_id", all.x = TRUE, sort = FALSE)
-  out <- merge(out, collection_map, by = "ref_id", all.x = TRUE, sort = FALSE)
+  out <- merge(ref_view, alias_map, by = "ref_id", all.x = TRUE, sort = FALSE)
+  if (nrow(entity_status)) {
+    status_view <- data.table::data.table(
+      entity_id = as.character(entity_status$entity_id),
+      has_md = as.logical(entity_status$has_fulltxt_md),
+      has_llm_digest = as.logical(entity_status$has_llm_digest)
+    )
+    out <- merge(out, status_view, by = "entity_id", all.x = TRUE, sort = FALSE)
+  } else {
+    out$has_md <- FALSE
+    out$has_llm_digest <- FALSE
+  }
+  out <- merge(out, collection_map, by = "entity_id", all.x = TRUE, sort = FALSE)
   out$has_md[is.na(out$has_md)] <- FALSE
   out$has_llm_digest[is.na(out$has_llm_digest)] <- FALSE
   out$collection_ids[is.na(out$collection_ids)] <- ""
@@ -3083,6 +3367,9 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
     out <- out[!out$eligible, ]
   }
 
+  if ("entity_id" %in% names(out)) {
+    out$entity_id <- NULL
+  }
   data.table::setcolorder(
     out,
     c("ref_id", "title", "entry_type", "collection_ids", "has_md", "has_llm_digest", "eligible", "reason")
@@ -3235,7 +3522,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   }
   collection <- .litxr_get_journal(cfg, collection_id)
   local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-  existing <- .litxr_read_journal_records(local_path)
+  existing <- .litxr_read_journal_records_authoritative(local_path)
   .litxr_write_journal_upserted_records(existing, row, local_path, collection, cfg = cfg)
 }
 
@@ -3337,11 +3624,31 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
   .litxr_update_collection_row(cfg, arxiv_row)
   .litxr_update_collection_row(cfg, doi_row)
 
+  .litxr_entity_index_maybe_refresh(cfg)
+  linked_entity_ids <- .litxr_entity_ids_for_ref_ids(cfg, c(arxiv_ref_id, doi_ref_id))
+  if (length(linked_entity_ids) != 1L) {
+    stop(
+      "DOI/arXiv link update did not converge to a single entity_id for ",
+      arxiv_ref_id,
+      " and ",
+      doi_ref_id,
+      call. = FALSE
+    )
+  }
+
+  linked_entity <- .litxr_read_project_entities_index(cfg)
+  linked_entity <- linked_entity[linked_entity$entity_id == linked_entity_ids[[1]], ]
+  preferred_citation_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$preferred_citation_ref_id) else NA_character_
+  primary_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$primary_ref_id) else NA_character_
+
   list(
     arxiv_ref_id = arxiv_ref_id,
     doi_ref_id = doi_ref_id,
     arxiv_title = .litxr_scalar_chr(arxiv_row$title),
-    doi_title = .litxr_scalar_chr(doi_row$title)
+    doi_title = .litxr_scalar_chr(doi_row$title),
+    entity_id = linked_entity_ids[[1]],
+    primary_ref_id = primary_ref_id,
+    preferred_citation_ref_id = preferred_citation_ref_id
   )
 }
 
@@ -3394,7 +3701,7 @@ litxr_add_refs <- function(
   records[["collection_title"]] <- collection$title
 
   local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-  existing <- .litxr_read_journal_records(local_path)
+  existing <- .litxr_read_journal_records_authoritative(local_path)
   .litxr_write_journal_upserted_records(existing, records, local_path, collection, cfg = cfg)
   records
 }
@@ -3633,6 +3940,12 @@ litxr_add_refs <- function(
 .litxr_assign_crossref_journals <- function(cfg, records, messages, auto_register = TRUE) {
   out_cfg <- cfg
   out_records <- data.table::copy(records)
+  if (!("collection_id" %in% names(out_records))) {
+    out_records[["collection_id"]] <- rep(NA_character_, nrow(out_records))
+  }
+  if (!("collection_title" %in% names(out_records))) {
+    out_records[["collection_title"]] <- rep(NA_character_, nrow(out_records))
+  }
 
   for (i in seq_len(nrow(out_records))) {
     message <- messages[[i]]
@@ -3652,8 +3965,8 @@ litxr_add_refs <- function(
       journal <- registered$journal
     }
 
-    out_records$collection_id[[i]] <- journal$collection_id
-    out_records$collection_title[[i]] <- journal$title
+    data.table::set(out_records, i = i, j = "collection_id", value = as.character(journal$collection_id))
+    data.table::set(out_records, i = i, j = "collection_title", value = as.character(journal$title))
   }
 
   list(cfg = out_cfg, records = out_records)
@@ -4276,6 +4589,19 @@ litxr_add_refs <- function(
   )
 }
 
+.litxr_read_journal_records_authoritative <- function(local_path) {
+  records <- .litxr_read_journal_records_from_json(local_path)
+  delta <- .litxr_read_collection_delta(local_path)
+  if (nrow(delta)) {
+    records <- .litxr_upsert_records(
+      records,
+      delta,
+      conflict_path = file.path(.litxr_journal_paths(local_path)$json, "_upsert_conflicts.jsonl")
+    )
+  }
+  records
+}
+
 .litxr_write_journal_upserted_records <- function(existing, incoming, local_path, journal, cfg = NULL) {
   records <- .litxr_upsert_journal_records(existing, incoming, local_path = local_path)
   incoming_keys <- .litxr_upsert_key(incoming)
@@ -4283,8 +4609,8 @@ litxr_add_refs <- function(
   touched_records <- records[records_keys %in% incoming_keys, ]
 
   .litxr_write_journal_record_files(touched_records, local_path, journal)
-  .litxr_write_journal_index(records, local_path)
-  if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, records)
+  .litxr_append_collection_delta(touched_records, local_path)
+  if (!is.null(cfg)) .litxr_update_project_indexes(cfg, journal, touched_records)
 
   records
 }
@@ -4466,6 +4792,13 @@ litxr_add_refs <- function(
   )
 }
 
+.litxr_read_index_columns_safe <- function(path) {
+  tryCatch(
+    fst::metadata_fst(path)$columnNames,
+    error = function(e) NULL
+  )
+}
+
 .litxr_read_journal_records_by_keys <- function(local_path, keys) {
   index_path <- .litxr_index_path(local_path)
   if (!file.exists(index_path)) {
@@ -4477,7 +4810,18 @@ litxr_add_refs <- function(
     return(records[records$ref_id %in% keys | source_id %in% keys, ])
   }
 
-  index_columns <- fst::metadata_fst(index_path)$columnNames
+  index_columns <- .litxr_read_index_columns_safe(index_path)
+  if (is.null(index_columns)) {
+    warning(
+      "Collection index is damaged and will be rebuilt from ref_json before keyed lookup: ",
+      index_path,
+      call. = FALSE
+    )
+    records <- .litxr_read_journal_records_from_json(local_path)
+    .litxr_write_journal_index(records, local_path)
+    source_id <- if ("source_id" %in% names(records)) records$source_id else rep(NA_character_, nrow(records))
+    return(records[records$ref_id %in% keys | source_id %in% keys, ])
+  }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
     records <- .litxr_read_journal_index(local_path)
     if (is.null(records) || !nrow(records)) {
@@ -5355,8 +5699,32 @@ litxr_add_refs <- function(
   file.path(.litxr_project_index_dir(cfg), "references.fst")
 }
 
+.litxr_project_references_delta_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "references_delta.fst")
+}
+
 .litxr_project_reference_collections_index_path <- function(cfg) {
   file.path(.litxr_project_index_dir(cfg), "reference_collections.fst")
+}
+
+.litxr_project_reference_collections_delta_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "reference_collections_delta.fst")
+}
+
+.litxr_project_ref_aliases_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "ref_aliases.fst")
+}
+
+.litxr_project_entities_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "entities.fst")
+}
+
+.litxr_project_entity_collections_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "entity_collections.fst")
+}
+
+.litxr_project_entity_status_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "entity_status.fst")
 }
 
 .litxr_sync_state_index_path <- function(cfg) {
@@ -5686,6 +6054,107 @@ litxr_add_refs <- function(
   data.table::copy(records)[, cols, with = FALSE]
 }
 
+.litxr_authoritative_project_records <- function(cfg) {
+  collections <- .litxr_config_collections(cfg)
+  if (!length(collections)) {
+    return(data.table::data.table())
+  }
+
+  refs_list <- lapply(collections, function(collection) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    records <- .litxr_read_journal_records_authoritative(local_path)
+    .litxr_project_references_from_collection_records(records)
+  })
+  refs_list <- refs_list[vapply(refs_list, nrow, integer(1)) > 0L]
+  if (!length(refs_list)) {
+    return(data.table::data.table())
+  }
+
+  refs <- data.table::rbindlist(refs_list, fill = TRUE)
+  .litxr_upsert_records(refs[0, ], refs)
+}
+
+.litxr_authoritative_project_reference_links <- function(cfg) {
+  collections <- .litxr_config_collections(cfg)
+  empty_links <- data.table::data.table(
+    ref_id = character(),
+    collection_id = character(),
+    collection_title = character(),
+    recorded_at = character()
+  )
+  if (!length(collections)) {
+    return(empty_links)
+  }
+
+  links_list <- lapply(collections, function(collection) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    records <- .litxr_read_journal_records_authoritative(local_path)
+    .litxr_project_reference_links_from_collection_records(records, collection)
+  })
+  links_list <- links_list[vapply(links_list, nrow, integer(1)) > 0L]
+  if (!length(links_list)) {
+    return(empty_links)
+  }
+
+  links <- data.table::rbindlist(links_list, fill = TRUE)
+  link_key <- paste(links$ref_id, links$collection_id, sep = "\r")
+  links[!duplicated(link_key), ]
+}
+
+.litxr_rebuild_project_reference_indexes <- function(cfg) {
+  collections <- .litxr_config_collections(cfg)
+  if (!length(collections)) {
+    .litxr_write_project_references_index(cfg, data.table::data.table())
+    .litxr_write_project_reference_collections_index(
+      cfg,
+      data.table::data.table(
+        ref_id = character(),
+        collection_id = character(),
+        collection_title = character(),
+        recorded_at = character()
+      )
+    )
+    return(invisible(NULL))
+  }
+
+  refs_list <- list()
+  links_list <- list()
+
+  for (collection in collections) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    records <- .litxr_read_journal_records_from_json(local_path)
+    delta <- .litxr_read_collection_delta(local_path)
+    if (nrow(delta)) {
+      records <- .litxr_upsert_records(records, delta)
+    }
+    if (nrow(records)) {
+      refs_list[[length(refs_list) + 1L]] <- .litxr_project_references_from_collection_records(records)
+      links_list[[length(links_list) + 1L]] <- .litxr_project_reference_links_from_collection_records(records, collection)
+    }
+  }
+
+  refs <- if (length(refs_list)) data.table::rbindlist(refs_list, fill = TRUE) else data.table::data.table()
+  links <- if (length(links_list)) data.table::rbindlist(links_list, fill = TRUE) else data.table::data.table(
+    ref_id = character(),
+    collection_id = character(),
+    collection_title = character(),
+    recorded_at = character()
+  )
+
+  if (nrow(refs)) {
+    refs <- .litxr_upsert_records(refs[0, ], refs)
+  }
+  if (nrow(links)) {
+    link_key <- paste(links$ref_id, links$collection_id, sep = "\r")
+    links <- links[!duplicated(link_key), ]
+  }
+
+  .litxr_write_project_references_index(cfg, refs)
+  .litxr_write_project_reference_collections_index(cfg, links)
+  .litxr_clear_project_reference_deltas(cfg)
+  invisible(NULL)
+}
+
 .litxr_project_reference_links_from_collection_records <- function(records, journal) {
   if (!nrow(records)) {
     return(data.table::data.table(
@@ -5706,7 +6175,7 @@ litxr_add_refs <- function(
   links[!duplicated(links$ref_id), ]
 }
 
-.litxr_read_project_references_index <- function(cfg) {
+.litxr_read_project_references_main_index <- function(cfg) {
   path <- .litxr_project_references_index_path(cfg)
   if (!file.exists(path)) {
     return(data.table::data.table())
@@ -5714,13 +6183,47 @@ litxr_add_refs <- function(
   .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
 }
 
+.litxr_read_project_references_delta_index <- function(cfg) {
+  path <- .litxr_project_references_delta_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
+}
+
+.litxr_read_project_references_index <- function(cfg) {
+  main <- .litxr_read_project_references_main_index(cfg)
+  delta <- .litxr_read_project_references_delta_index(cfg)
+  if (!nrow(delta)) {
+    return(main)
+  }
+  .litxr_upsert_records(main, delta)
+}
+
 .litxr_read_project_references_by_keys <- function(cfg, keys) {
   path <- .litxr_project_references_index_path(cfg)
+  delta_path <- .litxr_project_references_delta_index_path(cfg)
+  if (file.exists(delta_path)) {
+    refs <- .litxr_read_project_references_index(cfg)
+    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+    return(refs[refs$ref_id %in% keys | source_id %in% keys, ])
+  }
   if (!file.exists(path)) {
     return(data.table::data.table())
   }
 
-  index_columns <- fst::metadata_fst(path)$columnNames
+  index_columns <- .litxr_read_index_columns_safe(path)
+  if (is.null(index_columns)) {
+    warning(
+      "Project reference index is damaged and will be rebuilt from collection indexes before keyed lookup: ",
+      path,
+      call. = FALSE
+    )
+    .litxr_rebuild_project_reference_indexes(cfg)
+    refs <- .litxr_read_project_references_index(cfg)
+    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+    return(refs[refs$ref_id %in% keys | source_id %in% keys, ])
+  }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
     refs <- .litxr_read_project_references_index(cfg)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
@@ -5748,18 +6251,138 @@ litxr_add_refs <- function(
   out[!duplicated(key), ]
 }
 
+.litxr_entity_index_maybe_refresh <- function(cfg) {
+  alias_path <- .litxr_project_ref_aliases_index_path(cfg)
+  entities_path <- .litxr_project_entities_index_path(cfg)
+  entity_collections_path <- .litxr_project_entity_collections_index_path(cfg)
+  entity_status_path <- .litxr_project_entity_status_index_path(cfg)
+  refs_path <- .litxr_project_references_index_path(cfg)
+  links_path <- .litxr_project_reference_collections_index_path(cfg)
+  refs_delta_path <- .litxr_project_references_delta_index_path(cfg)
+  links_delta_path <- .litxr_project_reference_collections_delta_index_path(cfg)
+  needs_build <- !file.exists(alias_path) ||
+    !file.exists(entities_path) ||
+    !file.exists(entity_collections_path) ||
+    !file.exists(entity_status_path)
+  if (!needs_build && file.exists(refs_path) && file.exists(links_path)) {
+    alias_mtime <- file.info(alias_path)$mtime
+    refs_mtime <- file.info(refs_path)$mtime
+    links_mtime <- file.info(links_path)$mtime
+    needs_build <- isTRUE(alias_mtime < refs_mtime) || isTRUE(alias_mtime < links_mtime)
+    if (!needs_build && file.exists(refs_delta_path)) {
+      needs_build <- isTRUE(alias_mtime < file.info(refs_delta_path)$mtime)
+    }
+    if (!needs_build && file.exists(links_delta_path)) {
+      needs_build <- isTRUE(alias_mtime < file.info(links_delta_path)$mtime)
+    }
+  }
+  if (isTRUE(needs_build)) {
+    .litxr_build_entity_indexes(cfg)
+  }
+  invisible(NULL)
+}
+
+.litxr_match_alias_rows_by_keys <- function(cfg, keys) {
+  keys <- .litxr_expand_reference_keys(keys)
+  if (!length(keys)) {
+    return(data.table::data.table())
+  }
+  .litxr_entity_index_maybe_refresh(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (!nrow(aliases)) {
+    return(aliases)
+  }
+  source_id <- if ("source_id" %in% names(aliases)) aliases$source_id else rep(NA_character_, nrow(aliases))
+  matched <- aliases[aliases$ref_id %in% keys | source_id %in% keys, ]
+  if (!nrow(matched)) {
+    return(matched)
+  }
+  matched_key <- rep(NA_character_, nrow(matched))
+  ref_hit <- !is.na(matched$ref_id) & matched$ref_id %in% keys
+  matched_key[ref_hit] <- matched$ref_id[ref_hit]
+  source_hit <- !is.na(matched$source_id) &
+    matched$source_id %in% keys &
+    is.na(matched_key)
+  if (any(source_hit)) {
+    matched_key[source_hit] <- matched$source_id[source_hit]
+  }
+  matched[["litxr_matched_key__"]] <- matched_key
+  matched
+}
+
+.litxr_filter_refs_by_alias_rows <- function(refs, alias_rows, keys) {
+  if (!nrow(refs) || !nrow(alias_rows)) {
+    return(refs[0, ])
+  }
+  keys <- .litxr_expand_reference_keys(keys)
+  source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+  keep_ref_ids <- unique(as.character(alias_rows$ref_id))
+  keep_source_ids <- unique(as.character(alias_rows$source_id))
+  keep <- refs$ref_id %in% keep_ref_ids |
+    source_id %in% keys |
+    source_id %in% keep_source_ids
+  refs[keep, ]
+}
+
+.litxr_read_project_references_by_alias_keys <- function(cfg, keys) {
+  alias_rows <- .litxr_match_alias_rows_by_keys(cfg, keys)
+  if (!nrow(alias_rows)) {
+    return(data.table::data.table())
+  }
+  refs <- .litxr_read_project_references_index(cfg)
+  if (!nrow(refs)) {
+    return(refs)
+  }
+  out <- .litxr_filter_refs_by_alias_rows(refs, alias_rows, keys)
+  if (!nrow(out)) {
+    return(out)
+  }
+  key <- .litxr_upsert_key(out)
+  out[!duplicated(key), ]
+}
+
 .litxr_write_project_references_index <- function(cfg, records) {
   .litxr_ensure_project_index_dir(cfg)
   fst::write_fst(as.data.frame(.litxr_index_encode(records)), .litxr_project_references_index_path(cfg))
   invisible(.litxr_project_references_index_path(cfg))
 }
 
-.litxr_read_project_reference_collections_index <- function(cfg) {
+.litxr_append_project_references_delta <- function(cfg, records) {
+  .litxr_ensure_project_index_dir(cfg)
+  existing <- .litxr_read_project_references_delta_index(cfg)
+  delta <- .litxr_upsert_records(existing, records)
+  fst::write_fst(as.data.frame(.litxr_index_encode(delta)), .litxr_project_references_delta_index_path(cfg))
+  invisible(.litxr_project_references_delta_index_path(cfg))
+}
+
+.litxr_read_project_reference_collections_main_index <- function(cfg) {
   path <- .litxr_project_reference_collections_index_path(cfg)
   if (!file.exists(path)) {
     return(data.table::data.table())
   }
   fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_read_project_reference_collections_delta_index <- function(cfg) {
+  path <- .litxr_project_reference_collections_delta_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_read_project_reference_collections_index <- function(cfg) {
+  main <- .litxr_read_project_reference_collections_main_index(cfg)
+  delta <- .litxr_read_project_reference_collections_delta_index(cfg)
+  if (!nrow(delta)) {
+    return(main)
+  }
+  if (!nrow(main)) {
+    return(delta)
+  }
+  merged <- data.table::rbindlist(list(main, delta), fill = TRUE)
+  link_key <- paste(merged$ref_id, merged$collection_id, sep = "\r")
+  merged[!duplicated(link_key, fromLast = TRUE), ]
 }
 
 .litxr_write_project_reference_collections_index <- function(cfg, links) {
@@ -5768,33 +6391,994 @@ litxr_add_refs <- function(
   invisible(.litxr_project_reference_collections_index_path(cfg))
 }
 
+.litxr_append_project_reference_collections_delta <- function(cfg, links) {
+  .litxr_ensure_project_index_dir(cfg)
+  existing <- .litxr_read_project_reference_collections_delta_index(cfg)
+  if (!nrow(existing)) {
+    merged <- links
+  } else {
+    merged <- data.table::rbindlist(list(existing, links), fill = TRUE)
+    link_key <- paste(merged$ref_id, merged$collection_id, sep = "\r")
+    merged <- merged[!duplicated(link_key, fromLast = TRUE), ]
+  }
+  fst::write_fst(as.data.frame(merged), .litxr_project_reference_collections_delta_index_path(cfg))
+  invisible(.litxr_project_reference_collections_delta_index_path(cfg))
+}
+
+.litxr_clear_project_reference_deltas <- function(cfg) {
+  for (path in c(
+    .litxr_project_references_delta_index_path(cfg),
+    .litxr_project_reference_collections_delta_index_path(cfg)
+  )) {
+    if (file.exists(path)) unlink(path)
+  }
+  invisible(TRUE)
+}
+
+.litxr_refresh_entity_indexes_from_project_indexes <- function(cfg) {
+  refs <- .litxr_read_project_references_index(cfg)
+  links <- .litxr_read_project_reference_collections_index(cfg)
+  aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
+  .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
+  .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
+  .litxr_build_entity_status_index(cfg, aliases = aliases, refs = refs)
+  invisible(NULL)
+}
+
 .litxr_update_project_indexes <- function(cfg, journal, records) {
   .litxr_ensure_project_index_dir(cfg)
+  if (!file.exists(.litxr_project_references_index_path(cfg))) {
+    .litxr_write_project_references_index(cfg, data.table::data.table())
+  }
+  if (!file.exists(.litxr_project_reference_collections_index_path(cfg))) {
+    .litxr_write_project_reference_collections_index(
+      cfg,
+      data.table::data.table(
+        ref_id = character(),
+        collection_id = character(),
+        collection_title = character(),
+        recorded_at = character()
+      )
+    )
+  }
 
   incoming_refs <- .litxr_project_references_from_collection_records(records)
-  existing_refs <- .litxr_read_project_references_index(cfg)
-  merged_refs <- .litxr_upsert_records(
-    existing_refs,
-    incoming_refs,
-    conflict_path = file.path(.litxr_project_index_dir(cfg), "_reference_conflicts.jsonl")
-  )
-  .litxr_write_project_references_index(cfg, merged_refs)
-
-  existing_links <- .litxr_read_project_reference_collections_index(cfg)
-  incoming_links <- .litxr_project_reference_links_from_collection_records(records, journal)
-  if (!nrow(incoming_links)) {
-    merged_links <- existing_links
-  } else if (nrow(existing_links)) {
-    keep_old <- !(existing_links$collection_id == incoming_links$collection_id[[1]] &
-      existing_links$ref_id %in% incoming_links$ref_id)
-    merged_links <- data.table::rbindlist(list(existing_links[keep_old, ], incoming_links), fill = TRUE)
-  } else {
-    merged_links <- incoming_links
+  if (nrow(incoming_refs)) {
+    .litxr_append_project_references_delta(cfg, incoming_refs)
   }
-  link_key <- paste(merged_links$ref_id, merged_links$collection_id, sep = "\r")
-  merged_links <- merged_links[!duplicated(link_key), ]
-  .litxr_write_project_reference_collections_index(cfg, merged_links)
+
+  incoming_links <- .litxr_project_reference_links_from_collection_records(records, journal)
+  if (nrow(incoming_links)) {
+    .litxr_append_project_reference_collections_delta(cfg, incoming_links)
+  }
+  .litxr_refresh_entity_indexes_from_project_indexes(cfg)
   invisible(NULL)
+}
+
+.litxr_alias_type <- function(ref_id) {
+  ref_id <- as.character(ref_id %||% NA_character_)
+  if (is.na(ref_id) || !nzchar(ref_id)) {
+    return(NA_character_)
+  }
+  sub(":.*$", "", ref_id)
+}
+
+.litxr_alias_priority <- function(ref_id) {
+  alias_type <- .litxr_alias_type(ref_id)
+  if (identical(alias_type, "arxiv")) return(1L)
+  if (identical(alias_type, "doi")) return(2L)
+  if (identical(alias_type, "isbn")) return(3L)
+  if (identical(alias_type, "url")) return(4L)
+  9L
+}
+
+.litxr_entity_id_from_root_ref <- function(ref_id) {
+  paste0(
+    "ent:",
+    .litxr_record_slug(data.table::data.table(ref_id = as.character(ref_id), doi = NA_character_))
+  )
+}
+
+.litxr_first_author <- function(row) {
+  authors_list <- row$authors_list[[1]] %||% character()
+  if (length(authors_list)) {
+    return(as.character(authors_list[[1]]))
+  }
+  authors <- as.character(row$authors[[1]] %||% NA_character_)
+  if (is.na(authors) || !nzchar(authors)) {
+    return(NA_character_)
+  }
+  trimws(strsplit(authors, ";", fixed = TRUE)[[1]][1])
+}
+
+.litxr_author_short <- function(row) {
+  authors_list <- row$authors_list[[1]] %||% character()
+  first_author <- .litxr_first_author(row)
+  if (is.na(first_author) || !nzchar(first_author)) {
+    return(NA_character_)
+  }
+  if (length(authors_list) > 1L) {
+    paste0(first_author, " et al.")
+  } else {
+    first_author
+  }
+}
+
+.litxr_choose_entity_root_ref <- function(ref_ids) {
+  ref_ids <- unique(as.character(ref_ids))
+  ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+  if (!length(ref_ids)) {
+    return(NA_character_)
+  }
+  priority <- vapply(ref_ids, .litxr_alias_priority, integer(1))
+  ref_ids[order(priority, ref_ids)][[1]]
+}
+
+.litxr_collect_alias_component <- function(seed, neighbors, seen) {
+  queue <- seed
+  component <- character()
+  while (length(queue)) {
+    current <- queue[[1]]
+    queue <- queue[-1]
+    if (current %in% seen) {
+      next
+    }
+    seen <- c(seen, current)
+    component <- c(component, current)
+    next_neighbors <- neighbors[[current]]
+    if (length(next_neighbors)) {
+      queue <- c(queue, setdiff(next_neighbors, seen))
+    }
+  }
+  list(component = unique(component), seen = unique(seen))
+}
+
+.litxr_build_ref_aliases_index <- function(cfg, refs = NULL) {
+  if (is.null(refs)) {
+    refs <- .litxr_read_project_references_index(cfg)
+  }
+  if (!nrow(refs)) {
+    out <- data.table::data.table(
+      ref_id = character(),
+      entity_id = character(),
+      id_type = character(),
+      source = character(),
+      source_id = character(),
+      is_primary_ref_id = logical(),
+      is_published_form = logical(),
+      linked_at = character(),
+      status_code = character()
+    )
+    .litxr_write_project_ref_aliases_index(cfg, out)
+    return(out)
+  }
+
+  refs <- data.table::copy(refs)
+  if (!("linked_doi_ref_id" %in% names(refs))) refs[["linked_doi_ref_id"]] <- rep(NA_character_, nrow(refs))
+  if (!("linked_arxiv_ref_id" %in% names(refs))) refs[["linked_arxiv_ref_id"]] <- rep(NA_character_, nrow(refs))
+
+  all_aliases <- unique(c(
+    refs$ref_id,
+    refs$linked_doi_ref_id,
+    refs$linked_arxiv_ref_id
+  ))
+  all_aliases <- all_aliases[!is.na(all_aliases) & nzchar(all_aliases)]
+
+  neighbors <- stats::setNames(vector("list", length(all_aliases)), all_aliases)
+  for (i in seq_len(nrow(refs))) {
+    current <- unique(c(
+      refs$ref_id[[i]],
+      refs$linked_doi_ref_id[[i]],
+      refs$linked_arxiv_ref_id[[i]]
+    ))
+    current <- current[!is.na(current) & nzchar(current)]
+    if (!length(current)) {
+      next
+    }
+    for (alias in current) {
+      neighbors[[alias]] <- unique(c(neighbors[[alias]], setdiff(current, alias)))
+    }
+  }
+
+  alias_to_entity <- stats::setNames(rep(NA_character_, length(all_aliases)), all_aliases)
+  seen <- character()
+  for (alias in all_aliases) {
+    if (alias %in% seen) {
+      next
+    }
+    component_info <- .litxr_collect_alias_component(alias, neighbors, seen)
+    component <- component_info$component
+    seen <- component_info$seen
+    root_ref_id <- .litxr_choose_entity_root_ref(component)
+    entity_id <- .litxr_entity_id_from_root_ref(root_ref_id)
+    alias_to_entity[component] <- entity_id
+  }
+
+  linked_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  out <- data.table::data.table(
+    ref_id = refs$ref_id,
+    entity_id = unname(alias_to_entity[refs$ref_id]),
+    id_type = vapply(refs$ref_id, .litxr_alias_type, character(1)),
+    source = if ("source" %in% names(refs)) as.character(refs$source) else rep(NA_character_, nrow(refs)),
+    source_id = if ("source_id" %in% names(refs)) as.character(refs$source_id) else rep(NA_character_, nrow(refs)),
+    is_primary_ref_id = FALSE,
+    is_published_form = vapply(refs$ref_id, function(x) identical(.litxr_alias_type(x), "doi"), logical(1)),
+    linked_at = linked_at,
+    status_code = "active"
+  )
+
+  split_ids <- split(out$ref_id, out$entity_id)
+  root_by_entity <- data.table::data.table(
+    entity_id = names(split_ids),
+    root_ref_id = vapply(split_ids, .litxr_choose_entity_root_ref, character(1))
+  )
+  out <- merge(out, root_by_entity, by = "entity_id", all.x = TRUE, sort = FALSE)
+  out[["is_primary_ref_id"]] <- out$ref_id == out$root_ref_id
+  out[["root_ref_id"]] <- NULL
+  data.table::setcolorder(out, c(
+    "ref_id", "entity_id", "id_type", "source", "source_id",
+    "is_primary_ref_id", "is_published_form", "linked_at", "status_code"
+  ))
+  .litxr_write_project_ref_aliases_index(cfg, out)
+  out
+}
+
+.litxr_build_entities_index <- function(cfg, refs = NULL, aliases = NULL) {
+  if (is.null(refs)) refs <- .litxr_read_project_references_index(cfg)
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (!nrow(refs) || !nrow(aliases)) {
+    out <- data.table::data.table(
+      entity_id = character(),
+      primary_ref_id = character(),
+      preferred_citation_ref_id = character(),
+      display_title = character(),
+      year = integer(),
+      first_author = character(),
+      author_short = character(),
+      entry_type = character(),
+      primary_source = character(),
+      published_source = character(),
+      has_md = logical(),
+      has_llm_digest = logical(),
+      has_published_metadata = logical(),
+      updated_at = character()
+    )
+    .litxr_write_project_entities_index(cfg, out)
+    return(out)
+  }
+
+  alias_view <- data.table::data.table(
+    ref_id = aliases$ref_id,
+    entity_id = aliases$entity_id,
+    is_primary_ref_id = aliases$is_primary_ref_id,
+    is_published_form = aliases$is_published_form
+  )
+  rows <- merge(refs, alias_view, by = "ref_id", all.x = TRUE, sort = FALSE)
+  rows <- rows[!is.na(rows$entity_id) & nzchar(rows$entity_id), ]
+  if (!nrow(rows)) {
+    return(.litxr_build_entities_index(cfg, refs = refs[0, ], aliases = aliases[0, ]))
+  }
+
+  entity_ids <- unique(as.character(rows$entity_id))
+  out <- data.table::rbindlist(lapply(entity_ids, function(entity_id) {
+    entity_rows <- rows[rows$entity_id == entity_id, ]
+    primary_idx <- which(entity_rows$is_primary_ref_id %in% TRUE)
+    primary_row <- if (length(primary_idx)) entity_rows[primary_idx[[1]], ] else entity_rows[1L, ]
+    preferred_idx <- which(entity_rows$is_published_form %in% TRUE)
+    preferred_row <- if (length(preferred_idx)) entity_rows[preferred_idx[[1]], ] else primary_row
+    display_title <- as.character(preferred_row$title[[1]] %||% primary_row$title[[1]] %||% NA_character_)
+    data.table::data.table(
+      entity_id = entity_id,
+      primary_ref_id = as.character(primary_row$ref_id[[1]]),
+      preferred_citation_ref_id = as.character(preferred_row$ref_id[[1]]),
+      display_title = display_title,
+      year = suppressWarnings(as.integer(preferred_row$year[[1]] %||% primary_row$year[[1]])),
+      first_author = .litxr_first_author(preferred_row),
+      author_short = .litxr_author_short(preferred_row),
+      entry_type = as.character(preferred_row$entry_type[[1]] %||% primary_row$entry_type[[1]] %||% NA_character_),
+      primary_source = as.character(primary_row$source[[1]] %||% NA_character_),
+      published_source = if (length(preferred_idx)) as.character(preferred_row$source[[1]] %||% NA_character_) else NA_character_,
+      has_md = any(vapply(entity_rows$ref_id, function(x) file.exists(.litxr_md_path(cfg, x)), logical(1))),
+      has_llm_digest = any(vapply(entity_rows$ref_id, function(x) file.exists(.litxr_llm_digest_path(cfg, x)), logical(1))),
+      has_published_metadata = any(!is.na(entity_rows$doi) & nzchar(entity_rows$doi)),
+      updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+    )
+  }), fill = TRUE)
+
+  .litxr_write_project_entities_index(cfg, out)
+  out
+}
+
+.litxr_build_entity_collections_index <- function(cfg, aliases = NULL, links = NULL) {
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (is.null(links)) links <- .litxr_read_project_reference_collections_index(cfg)
+  if (!nrow(aliases) || !nrow(links)) {
+    out <- data.table::data.table(
+      entity_id = character(),
+      collection_id = character(),
+      recorded_at = character()
+    )
+    .litxr_write_project_entity_collections_index(cfg, out)
+    return(out)
+  }
+
+  links_view <- data.table::data.table(
+    ref_id = links$ref_id,
+    collection_id = links$collection_id,
+    recorded_at = links$recorded_at
+  )
+  alias_view <- data.table::data.table(
+    ref_id = aliases$ref_id,
+    entity_id = aliases$entity_id
+  )
+  merged <- merge(
+    links_view,
+    alias_view,
+    by = "ref_id",
+    all.x = FALSE,
+    all.y = FALSE,
+    sort = FALSE
+  )
+  if (!nrow(merged)) {
+    out <- data.table::data.table(
+      entity_id = character(),
+      collection_id = character(),
+      recorded_at = character()
+    )
+    .litxr_write_project_entity_collections_index(cfg, out)
+    return(out)
+  }
+  split_keys <- paste(merged$entity_id, merged$collection_id, sep = "\r")
+  split_rows <- split(merged, split_keys)
+  out <- data.table::rbindlist(lapply(split_rows, function(x) {
+    dt <- data.table::as.data.table(x)
+    data.table::data.table(
+      entity_id = as.character(dt$entity_id[[1]]),
+      collection_id = as.character(dt$collection_id[[1]]),
+      recorded_at = as.character(max(dt$recorded_at))
+    )
+  }), fill = TRUE)
+  .litxr_write_project_entity_collections_index(cfg, out)
+  out
+}
+
+.litxr_entity_status_empty <- function() {
+  data.table::data.table(
+    entity_id = character(),
+    has_ref_json = logical(),
+    has_fulltxt_md = logical(),
+    has_llm_digest = logical(),
+    has_standardized_findings = logical(),
+    has_descriptive_stats = logical(),
+    has_anchor_references = logical(),
+    has_citation_logic_nodes = logical(),
+    digest_schema_version = character(),
+    digest_revision_latest = integer(),
+    updated_at = character()
+  )
+}
+
+.litxr_entity_ids_for_ref_ids <- function(cfg, ref_ids, aliases = NULL) {
+  keys <- .litxr_expand_reference_keys(ref_ids)
+  if (!length(keys)) {
+    return(character())
+  }
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (!nrow(aliases)) {
+    return(character())
+  }
+  matched <- aliases[aliases$ref_id %in% keys, ]
+  if (!nrow(matched) && "source_id" %in% names(aliases)) {
+    matched <- aliases[aliases$source_id %in% keys, ]
+  }
+  if (!nrow(matched)) {
+    return(character())
+  }
+  unique(as.character(matched$entity_id))
+}
+
+.litxr_entity_status_rows_for_entities <- function(cfg, entity_ids, aliases = NULL, refs = NULL) {
+  entity_ids <- unique(as.character(entity_ids))
+  entity_ids <- entity_ids[!is.na(entity_ids) & nzchar(entity_ids)]
+  if (!length(entity_ids)) {
+    return(.litxr_entity_status_empty())
+  }
+
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (is.null(refs)) refs <- .litxr_read_project_references_index(cfg)
+  if (!nrow(aliases) || !nrow(refs)) {
+    return(.litxr_entity_status_empty())
+  }
+
+  alias_view <- data.table::data.table(
+    ref_id = as.character(aliases$ref_id),
+    entity_id = as.character(aliases$entity_id)
+  )
+  alias_view <- alias_view[alias_view$entity_id %in% entity_ids, ]
+  ref_view <- data.table::data.table(ref_id = as.character(refs$ref_id))
+  refs_map <- merge(
+    alias_view,
+    ref_view,
+    by = "ref_id",
+    all.x = FALSE,
+    all.y = FALSE,
+    sort = FALSE
+  )
+  if (!nrow(refs_map)) {
+    return(.litxr_entity_status_empty())
+  }
+
+  split_refs <- split(refs_map$ref_id, refs_map$entity_id)
+  status <- data.table::rbindlist(lapply(names(split_refs), function(entity_id) {
+    ref_ids <- as.character(split_refs[[entity_id]])
+    data.table::data.table(
+      entity_id = entity_id,
+      has_ref_json = TRUE,
+      has_fulltxt_md = any(vapply(ref_ids, function(x) file.exists(.litxr_md_path(cfg, x)), logical(1))),
+      has_llm_digest = any(vapply(ref_ids, function(x) file.exists(.litxr_llm_digest_path(cfg, x)), logical(1)))
+    )
+  }), fill = TRUE)
+
+  digests <- tryCatch(litxr_read_llm_digests(cfg), error = function(e) data.table::data.table())
+  if (nrow(digests)) {
+    digest_rows <- merge(
+      data.table::data.table(
+        ref_id = as.character(digests$ref_id),
+        schema_version = as.character(digests$schema_version),
+        digest_revision = suppressWarnings(as.integer(digests$digest_revision)),
+        updated_at = if ("updated_at" %in% names(digests)) as.character(digests$updated_at) else NA_character_
+      ),
+      alias_view,
+      by = "ref_id",
+      all.x = FALSE,
+      all.y = FALSE,
+      sort = FALSE
+    )
+    if (nrow(digest_rows)) {
+      digest_split <- split(seq_len(nrow(digest_rows)), digest_rows$entity_id)
+      digest_status <- data.table::rbindlist(lapply(names(digest_split), function(entity_id) {
+        idx <- digest_split[[entity_id]]
+        rows <- digest_rows[idx, , drop = FALSE]
+        revisions <- suppressWarnings(as.integer(rows$digest_revision))
+        latest_idx <- if (length(revisions) && any(!is.na(revisions))) {
+          order(revisions, decreasing = TRUE)[[1]]
+        } else {
+          order(rows$updated_at, decreasing = TRUE)[[1]]
+        }
+        data.table::data.table(
+          entity_id = entity_id,
+          digest_schema_version = as.character(rows$schema_version[[latest_idx]] %||% NA_character_),
+          digest_revision_latest = suppressWarnings(as.integer(rows$digest_revision[[latest_idx]] %||% NA_integer_))
+        )
+      }), fill = TRUE)
+      status <- merge(status, digest_status, by = "entity_id", all.x = TRUE, sort = FALSE)
+    }
+  }
+  if (!("digest_schema_version" %in% names(status))) status$digest_schema_version <- NA_character_
+  if (!("digest_revision_latest" %in% names(status))) status$digest_revision_latest <- NA_integer_
+
+  entity_any <- function(dt, flag_name) {
+    if (!nrow(dt) || !("ref_id" %in% names(dt))) {
+      out <- data.table::data.table(entity_id = character(), value = logical())
+      data.table::setnames(out, "value", flag_name)
+      return(out)
+    }
+    dt_view <- data.table::data.table(ref_id = as.character(dt$ref_id))
+    merged <- merge(dt_view, alias_view, by = "ref_id", all.x = FALSE, all.y = FALSE, sort = FALSE)
+    if (!nrow(merged)) {
+      out <- data.table::data.table(entity_id = character(), value = logical())
+      data.table::setnames(out, "value", flag_name)
+      return(out)
+    }
+    out <- data.table::data.table(entity_id = unique(as.character(merged$entity_id)), value = TRUE)
+    data.table::setnames(out, "value", flag_name)
+    out
+  }
+
+  findings <- tryCatch(litxr_read_standardized_findings(cfg), error = function(e) data.table::data.table())
+  desc_stats <- tryCatch(litxr_read_descriptive_stats(cfg), error = function(e) data.table::data.table())
+  anchors <- tryCatch(litxr_read_anchor_references(cfg), error = function(e) data.table::data.table())
+  nodes <- tryCatch(litxr_read_citation_logic_nodes(cfg), error = function(e) data.table::data.table())
+
+  status <- merge(status, entity_any(findings, "has_standardized_findings"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_any(desc_stats, "has_descriptive_stats"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_any(anchors, "has_anchor_references"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_any(nodes, "has_citation_logic_nodes"), by = "entity_id", all.x = TRUE, sort = FALSE)
+
+  for (nm in c("has_standardized_findings", "has_descriptive_stats", "has_anchor_references", "has_citation_logic_nodes")) {
+    if (!(nm %in% names(status))) status[[nm]] <- FALSE
+    status[[nm]][is.na(status[[nm]])] <- FALSE
+  }
+  status$has_ref_json[is.na(status$has_ref_json)] <- FALSE
+  status$has_fulltxt_md[is.na(status$has_fulltxt_md)] <- FALSE
+  status$has_llm_digest[is.na(status$has_llm_digest)] <- FALSE
+  status[["updated_at"]] <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  data.table::setcolorder(status, names(.litxr_entity_status_empty()))
+  status
+}
+
+.litxr_write_entity_status_rows <- function(cfg, rows) {
+  .litxr_ensure_project_index_dir(cfg)
+  existing <- .litxr_read_project_entity_status_index(cfg)
+  if (is.null(rows) || !nrow(rows)) {
+    .litxr_write_project_entity_status_index(cfg, existing)
+    return(invisible(.litxr_project_entity_status_index_path(cfg)))
+  }
+  merged <- if (!nrow(existing)) {
+    rows
+  } else {
+    stacked <- data.table::rbindlist(list(existing, rows), fill = TRUE)
+    key <- as.character(stacked$entity_id)
+    stacked[!duplicated(key, fromLast = TRUE), ]
+  }
+  merged <- merged[!is.na(merged$entity_id) & nzchar(merged$entity_id), ]
+  data.table::setcolorder(merged, names(.litxr_entity_status_empty()))
+  .litxr_write_project_entity_status_index(cfg, merged)
+  invisible(.litxr_project_entity_status_index_path(cfg))
+}
+
+.litxr_update_entity_status_entities <- function(cfg, entity_ids, aliases = NULL, refs = NULL) {
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (is.null(refs)) refs <- .litxr_read_project_references_index(cfg)
+  rows <- .litxr_entity_status_rows_for_entities(cfg, entity_ids = entity_ids, aliases = aliases, refs = refs)
+  .litxr_write_entity_status_rows(cfg, rows)
+}
+
+.litxr_update_entity_status_refs <- function(cfg, ref_ids, aliases = NULL, refs = NULL) {
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  entity_ids <- .litxr_entity_ids_for_ref_ids(cfg, ref_ids = ref_ids, aliases = aliases)
+  if (!length(entity_ids)) {
+    return(invisible(NULL))
+  }
+  .litxr_update_entity_status_entities(cfg, entity_ids = entity_ids, aliases = aliases, refs = refs)
+}
+
+.litxr_build_entity_status_index <- function(cfg, aliases = NULL, refs = NULL) {
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (is.null(refs)) refs <- .litxr_read_project_references_index(cfg)
+  entity_ids <- if (nrow(aliases)) unique(as.character(aliases$entity_id)) else character()
+  out <- .litxr_entity_status_rows_for_entities(cfg, entity_ids = entity_ids, aliases = aliases, refs = refs)
+  if (!nrow(out)) {
+    out <- .litxr_entity_status_empty()
+  }
+  .litxr_write_project_entity_status_index(cfg, out)
+  out
+}
+
+.litxr_build_entity_indexes <- function(cfg) {
+  .litxr_ensure_project_index_dir(cfg)
+  .litxr_rebuild_project_reference_indexes(cfg)
+  refs <- .litxr_read_project_references_index(cfg)
+  links <- .litxr_read_project_reference_collections_index(cfg)
+  aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
+  entities <- .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
+  entity_collections <- .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
+  entity_status <- .litxr_build_entity_status_index(cfg, aliases = aliases, refs = refs)
+
+  list(
+    ref_aliases_path = .litxr_project_ref_aliases_index_path(cfg),
+    entities_path = .litxr_project_entities_index_path(cfg),
+    entity_collections_path = .litxr_project_entity_collections_index_path(cfg),
+    entity_status_path = .litxr_project_entity_status_index_path(cfg),
+    n_ref_aliases = nrow(aliases),
+    n_entities = nrow(entities),
+    n_entity_collections = nrow(entity_collections),
+    n_entity_status = nrow(entity_status)
+  )
+}
+
+.litxr_read_project_ref_aliases_index <- function(cfg) {
+  path <- .litxr_project_ref_aliases_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_write_project_ref_aliases_index <- function(cfg, records) {
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(records), .litxr_project_ref_aliases_index_path(cfg))
+  invisible(.litxr_project_ref_aliases_index_path(cfg))
+}
+
+.litxr_read_project_entities_index <- function(cfg) {
+  path <- .litxr_project_entities_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_write_project_entities_index <- function(cfg, records) {
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(records), .litxr_project_entities_index_path(cfg))
+  invisible(.litxr_project_entities_index_path(cfg))
+}
+
+.litxr_read_project_entity_collections_index <- function(cfg) {
+  path <- .litxr_project_entity_collections_index_path(cfg)
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_write_project_entity_collections_index <- function(cfg, records) {
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(records), .litxr_project_entity_collections_index_path(cfg))
+  invisible(.litxr_project_entity_collections_index_path(cfg))
+}
+
+.litxr_read_project_entity_status_index <- function(cfg) {
+  path <- .litxr_project_entity_status_index_path(cfg)
+  if (!file.exists(path)) {
+    return(.litxr_entity_status_empty())
+  }
+  fst::read_fst(path, as.data.table = TRUE)
+}
+
+.litxr_write_project_entity_status_index <- function(cfg, records) {
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(records), .litxr_project_entity_status_index_path(cfg))
+  invisible(.litxr_project_entity_status_index_path(cfg))
+}
+
+.litxr_orphan_project_artifacts <- function(cfg, aliases = NULL) {
+  if (is.null(aliases)) aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  valid_ref_ids <- unique(as.character(aliases$ref_id))
+  valid_slugs <- if (length(valid_ref_ids)) {
+    vapply(valid_ref_ids, function(x) .litxr_record_slug(data.table::data.table(ref_id = x, doi = NA_character_)), character(1))
+  } else {
+    character()
+  }
+
+  collect_files <- function(dir_path, pattern, artifact_type) {
+    if (!dir.exists(dir_path)) {
+      return(data.table::data.table(
+        artifact_type = character(),
+        artifact_ref_id = character(),
+        path = character(),
+        reason = character()
+      ))
+    }
+    files <- list.files(dir_path, pattern = pattern, full.names = TRUE)
+    if (!length(files)) {
+      return(data.table::data.table(
+        artifact_type = character(),
+        artifact_ref_id = character(),
+        path = character(),
+        reason = character()
+      ))
+    }
+    slugs <- sub(pattern, "", basename(files))
+    keep <- !(slugs %in% valid_slugs)
+    if (!any(keep)) {
+      return(data.table::data.table(
+        artifact_type = character(),
+        artifact_ref_id = character(),
+        path = character(),
+        reason = character()
+      ))
+    }
+    data.table::data.table(
+      artifact_type = artifact_type,
+      artifact_ref_id = NA_character_,
+      path = files[keep],
+      reason = "no_matching_ref_alias"
+    )
+  }
+
+  data.table::rbindlist(list(
+    collect_files(.litxr_project_llm_dir(cfg), "\\.json$", "llm_digest"),
+    collect_files(.litxr_project_md_dir(cfg), "\\.md$", "fulltxt_md")
+  ), fill = TRUE)
+}
+
+.litxr_audit_ambiguous_alias_joins <- function(refs) {
+  if (!nrow(refs)) {
+    return(data.table::data.table(
+      join_type = character(),
+      alias = character(),
+      n_links = integer()
+    ))
+  }
+  if (!("linked_doi_ref_id" %in% names(refs))) refs[["linked_doi_ref_id"]] <- rep(NA_character_, nrow(refs))
+  if (!("linked_arxiv_ref_id" %in% names(refs))) refs[["linked_arxiv_ref_id"]] <- rep(NA_character_, nrow(refs))
+
+  arxiv_keep <- grepl("^arxiv:", refs$ref_id) & !is.na(refs$linked_doi_ref_id) & nzchar(refs$linked_doi_ref_id)
+  arxiv_to_doi <- data.table::data.table(
+    join_type = rep("arxiv_to_doi", sum(arxiv_keep)),
+    alias = refs$linked_doi_ref_id[arxiv_keep],
+    linked_ref_id = refs$ref_id[arxiv_keep]
+  )
+  doi_keep <- grepl("^doi:", refs$ref_id) & !is.na(refs$linked_arxiv_ref_id) & nzchar(refs$linked_arxiv_ref_id)
+  doi_to_arxiv <- data.table::data.table(
+    join_type = rep("doi_to_arxiv", sum(doi_keep)),
+    alias = refs$linked_arxiv_ref_id[doi_keep],
+    linked_ref_id = refs$ref_id[doi_keep]
+  )
+  links <- data.table::rbindlist(list(arxiv_to_doi, doi_to_arxiv), fill = TRUE)
+  if (!nrow(links)) {
+    return(data.table::data.table(
+      join_type = character(),
+      alias = character(),
+      n_links = integer()
+    ))
+  }
+  split_keys <- paste(links$join_type, links$alias, sep = "\r")
+  grouped <- split(links$linked_ref_id, split_keys)
+  out <- data.table::rbindlist(lapply(names(grouped), function(key) {
+    parts <- strsplit(key, "\r", fixed = TRUE)[[1]]
+    data.table::data.table(
+      join_type = parts[[1]],
+      alias = parts[[2]],
+      n_links = data.table::uniqueN(grouped[[key]])
+    )
+  }), fill = TRUE)
+  out[which(out$n_links > 1L), , drop = FALSE]
+}
+
+.litxr_index_health_report <- function(cfg, oversized_mb = 25) {
+  collections <- .litxr_config_collections(cfg)
+  collection_rows <- lapply(collections, function(collection) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    path <- .litxr_index_path(local_path)
+    info <- if (file.exists(path)) file.info(path) else NULL
+    readable <- !is.null(.litxr_read_index_columns_safe(path))
+    size_bytes <- if (is.null(info)) NA_real_ else as.numeric(info$size)
+    data.table::data.table(
+      index_name = paste0("collection:", collection$collection_id),
+      path = path,
+      exists = file.exists(path),
+      readable = readable,
+      size_bytes = size_bytes,
+      size_mb = size_bytes / (1024^2),
+      status = if (!file.exists(path)) "missing" else if (!readable) "damaged" else if (!is.na(size_bytes) && size_bytes / (1024^2) > oversized_mb) "oversized" else "ok"
+    )
+  })
+  project_paths <- data.table::data.table(
+    index_name = c("project_references", "project_reference_collections", "ref_aliases", "entities", "entity_collections", "entity_status"),
+    path = c(
+      .litxr_project_references_index_path(cfg),
+      .litxr_project_reference_collections_index_path(cfg),
+      .litxr_project_ref_aliases_index_path(cfg),
+      .litxr_project_entities_index_path(cfg),
+      .litxr_project_entity_collections_index_path(cfg),
+      .litxr_project_entity_status_index_path(cfg)
+    )
+  )
+  project_rows <- data.table::rbindlist(lapply(seq_len(nrow(project_paths)), function(i) {
+    index_name <- as.character(project_paths$index_name[[i]])
+    path <- as.character(project_paths$path[[i]])
+    info <- if (file.exists(path)) file.info(path) else NULL
+    readable <- !is.null(.litxr_read_index_columns_safe(path))
+    size_bytes <- if (is.null(info)) NA_real_ else as.numeric(info$size)
+    data.table::data.table(
+      index_name = index_name,
+      path = path,
+      exists = file.exists(path),
+      readable = readable,
+      size_bytes = size_bytes,
+      size_mb = size_bytes / (1024^2),
+      status = if (!file.exists(path)) "missing" else if (!readable) "damaged" else if (!is.na(size_bytes) && size_bytes / (1024^2) > oversized_mb) "oversized" else "ok"
+    )
+  }), fill = TRUE)
+  data.table::rbindlist(c(collection_rows, list(project_rows)), fill = TRUE)
+}
+
+.litxr_audit_entity_indexes <- function(cfg, oversized_mb = 25) {
+  refs <- .litxr_read_project_references_index(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  if (!nrow(aliases) && nrow(refs)) {
+    aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
+  }
+
+  alias_splits <- if (!nrow(aliases) || !nrow(refs)) {
+    data.table::data.table(
+      entity_id = character(),
+      n_aliases = integer(),
+      ref_ids = character(),
+      preferred_citation_ref_id = character()
+    )
+  } else {
+    ref_view <- data.table::data.table(ref_id = refs$ref_id, title = refs$title, doi = refs$doi)
+    merged <- merge(aliases, ref_view, by = "ref_id", all.x = TRUE, sort = FALSE)
+    split_rows <- split(merged$ref_id, merged$entity_id)
+    alias_splits_dt <- data.table::rbindlist(lapply(names(split_rows), function(entity_id) {
+      ref_ids <- sort(as.character(split_rows[[entity_id]]))
+      doi_rows <- ref_ids[grepl("^doi:", ref_ids)]
+      data.table::data.table(
+        entity_id = entity_id,
+        n_aliases = length(ref_ids),
+        ref_ids = paste(ref_ids, collapse = ", "),
+        preferred_citation_ref_id = if (length(doi_rows)) doi_rows[[1]] else ref_ids[[1]]
+      )
+    }), fill = TRUE)
+    alias_splits_dt[which(alias_splits_dt$n_aliases > 1L), , drop = FALSE]
+  }
+
+  list(
+    alias_splits = alias_splits,
+    ambiguous_alias_joins = .litxr_audit_ambiguous_alias_joins(refs),
+    orphan_artifacts = .litxr_orphan_project_artifacts(cfg, aliases = aliases),
+    index_health = .litxr_index_health_report(cfg, oversized_mb = oversized_mb)
+  )
+}
+
+.litxr_audit_reference_cache_state <- function(cfg) {
+  collections <- .litxr_config_collections(cfg)
+  collection_rows <- lapply(collections, function(collection) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    cached_main <- tryCatch(.litxr_read_journal_index(local_path), error = function(e) data.table::data.table())
+    cached_delta <- tryCatch(.litxr_read_collection_delta(local_path), error = function(e) data.table::data.table())
+    authoritative <- tryCatch(.litxr_read_journal_records_authoritative(local_path), error = function(e) data.table::data.table())
+    cached_ref_ids <- if (is.null(cached_main) || !nrow(cached_main)) character() else unique(as.character(cached_main$ref_id))
+    cached_delta_ids <- if (!nrow(cached_delta)) character() else unique(as.character(cached_delta$ref_id))
+    auth_ids <- if (!nrow(authoritative)) character() else unique(as.character(authoritative$ref_id))
+    main_path <- .litxr_index_path(local_path)
+    delta_path <- .litxr_delta_index_path(local_path)
+    data.table::data.table(
+      scope = "collection",
+      scope_id = collection$collection_id,
+      main_path = main_path,
+      delta_path = delta_path,
+      main_exists = file.exists(main_path),
+      delta_exists = file.exists(delta_path),
+      authoritative_n = length(auth_ids),
+      cached_main_n = length(cached_ref_ids),
+      cached_delta_n = length(cached_delta_ids),
+      cached_merged_n = length(unique(c(cached_ref_ids, cached_delta_ids))),
+      main_missing_n = length(setdiff(auth_ids, cached_ref_ids)),
+      main_extra_n = length(setdiff(cached_ref_ids, auth_ids)),
+      merged_missing_n = length(setdiff(auth_ids, unique(c(cached_ref_ids, cached_delta_ids)))),
+      merged_extra_n = length(setdiff(unique(c(cached_ref_ids, cached_delta_ids)), auth_ids))
+    )
+  })
+
+  project_main <- tryCatch(.litxr_read_project_references_main_index(cfg), error = function(e) data.table::data.table())
+  project_delta <- tryCatch(.litxr_read_project_references_delta_index(cfg), error = function(e) data.table::data.table())
+  project_authoritative <- tryCatch(.litxr_authoritative_project_records(cfg), error = function(e) data.table::data.table())
+  main_ids <- if (!nrow(project_main)) character() else unique(as.character(project_main$ref_id))
+  delta_ids <- if (!nrow(project_delta)) character() else unique(as.character(project_delta$ref_id))
+  auth_ids <- if (!nrow(project_authoritative)) character() else unique(as.character(project_authoritative$ref_id))
+  project_refs <- data.table::data.table(
+    scope = "project_references",
+    scope_id = "project",
+    main_path = .litxr_project_references_index_path(cfg),
+    delta_path = .litxr_project_references_delta_index_path(cfg),
+    main_exists = file.exists(.litxr_project_references_index_path(cfg)),
+    delta_exists = file.exists(.litxr_project_references_delta_index_path(cfg)),
+    authoritative_n = length(auth_ids),
+    cached_main_n = length(main_ids),
+    cached_delta_n = length(delta_ids),
+    cached_merged_n = length(unique(c(main_ids, delta_ids))),
+    main_missing_n = length(setdiff(auth_ids, main_ids)),
+    main_extra_n = length(setdiff(main_ids, auth_ids)),
+    merged_missing_n = length(setdiff(auth_ids, unique(c(main_ids, delta_ids)))),
+    merged_extra_n = length(setdiff(unique(c(main_ids, delta_ids)), auth_ids))
+  )
+
+  project_links_main <- tryCatch(.litxr_read_project_reference_collections_main_index(cfg), error = function(e) data.table::data.table())
+  project_links_delta <- tryCatch(.litxr_read_project_reference_collections_delta_index(cfg), error = function(e) data.table::data.table())
+  project_links_merged <- tryCatch(.litxr_read_project_reference_collections_index(cfg), error = function(e) data.table::data.table())
+  auth_links <- tryCatch(.litxr_authoritative_project_reference_links(cfg), error = function(e) data.table::data.table())
+  link_key <- function(dt) if (!nrow(dt)) character() else paste(dt$ref_id, dt$collection_id, sep = "\r")
+  main_link_keys <- link_key(project_links_main)
+  delta_link_keys <- link_key(project_links_delta)
+  merged_link_keys <- link_key(project_links_merged)
+  auth_link_keys <- link_key(auth_links)
+  project_links <- data.table::data.table(
+    scope = "project_reference_collections",
+    scope_id = "project",
+    main_path = .litxr_project_reference_collections_index_path(cfg),
+    delta_path = .litxr_project_reference_collections_delta_index_path(cfg),
+    main_exists = file.exists(.litxr_project_reference_collections_index_path(cfg)),
+    delta_exists = file.exists(.litxr_project_reference_collections_delta_index_path(cfg)),
+    authoritative_n = length(auth_link_keys),
+    cached_main_n = length(main_link_keys),
+    cached_delta_n = length(delta_link_keys),
+    cached_merged_n = length(merged_link_keys),
+    main_missing_n = length(setdiff(auth_link_keys, main_link_keys)),
+    main_extra_n = length(setdiff(main_link_keys, auth_link_keys)),
+    merged_missing_n = length(setdiff(auth_link_keys, merged_link_keys)),
+    merged_extra_n = length(setdiff(merged_link_keys, auth_link_keys))
+  )
+
+  list(
+    collection_reference_cache = data.table::rbindlist(collection_rows, fill = TRUE),
+    project_reference_cache = data.table::rbindlist(list(project_refs, project_links), fill = TRUE)
+  )
+}
+
+.litxr_audit_entity_status_state <- function(cfg) {
+  .litxr_entity_index_maybe_refresh(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg)
+  refs <- .litxr_read_project_references_index(cfg)
+  expected <- .litxr_entity_status_rows_for_entities(
+    cfg,
+    entity_ids = if (nrow(aliases)) unique(as.character(aliases$entity_id)) else character(),
+    aliases = aliases,
+    refs = refs
+  )
+  actual <- .litxr_read_project_entity_status_index(cfg)
+
+  expected_ids <- if (nrow(expected)) unique(as.character(expected$entity_id)) else character()
+  actual_ids <- if (nrow(actual)) unique(as.character(actual$entity_id)) else character()
+
+  missing <- if (length(setdiff(expected_ids, actual_ids))) {
+    expected[expected$entity_id %in% setdiff(expected_ids, actual_ids), ]
+  } else {
+    .litxr_entity_status_empty()
+  }
+  orphan <- if (length(setdiff(actual_ids, expected_ids))) {
+    actual[actual$entity_id %in% setdiff(actual_ids, expected_ids), ]
+  } else {
+    .litxr_entity_status_empty()
+  }
+
+  compare_cols <- c(
+    "has_ref_json",
+    "has_fulltxt_md",
+    "has_llm_digest",
+    "has_standardized_findings",
+    "has_descriptive_stats",
+    "has_anchor_references",
+    "has_citation_logic_nodes",
+    "digest_schema_version",
+    "digest_revision_latest"
+  )
+
+  stale <- if (nrow(expected) && nrow(actual)) {
+    merged <- merge(
+      expected,
+      actual,
+      by = "entity_id",
+      all = FALSE,
+      suffixes = c(".expected", ".actual"),
+      sort = FALSE
+    )
+    if (!nrow(merged)) {
+      data.table::data.table()
+    } else {
+      stale_flags <- vapply(seq_len(nrow(merged)), function(i) {
+        any(vapply(compare_cols, function(nm) {
+          left <- merged[[paste0(nm, ".expected")]][[i]]
+          right <- merged[[paste0(nm, ".actual")]][[i]]
+          if (is.na(left) && is.na(right)) return(FALSE)
+          !identical(left, right)
+        }, logical(1)))
+      }, logical(1))
+      merged[stale_flags, ]
+    }
+  } else {
+    data.table::data.table()
+  }
+
+  digest_mismatch <- if (nrow(stale)) {
+    keep <- vapply(seq_len(nrow(stale)), function(i) {
+      schema_diff <- {
+        left <- stale$digest_schema_version.expected[[i]]
+        right <- stale$digest_schema_version.actual[[i]]
+        if (is.na(left) && is.na(right)) FALSE else !identical(left, right)
+      }
+      revision_diff <- {
+        left <- stale$digest_revision_latest.expected[[i]]
+        right <- stale$digest_revision_latest.actual[[i]]
+        if (is.na(left) && is.na(right)) FALSE else !identical(left, right)
+      }
+      isTRUE(schema_diff) || isTRUE(revision_diff)
+    }, logical(1))
+    stale[keep, ]
+  } else {
+    data.table::data.table()
+  }
+
+  list(
+    missing_entity_status = missing,
+    orphan_entity_status = orphan,
+    stale_entity_status = stale,
+    digest_revision_mismatch = digest_mismatch
+  )
 }
 
 .litxr_row_to_storage_payload <- function(row, journal) {

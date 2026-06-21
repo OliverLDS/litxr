@@ -163,6 +163,9 @@ link_result <- litxr::litxr_enrich_arxiv_with_doi(
 )
 stopifnot(identical(link_result$arxiv_ref_id, "arxiv:2501.00001"))
 stopifnot(identical(link_result$doi_ref_id, "doi:10.1000/published-example"))
+stopifnot(!is.na(link_result$entity_id))
+stopifnot(identical(link_result$primary_ref_id, "arxiv:2501.00001"))
+stopifnot(identical(link_result$preferred_citation_ref_id, "doi:10.1000/published-example"))
 
 linked_arxiv <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg_export)
 stopifnot(identical(as.character(linked_arxiv$doi[[1]]), "10.1000/published-example"))
@@ -725,6 +728,12 @@ stopifnot(!file.exists(index_path))
 rebuilt_path <- litxr::litxr_rebuild_journal_index(journal$journal_id, cfg_export)
 stopifnot(file.exists(rebuilt_path))
 
+writeLines("broken", index_path)
+corrupt_lookup <- litxr:::.litxr_read_journal_records_by_keys(local_path, "doi:10.1000/example")
+stopifnot(nrow(corrupt_lookup) == 1L)
+stopifnot(identical(corrupt_lookup$ref_id[[1]], "doi:10.1000/example"))
+stopifnot(file.exists(index_path))
+
 new_record <- data.table::copy(record)
 new_record$ref_id[[1]] <- "doi:10.1000/newer"
 new_record$source_id[[1]] <- "10.1000/newer"
@@ -789,6 +798,18 @@ bib_keys <- paste(readLines(out_keys, warn = FALSE), collapse = "\n")
 stopifnot(grepl("@article\\{example,", bib_keys))
 stopifnot(grepl("doi = \\{10.1000/example\\}", bib_keys))
 stopifnot(grepl("arxiv:missing-id", warn_msg, fixed = TRUE))
+
+out_arxiv_preferred <- file.path(td_export, "references_arxiv_preferred.bib")
+litxr::litxr_export_bib(
+  out_arxiv_preferred,
+  keys = "arxiv:2501.00001",
+  config = cfg_export
+)
+stopifnot(file.exists(out_arxiv_preferred))
+bib_arxiv_preferred <- paste(readLines(out_arxiv_preferred, warn = FALSE), collapse = "\n")
+stopifnot(grepl("Published Example Paper", bib_arxiv_preferred, fixed = TRUE))
+stopifnot(grepl("doi = \\{10.1000/published-example\\}", bib_arxiv_preferred))
+stopifnot(!grepl("https://arxiv.org", bib_arxiv_preferred, fixed = TRUE))
 
 existing <- data.table::copy(record)
 existing[["title"]] <- "Old Title"
@@ -867,6 +888,19 @@ stopifnot(file.exists(attr(cfg_registered, "config_path", exact = TRUE)))
 
 cfg_reloaded <- litxr::litxr_read_config(attr(cfg_registered, "config_path", exact = TRUE))
 stopifnot(any(vapply(cfg_reloaded$collections, `[[`, character(1), "collection_id") == new_journal$collection_id))
+
+assigned <- litxr:::.litxr_assign_crossref_journals(
+  cfg_export,
+  data.table::rbindlist(list(litxr::parse_crossref_entry_unified(new_cr_message)), fill = TRUE),
+  list(new_cr_message),
+  auto_register = TRUE
+)
+stopifnot(identical(as.character(assigned$records$collection_id[[1]]), new_journal$collection_id))
+stopifnot(identical(as.character(assigned$records$collection_title[[1]]), new_journal$title))
+stopifnot(identical(
+  litxr:::.litxr_get_journal(assigned$cfg, as.character(assigned$records$collection_id[[1]]))$collection_id,
+  new_journal$collection_id
+))
 
 manual_refs <- data.table::data.table(
   source = "book",
@@ -957,6 +991,55 @@ stopifnot(nrow(candidate_one) == 1L)
 stopifnot(isTRUE(candidate_one$eligible[[1]]) == FALSE)
 stopifnot(identical(candidate_one$reason[[1]], "digest_exists"))
 
+entity_build <- litxr::litxr_build_entity_indexes(cfg_manual)
+stopifnot(file.exists(entity_build$ref_aliases_path))
+stopifnot(file.exists(entity_build$entities_path))
+stopifnot(file.exists(entity_build$entity_collections_path))
+stopifnot(file.exists(entity_build$entity_status_path))
+
+alias_index <- litxr::litxr_read_ref_aliases(cfg_manual)
+stopifnot(any(alias_index$ref_id == "arxiv:2501.00001"))
+stopifnot(any(alias_index$ref_id == "doi:10.1000/published-example"))
+
+arxiv_entity_id <- alias_index$entity_id[alias_index$ref_id == "arxiv:2501.00001"][[1]]
+doi_entity_id <- alias_index$entity_id[alias_index$ref_id == "doi:10.1000/published-example"][[1]]
+stopifnot(identical(arxiv_entity_id, doi_entity_id))
+
+entities_index <- litxr::litxr_read_entities(cfg_manual)
+linked_entity <- entities_index[entities_index$entity_id == arxiv_entity_id, ]
+stopifnot(nrow(linked_entity) == 1L)
+stopifnot(identical(linked_entity$primary_ref_id[[1]], "arxiv:2501.00001"))
+stopifnot(identical(linked_entity$preferred_citation_ref_id[[1]], "doi:10.1000/published-example"))
+
+entity_collections <- litxr::litxr_read_entity_collections(cfg_manual)
+stopifnot(any(entity_collections$entity_id == arxiv_entity_id & entity_collections$collection_id == journal$journal_id))
+stopifnot(any(entity_collections$entity_id == arxiv_entity_id & entity_collections$collection_id == arxiv_collection$collection_id))
+
+entity_status <- litxr::litxr_read_entity_status(cfg_manual)
+manual_alias_index <- alias_index[alias_index$ref_id == "isbn:9780262046305", ]
+manual_entity_status <- entity_status[entity_status$entity_id == manual_alias_index$entity_id[[1]], ]
+stopifnot(nrow(manual_entity_status) == 1L)
+stopifnot(isTRUE(manual_entity_status$has_fulltxt_md[[1]]))
+stopifnot(isTRUE(manual_entity_status$has_llm_digest[[1]]))
+stopifnot(!is.na(manual_entity_status$digest_schema_version[[1]]))
+entity_status_audit_ok <- litxr::litxr_audit_entity_status_state(cfg_manual)
+stopifnot(is.list(entity_status_audit_ok))
+stopifnot(all(c("missing_entity_status", "orphan_entity_status", "stale_entity_status", "digest_revision_mismatch") %in% names(entity_status_audit_ok)))
+stopifnot(identical(nrow(entity_status_audit_ok$missing_entity_status), 0L))
+stopifnot(identical(nrow(entity_status_audit_ok$orphan_entity_status), 0L))
+stopifnot(identical(nrow(entity_status_audit_ok$stale_entity_status), 0L))
+stopifnot(identical(nrow(entity_status_audit_ok$digest_revision_mismatch), 0L))
+
+orphan_md_path <- file.path(litxr:::.litxr_project_md_dir(cfg_manual), "orphan_alias.md")
+writeLines("orphan", orphan_md_path)
+entity_audit <- litxr::litxr_audit_entity_indexes(cfg_manual, oversized_mb = 0.0001)
+stopifnot(is.list(entity_audit))
+stopifnot(all(c("alias_splits", "ambiguous_alias_joins", "orphan_artifacts", "index_health") %in% names(entity_audit)))
+stopifnot(any(entity_audit$alias_splits$entity_id == arxiv_entity_id))
+stopifnot(any(entity_audit$orphan_artifacts$path == orphan_md_path))
+stopifnot(any(entity_audit$index_health$index_name == "ref_aliases"))
+stopifnot(any(entity_audit$index_health$status %in% c("ok", "oversized")))
+
 manual_refs2 <- data.table::data.table(
   source = "report",
   entry_type = "techreport",
@@ -971,12 +1054,65 @@ litxr::litxr_add_refs(
   config = cfg_manual,
   auto_register = FALSE
 )
+manual_local_path <- litxr:::.litxr_resolve_local_path(cfg_manual, litxr:::.litxr_get_journal(cfg_manual, "manual_books")$local_path)
+manual_delta_path <- file.path(manual_local_path, "index", "references_delta.fst")
+stopifnot(file.exists(manual_delta_path))
+manual_index_after_add <- litxr:::.litxr_read_journal_index(manual_local_path)
+stopifnot(nrow(manual_index_after_add) == 1L)
+manual_collection_after_add <- litxr::litxr_read_collection("manual_books", cfg_manual)
+stopifnot(nrow(manual_collection_after_add) == 2L)
+project_refs_main_after_add <- litxr:::.litxr_read_project_references_main_index(cfg_manual)
+project_refs_merged_after_add <- litxr::litxr_read_references(cfg_manual)
+project_refs_delta_path <- file.path(litxr:::.litxr_project_root(cfg_manual), "index", "references_delta.fst")
+stopifnot(file.exists(project_refs_delta_path))
+stopifnot(!any(project_refs_main_after_add$title == "Manual Report"))
+stopifnot(any(project_refs_merged_after_add$title == "Manual Report"))
+cache_audit <- litxr::litxr_audit_reference_cache_state(cfg_manual)
+stopifnot(is.list(cache_audit))
+stopifnot(all(c("collection_reference_cache", "project_reference_cache") %in% names(cache_audit)))
+manual_cache_row <- cache_audit$collection_reference_cache[
+  cache_audit$collection_reference_cache$scope_id == "manual_books",
+]
+stopifnot(nrow(manual_cache_row) >= 1L)
+stopifnot(manual_cache_row$main_missing_n[[1]] >= 1L)
+stopifnot(identical(manual_cache_row$merged_missing_n[[1]], 0L))
+project_cache_row <- cache_audit$project_reference_cache[
+  cache_audit$project_reference_cache$scope == "project_references",
+]
+stopifnot(nrow(project_cache_row) >= 1L)
+stopifnot(project_cache_row$main_missing_n[[1]] >= 1L)
+stopifnot(identical(project_cache_row$merged_missing_n[[1]], 0L))
 candidates_after_report <- litxr::litxr_list_enrichment_candidates(config = cfg_manual, collection_id = "manual_books")
 report_row <- candidates_after_report[candidates_after_report$title == "Manual Report", ]
 stopifnot(nrow(report_row) == 1L)
 stopifnot(isFALSE(report_row$has_md[[1]]))
 stopifnot(isFALSE(report_row$eligible[[1]]))
 stopifnot(identical(report_row$reason[[1]], "missing_md"))
+manual_report_alias <- litxr::litxr_read_ref_aliases(cfg_manual)
+manual_report_entity_id <- manual_report_alias$entity_id[manual_report_alias$ref_id == "url:https://example.org/manual-report"][[1]]
+manual_entity_status_now <- litxr::litxr_read_entity_status(cfg_manual)
+manual_report_status <- manual_entity_status_now[manual_entity_status_now$entity_id == manual_report_entity_id, ]
+stopifnot(nrow(manual_report_status) == 1L)
+stopifnot(isFALSE(manual_report_status$has_fulltxt_md[[1]]))
+stopifnot(isFALSE(manual_report_status$has_llm_digest[[1]]))
+status_path <- litxr:::.litxr_project_entity_status_index_path(cfg_manual)
+stale_status <- data.table::copy(manual_entity_status_now)
+stale_hit <- match(manual_report_entity_id, stale_status$entity_id)
+stopifnot(!is.na(stale_hit))
+stale_status$has_fulltxt_md[[stale_hit]] <- TRUE
+stale_status$digest_revision_latest[[stale_hit]] <- 99L
+fst::write_fst(as.data.frame(stale_status), status_path)
+entity_status_audit_bad <- litxr::litxr_audit_entity_status_state(cfg_manual)
+stopifnot(any(entity_status_audit_bad$stale_entity_status$entity_id == manual_report_entity_id))
+stopifnot(any(entity_status_audit_bad$digest_revision_mismatch$entity_id == manual_report_entity_id))
+candidates_stale <- litxr::litxr_list_enrichment_candidates(config = cfg_manual, collection_id = "manual_books")
+stale_report_row <- candidates_stale[candidates_stale$title == "Manual Report", ]
+stopifnot(nrow(stale_report_row) == 1L)
+stopifnot(isTRUE(stale_report_row$has_md[[1]]))
+litxr:::.litxr_update_entity_status_entities(cfg_manual, manual_report_entity_id)
+entity_status_audit_fixed <- litxr::litxr_audit_entity_status_state(cfg_manual)
+stopifnot(!any(entity_status_audit_fixed$stale_entity_status$entity_id == manual_report_entity_id))
+stopifnot(!any(entity_status_audit_fixed$digest_revision_mismatch$entity_id == manual_report_entity_id))
 
 builder_fun <- function(ref, markdown, template) {
   list(

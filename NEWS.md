@@ -1,3 +1,16 @@
+# litxr 0.0.8.15
+
+- Added the first thin entity-index layer for the v0.1.0 refactor, including
+  machine-readable alias, entity, entity-collection, and entity-status stores
+  plus audit helpers for cache health and entity-status freshness.
+- Moved canonical reference resolution and BibTeX export policy onto the new
+  entity alias layer so linked arXiv and DOI aliases now resolve to one
+  preferred citation row.
+- Updated DOI/arXiv linking and prompt-building logic to use entity-aware
+  resolution, including better linked-arXiv source hints for digest prompts.
+- Moved the human BibTeX-adjacent report scripts and `get_ref_summary.sh` onto
+  the shared entity resolver and removed obsolete row-selection fallback code.
+
 # litxr 0.0.8.14
 
 - Added machine-readable LLM schema release metadata via

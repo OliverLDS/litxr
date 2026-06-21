@@ -1921,6 +1921,7 @@ litxr_write_standardized_findings <- function(findings, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_standardized_findings)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "finding_id"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
+  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2014,6 +2015,7 @@ litxr_compact_standardized_findings <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
+  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2088,6 +2090,7 @@ litxr_write_descriptive_stats <- function(stats, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_descriptive_stats)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "table_id", "variable"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
+  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2173,6 +2176,7 @@ litxr_compact_descriptive_stats <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
+  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2274,6 +2278,7 @@ litxr_write_anchor_references <- function(anchors, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_anchor_references)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "anchor_rank"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
+  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2358,6 +2363,7 @@ litxr_compact_anchor_references <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
+  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2446,6 +2452,7 @@ litxr_write_citation_logic_nodes <- function(nodes, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_citation_logic_nodes)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "node_id"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
+  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2533,6 +2540,7 @@ litxr_compact_citation_logic_nodes <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
+  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2564,6 +2572,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
+  .litxr_entity_index_maybe_refresh(cfg)
   refs <- litxr_read_references(cfg)
   if (!nrow(refs)) {
     return(data.table::data.table(
@@ -2586,59 +2595,112 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     ))
   }
 
-  links <- litxr_read_reference_collections(cfg)
-  status <- litxr_read_enrichment_status(cfg)
+  aliases <- litxr_read_ref_aliases(cfg)
+  entity_status <- litxr_read_entity_status(cfg)
+  entity_links <- litxr_read_entity_collections(cfg)
   digests <- litxr_read_llm_digests(cfg)
   findings <- litxr_read_standardized_findings(cfg)
   desc_stats <- litxr_read_descriptive_stats(cfg)
   anchors <- litxr_read_anchor_references(cfg)
   logic_nodes <- litxr_read_citation_logic_nodes(cfg)
 
-  collection_map <- if (nrow(links)) {
-    split_ids <- split(as.character(links$collection_id), as.character(links$ref_id))
+  alias_map <- if (nrow(aliases)) {
     data.table::data.table(
-      ref_id = names(split_ids),
+      ref_id = as.character(aliases$ref_id),
+      entity_id = as.character(aliases$entity_id)
+    )
+  } else {
+    data.table::data.table(ref_id = character(), entity_id = character())
+  }
+
+  collection_map <- if (nrow(entity_links)) {
+    split_ids <- split(as.character(entity_links$collection_id), as.character(entity_links$entity_id))
+    data.table::data.table(
+      entity_id = names(split_ids),
       collection_ids = vapply(split_ids, function(x) paste(sort(unique(x)), collapse = ","), character(1))
     )
   } else {
-    data.table::data.table(ref_id = character(), collection_ids = character())
+    data.table::data.table(entity_id = character(), collection_ids = character())
   }
 
-  finding_counts <- if (nrow(findings)) {
-    counts <- table(as.character(findings$ref_id))
-    data.table::data.table(
-      ref_id = names(counts),
-      n_standardized_findings = as.integer(counts)
+  entity_count <- function(dt, value_name) {
+    if (!nrow(dt) || !("ref_id" %in% names(dt)) || !nrow(alias_map)) {
+      out <- data.table::data.table(entity_id = character(), value = integer())
+      data.table::setnames(out, "value", value_name)
+      return(out)
+    }
+    merged <- merge(
+      data.table::data.table(ref_id = as.character(dt$ref_id)),
+      alias_map,
+      by = "ref_id",
+      all.x = FALSE,
+      all.y = FALSE,
+      sort = FALSE
     )
-  } else {
-    data.table::data.table(ref_id = character(), n_standardized_findings = integer())
+    if (!nrow(merged)) {
+      out <- data.table::data.table(entity_id = character(), value = integer())
+      data.table::setnames(out, "value", value_name)
+      return(out)
+    }
+    counts <- table(as.character(merged$entity_id))
+    out <- data.table::data.table(
+      entity_id = names(counts),
+      value = as.integer(counts)
+    )
+    data.table::setnames(out, "value", value_name)
+    out
   }
-  desc_counts <- if (nrow(desc_stats)) {
-    counts <- table(as.character(desc_stats$ref_id))
-    data.table::data.table(
-      ref_id = names(counts),
-      n_descriptive_stats = as.integer(counts)
+
+  finding_counts <- entity_count(findings, "n_standardized_findings")
+  desc_counts <- entity_count(desc_stats, "n_descriptive_stats")
+  anchor_counts <- entity_count(anchors, "n_anchor_references")
+  logic_counts <- entity_count(logic_nodes, "n_citation_logic_nodes")
+
+  digest_meta <- if (nrow(digests) && nrow(alias_map)) {
+    merged <- merge(
+      data.table::data.table(
+        ref_id = as.character(digests$ref_id),
+        schema_version = as.character(digests$schema_version),
+        paper_type = as.character(digests$paper_type),
+        digest_revision = suppressWarnings(as.integer(digests$digest_revision)),
+        updated_at = if ("updated_at" %in% names(digests)) as.character(digests$updated_at) else NA_character_
+      ),
+      alias_map,
+      by = "ref_id",
+      all.x = FALSE,
+      all.y = FALSE,
+      sort = FALSE
     )
+    if (!nrow(merged)) {
+      data.table::data.table(
+        entity_id = character(),
+        llm_schema_version = character(),
+        llm_paper_type = character()
+      )
+    } else {
+      split_rows <- split(seq_len(nrow(merged)), merged$entity_id)
+      data.table::rbindlist(lapply(names(split_rows), function(entity_id) {
+        idx <- split_rows[[entity_id]]
+        rows <- merged[idx, , drop = FALSE]
+        revisions <- rows$digest_revision
+        latest_idx <- if (length(revisions) && any(!is.na(revisions))) {
+          order(revisions, decreasing = TRUE)[[1]]
+        } else {
+          order(rows$updated_at, decreasing = TRUE)[[1]]
+        }
+        data.table::data.table(
+          entity_id = entity_id,
+          llm_schema_version = as.character(rows$schema_version[[latest_idx]] %||% NA_character_),
+          llm_paper_type = as.character(rows$paper_type[[latest_idx]] %||% NA_character_)
+        )
+      }), fill = TRUE)
+    }
   } else {
-    data.table::data.table(ref_id = character(), n_descriptive_stats = integer())
-  }
-  anchor_counts <- if (nrow(anchors)) {
-    counts <- table(as.character(anchors$ref_id))
     data.table::data.table(
-      ref_id = names(counts),
-      n_anchor_references = as.integer(counts)
+      entity_id = character(),
+      llm_schema_version = character(),
+      llm_paper_type = character()
     )
-  } else {
-    data.table::data.table(ref_id = character(), n_anchor_references = integer())
-  }
-  logic_counts <- if (nrow(logic_nodes)) {
-    counts <- table(as.character(logic_nodes$ref_id))
-    data.table::data.table(
-      ref_id = names(counts),
-      n_citation_logic_nodes = as.integer(counts)
-    )
-  } else {
-    data.table::data.table(ref_id = character(), n_citation_logic_nodes = integer())
   }
 
   out <- data.table::data.table(
@@ -2646,37 +2708,36 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     title = if ("title" %in% names(refs)) as.character(refs$title) else NA_character_,
     entry_type = if ("entry_type" %in% names(refs)) as.character(refs$entry_type) else NA_character_
   )
-  out <- merge(out, collection_map, by = "ref_id", all.x = TRUE)
-  out <- merge(
-    out,
-    data.table::data.table(
-      ref_id = as.character(status$ref_id),
-      has_md = as.logical(status$has_md),
-      has_llm_digest = as.logical(status$has_llm_digest)
-    ),
-    by = "ref_id",
-    all.x = TRUE
-  )
-  if (nrow(digests)) {
+  out <- merge(out, alias_map, by = "ref_id", all.x = TRUE, sort = FALSE)
+  out <- merge(out, collection_map, by = "entity_id", all.x = TRUE, sort = FALSE)
+  if (nrow(entity_status)) {
     out <- merge(
       out,
       data.table::data.table(
-        ref_id = as.character(digests$ref_id),
-        llm_schema_version = as.character(digests$schema_version),
-        llm_paper_type = as.character(digests$paper_type)
+        entity_id = as.character(entity_status$entity_id),
+        has_md = as.logical(entity_status$has_fulltxt_md),
+        has_llm_digest = as.logical(entity_status$has_llm_digest)
       ),
-      by = "ref_id",
-      all.x = TRUE
+      by = "entity_id",
+      all.x = TRUE,
+      sort = FALSE
     )
   } else {
-    out$llm_schema_version <- NA_character_
-    out$llm_paper_type <- NA_character_
+    out$has_md <- FALSE
+    out$has_llm_digest <- FALSE
   }
-  out <- merge(out, finding_counts, by = "ref_id", all.x = TRUE)
-  out <- merge(out, desc_counts, by = "ref_id", all.x = TRUE)
-  out <- merge(out, anchor_counts, by = "ref_id", all.x = TRUE)
-  out <- merge(out, logic_counts, by = "ref_id", all.x = TRUE)
+  out <- merge(out, digest_meta, by = "entity_id", all.x = TRUE, sort = FALSE)
+  out <- merge(out, finding_counts, by = "entity_id", all.x = TRUE, sort = FALSE)
+  out <- merge(out, desc_counts, by = "entity_id", all.x = TRUE, sort = FALSE)
+  out <- merge(out, anchor_counts, by = "entity_id", all.x = TRUE, sort = FALSE)
+  out <- merge(out, logic_counts, by = "entity_id", all.x = TRUE, sort = FALSE)
 
+  if (!("llm_schema_version" %in% names(out))) out$llm_schema_version <- rep(NA_character_, nrow(out))
+  if (!("llm_paper_type" %in% names(out))) out$llm_paper_type <- rep(NA_character_, nrow(out))
+  if (!("n_standardized_findings" %in% names(out))) out$n_standardized_findings <- rep(0L, nrow(out))
+  if (!("n_descriptive_stats" %in% names(out))) out$n_descriptive_stats <- rep(0L, nrow(out))
+  if (!("n_anchor_references" %in% names(out))) out$n_anchor_references <- rep(0L, nrow(out))
+  if (!("n_citation_logic_nodes" %in% names(out))) out$n_citation_logic_nodes <- rep(0L, nrow(out))
   out$collection_ids[is.na(out$collection_ids)] <- ""
   out$has_md[is.na(out$has_md)] <- FALSE
   out$has_llm_digest[is.na(out$has_llm_digest)] <- FALSE
@@ -2697,6 +2758,9 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     out <- out[out$ref_id %in% as.character(ref_ids), ]
   }
 
+  if ("entity_id" %in% names(out)) {
+    out$entity_id <- NULL
+  }
   out[, c(
     "ref_id", "title", "entry_type", "collection_ids",
     "has_md", "has_llm_digest", "llm_schema_version", "llm_paper_type",

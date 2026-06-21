@@ -209,28 +209,6 @@ collapse_ws <- function(x) {
   paste(strsplit(trimws(x), "\\s+")[[1L]], collapse = " ")
 }
 
-pick_preferred_row <- function(rows, doi = NA_character_) {
-  if (!nrow(rows)) {
-    return(rows)
-  }
-
-  if ("source" %in% names(rows)) {
-    non_arxiv <- rows[rows$source != "arxiv", ]
-    if (nrow(non_arxiv)) {
-      rows <- non_arxiv
-    }
-  }
-
-  if (!is.na(doi) && nzchar(doi) && "doi" %in% names(rows)) {
-    exact <- rows[rows$doi == doi, ]
-    if (nrow(exact)) {
-      rows <- exact
-    }
-  }
-
-  rows[1L, ]
-}
-
 resolve_reference <- function(entry_lines, bib_key, cfg) {
   doi <- extract_bib_field(entry_lines, "doi")
   doi <- normalize_lookup_value(doi)
@@ -239,30 +217,15 @@ resolve_reference <- function(entry_lines, bib_key, cfg) {
     if (!is.na(doi) && nzchar(doi)) lookup_candidates(doi) else character()
   ))
 
-  for (candidate in key_candidates) {
-    rows <- data.table::as.data.table(litxr::litxr_find_refs(ref_id = candidate, config = cfg))
-    if (nrow(rows)) {
-      rows <- pick_preferred_row(rows, doi = doi)
-      return(list(
-        resolved = TRUE,
-        ref = rows,
-        matched_by = candidate,
-        bib_doi = doi
-      ))
-    }
-  }
-
-  if (!is.na(doi) && nzchar(doi)) {
-    rows <- data.table::as.data.table(litxr::litxr_find_refs(doi = doi, config = cfg))
-    if (nrow(rows)) {
-      rows <- pick_preferred_row(rows, doi = doi)
-      return(list(
-        resolved = TRUE,
-        ref = rows,
-        matched_by = paste0("doi:", doi),
-        bib_doi = doi
-      ))
-    }
+  rows <- data.table::as.data.table(litxr:::.litxr_preferred_rows_for_keys(cfg, key_candidates))
+  if (nrow(rows)) {
+    matched_by <- if (length(key_candidates)) key_candidates[[1L]] else NA_character_
+    return(list(
+      resolved = TRUE,
+      ref = rows[1L, ],
+      matched_by = matched_by,
+      bib_doi = doi
+    ))
   }
 
   list(
@@ -280,12 +243,23 @@ read_digests_by_ref_ids <- function(ref_ids, cfg) {
     return(list())
   }
 
-  digests <- litxr::litxr_read_llm_digests(cfg, ref_ids = ref_ids)
+  digest_ref_ids <- unique(vapply(ref_ids, function(x) {
+    out <- litxr:::.litxr_entity_best_digest_ref_id(cfg, x)
+    if (is.na(out) || !nzchar(out)) x else out
+  }, character(1)))
+  digests <- litxr::litxr_read_llm_digests(cfg, ref_ids = digest_ref_ids)
   if (!nrow(digests)) {
     return(list())
   }
 
-  split(digests, digests$ref_id)
+  out <- list()
+  for (ref_id in ref_ids) {
+    digest_ref_id <- litxr:::.litxr_entity_best_digest_ref_id(cfg, ref_id)
+    if (is.na(digest_ref_id) || !nzchar(digest_ref_id)) next
+    hit <- digests[digests$ref_id == digest_ref_id, ]
+    if (nrow(hit)) out[[ref_id]] <- hit
+  }
+  out
 }
 
 scalar_methods <- function(x) {

@@ -171,6 +171,7 @@ prompt_ref <- data.table::data.table(
   source_id = "2501.00001",
   title = "Prompt Builder Test Paper",
   abstract = "Prompt builder abstract.",
+  linked_doi_ref_id = "doi:10.1000/prompt-doi",
   doi = NA_character_,
   year = 2025L
 )

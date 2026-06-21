@@ -93,7 +93,7 @@
   paste(lines, collapse = "\n")
 }
 
-.litxr_llm_digest_prompt_source_hint <- function(ref_id, ref = NULL) {
+.litxr_llm_digest_prompt_source_hint <- function(ref_id, ref = NULL, cfg = NULL) {
   doi <- if (!is.null(ref) && "doi" %in% names(ref)) .litxr_prompt_scalar(ref$doi) else NA_character_
   linked_arxiv_ref_id <- if (!is.null(ref) && "linked_arxiv_ref_id" %in% names(ref)) .litxr_prompt_scalar(ref$linked_arxiv_ref_id) else NA_character_
 
@@ -105,6 +105,24 @@
       sprintf("- PDF full text: https://arxiv.org/pdf/%s", arxiv_id),
       "Use these direct links first before exploring other resources."
     ), collapse = "\n"))
+  }
+
+  if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
+    if (!is.null(cfg)) {
+      linked_arxiv_ref_id <- .litxr_entity_best_arxiv_ref_id(cfg, ref_id)
+      if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
+        refs <- tryCatch(.litxr_read_project_references_index(cfg), error = function(e) data.table::data.table())
+        if (nrow(refs) && "linked_doi_ref_id" %in% names(refs)) {
+          fallback <- refs[grepl("^arxiv:", refs$ref_id) & as.character(refs$linked_doi_ref_id) == ref_id, ]
+          if (!nrow(fallback) && "doi" %in% names(refs) && !is.na(doi) && nzchar(doi)) {
+            fallback <- refs[grepl("^arxiv:", refs$ref_id) & as.character(refs$doi) == doi, ]
+          }
+          if (nrow(fallback)) {
+            linked_arxiv_ref_id <- .litxr_prompt_scalar(fallback$ref_id)
+          }
+        }
+      }
+    }
   }
 
   if (!is.na(linked_arxiv_ref_id) && nzchar(linked_arxiv_ref_id)) {
@@ -215,7 +233,7 @@ litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "r
 
   values <- list(
     paper_metadata = .litxr_llm_digest_prompt_metadata(ref_id, ref),
-    source_lookup_hint = .litxr_llm_digest_prompt_source_hint(ref_id, ref),
+    source_lookup_hint = .litxr_llm_digest_prompt_source_hint(ref_id, ref, cfg = cfg),
     paper_type_vocab = paste(litxr_paper_type_levels(), collapse = ", "),
     citation_logic_type_vocab = paste(paste0("- ", .litxr_citation_logic_type_levels()), collapse = "\n"),
     mode = mode,

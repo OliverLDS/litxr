@@ -87,7 +87,7 @@ usage <- function() {
       "",
       "Notes:",
       "  - All supplied ref_id values must already exist in the local litxr reference cache.",
-      "  - Validation uses exact ref_id lookup only and stops if any requested ref_id is missing.",
+      "  - Resolution uses the entity alias layer and stops if any requested ref_id cannot be resolved.",
       "  - Duplicate detection in the target .bib file is based on the BibTeX citekey generated",
       "    from each reference row.",
       "  - Progress logs are written to stderr; compact JSON is written to stdout.",
@@ -164,20 +164,12 @@ find_rows_by_ref_ids <- function(ref_ids, cfg) {
   resolved_rows <- list()
 
   for (ref in ref_ids) {
-    rows <- as.data.table(litxr::litxr_find_refs(ref_id = ref, config = cfg))
+    rows <- as.data.table(litxr:::.litxr_preferred_rows_for_keys(cfg, ref))
     if (!nrow(rows)) {
       missing <- c(missing, ref)
       next
     }
-
-    rows[, source_id_chr__ := if ("source_id" %in% names(rows)) as.character(source_id) else NA_character_]
-    expanded <- unique(as.character(litxr:::.litxr_expand_reference_keys(ref)))
-    hit <- which(rows$ref_id %in% expanded | rows$source_id_chr__ %in% expanded)
-    if (!length(hit)) {
-      missing <- c(missing, ref)
-      next
-    }
-    resolved_rows[[length(resolved_rows) + 1L]] <- rows[hit[[1]], ]
+    resolved_rows[[length(resolved_rows) + 1L]] <- rows[1L, ]
   }
 
   if (length(missing)) {
@@ -189,58 +181,7 @@ find_rows_by_ref_ids <- function(ref_ids, cfg) {
   }
 
   rows <- data.table::rbindlist(resolved_rows, fill = TRUE)
-  rows[, source_id_chr__ := NULL]
-  rows <- prefer_published_rows(rows, cfg)
   rows
-}
-
-has_value <- function(x) {
-  !is.null(x) && length(x) == 1L && !is.na(x) && nzchar(as.character(x))
-}
-
-published_metadata_score <- function(row) {
-  fields <- c("journal", "container_title", "publisher", "volume", "issue", "pages")
-  sum(vapply(fields, function(name) has_value(row[[name]]), logical(1)))
-}
-
-prefer_published_rows <- function(rows, cfg) {
-  if (!nrow(rows) || !"source" %in% names(rows) || !"doi" %in% names(rows)) {
-    rows[, prefer_doi_key__ := TRUE]
-    return(rows)
-  }
-
-  replace_row <- function(row) {
-    doi_value <- as.character(row[["doi"]])
-    if (!identical(as.character(row[["source"]]), "arxiv") || is.na(doi_value) || !nzchar(doi_value)) {
-      row[["prefer_doi_key__"]] <- TRUE
-      return(row)
-    }
-
-    published <- as.data.table(litxr::litxr_find_refs(ref_id = paste0("doi:", doi_value), config = cfg))
-    if (!nrow(published)) {
-      published <- as.data.table(litxr::litxr_find_refs(doi = doi_value, config = cfg))
-      if (nrow(published) && "source" %in% names(published)) {
-        published <- published[published$source != "arxiv", ]
-      }
-    }
-    if (!nrow(published)) {
-      row[["prefer_doi_key__"]] <- FALSE
-      return(row)
-    }
-
-    scores <- vapply(seq_len(nrow(published)), function(i) published_metadata_score(published[i, ]), integer(1))
-    published <- published[order(-scores)]
-    best <- published[1, ]
-    if (published_metadata_score(best) <= 0L) {
-      row[["prefer_doi_key__"]] <- FALSE
-      return(row)
-    }
-
-    best[["prefer_doi_key__"]] <- TRUE
-    best
-  }
-
-  rbindlist(lapply(seq_len(nrow(rows)), function(i) replace_row(rows[i, ])), fill = TRUE, use.names = TRUE)
 }
 
 make_bib_entry <- function(row) {
