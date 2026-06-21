@@ -18,14 +18,17 @@ usage <- function() {
       "  Rscript scripts/refresh_project_index.R --collection-id COLLECTION_ID",
       "",
       "Options:",
-      "  --collection-id ID  Collection whose records should refresh the project index.",
+      "  --collection-id ID  Collection whose project projection should be refreshed.",
       "  --journal-id ID     Compatibility alias for --collection-id.",
       "  -h, --help          Show this help message.",
       "",
       "Behavior:",
-      "  - Reads the current collection fst index for the requested collection.",
-      "  - Refreshes the project-level reference and collection-membership indexes only.",
-      "  - Only loads full collection rows that are newer than the project index.",
+      "  - Rebuilds the project-level reference projection for one collection from",
+      "    authoritative collection state.",
+      "  - Prefers thin collection projection caches when healthy.",
+      "  - Falls back to collection JSON plus delta when a collection cache is",
+      "    missing or damaged.",
+      "  - Clears project reference deltas after writing refreshed main caches.",
       "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
@@ -56,14 +59,13 @@ parse_args <- function(args) {
     if (!name %in% c("collection-id", "journal-id")) {
       stop("Unknown argument: ", key, call. = FALSE)
     }
-
     if (i == length(args)) {
       stop("Missing value for argument: ", key, call. = FALSE)
     }
 
     if (identical(name, "collection-id")) {
       out$collection_id <- args[[i + 1L]]
-    } else if (identical(name, "journal-id")) {
+    } else {
       out$journal_id <- args[[i + 1L]]
     }
     i <- i + 2L
@@ -106,121 +108,15 @@ if (requireNamespace("pkgload", quietly = TRUE)) {
 }
 
 cfg <- litxr::litxr_read_config()
-journal <- litxr:::.litxr_get_journal(cfg, collection_id)
-local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
-collection_index_path <- litxr:::.litxr_index_path(local_path)
-project_index_path <- litxr:::.litxr_project_references_index_path(cfg)
-project_links_path <- litxr:::.litxr_project_reference_collections_index_path(cfg)
+log_line(sprintf("refreshing project projection for collection_id=%s", collection_id))
 
-read_index_columns <- function(path, columns) {
-  if (!file.exists(path)) {
-    return(data.table::data.table())
-  }
-  fst::read_fst(path, columns = columns, as.data.table = TRUE)
-}
+result <- litxr:::.litxr_refresh_project_index_for_collection(cfg, collection_id, repair_collection_index = TRUE)
 
-collection_meta <- read_index_columns(collection_index_path, c("ref_id", "pub_date"))
-if (!nrow(collection_meta)) {
-  stop("No local records were found for collection: ", collection_id, call. = FALSE)
-}
-
-project_meta <- read_index_columns(project_index_path, c("ref_id", "pub_date"))
-project_ref_ids <- if (nrow(project_meta) && "ref_id" %in% names(project_meta)) as.character(project_meta$ref_id) else character()
-project_dates <- if (nrow(project_meta) && "pub_date" %in% names(project_meta)) as.Date(project_meta$pub_date) else as.Date(character())
-project_max_date <- if (length(project_dates[!is.na(project_dates)])) max(project_dates, na.rm = TRUE) else as.Date("1900-01-01")
-
-collection_dates <- if ("pub_date" %in% names(collection_meta)) as.Date(collection_meta$pub_date) else rep(as.Date(NA), nrow(collection_meta))
-needs_refresh <- !collection_meta$ref_id %in% project_ref_ids |
-  (!is.na(collection_dates) & collection_dates > project_max_date)
-candidate_idx <- which(needs_refresh)
-
-log_line(sprintf(
-  "refreshing project index: collection_id=%s collection_rows=%s candidate_rows=%s project_max_date=%s",
-  collection_id,
-  nrow(collection_meta),
-  length(candidate_idx),
-  as.character(project_max_date)
-))
-
-if (!length(candidate_idx)) {
-  emit_json(list(
+emit_json(c(
+  list(
     status = "ok",
-    collection_id = collection_id,
-    collection_rows = nrow(collection_meta),
-    candidate_rows = 0L,
-    project_index_path = project_index_path,
-    project_links_path = project_links_path,
-    project_max_date = as.character(project_max_date),
-    refreshed = FALSE
-  ))
-  quit(save = "no", status = 0L)
-}
-
-candidate_ref_ids <- as.character(collection_meta$ref_id[candidate_idx])
-candidate_ref_ids <- candidate_ref_ids[nzchar(candidate_ref_ids)]
-candidate_ref_ids <- unique(candidate_ref_ids)
-
-if (length(candidate_idx) == nrow(collection_meta)) {
-  candidate_records <- litxr::litxr_read_collection(collection_id, cfg)
-} else {
-  idx_start <- min(candidate_idx)
-  idx_end <- max(candidate_idx)
-  candidate_records <- fst::read_fst(collection_index_path, from = idx_start, to = idx_end, as.data.table = TRUE)
-  if (nrow(candidate_records) && length(candidate_ref_ids)) {
-    candidate_records <- candidate_records[candidate_records$ref_id %in% candidate_ref_ids, ]
-  }
-}
-
-if (!nrow(candidate_records)) {
-  emit_json(list(
-    status = "ok",
-    collection_id = collection_id,
-    collection_rows = nrow(collection_meta),
-    candidate_rows = 0L,
-    project_index_path = project_index_path,
-    project_links_path = project_links_path,
-    project_max_date = as.character(project_max_date),
-    refreshed = FALSE
-  ))
-  quit(save = "no", status = 0L)
-}
-
-incoming_refs <- litxr:::.litxr_project_references_from_collection_records(candidate_records)
-existing_refs <- litxr:::.litxr_read_project_references_index(cfg)
-if (nrow(existing_refs)) {
-  existing_key <- litxr:::.litxr_upsert_key(existing_refs)
-  incoming_key <- litxr:::.litxr_upsert_key(incoming_refs)
-  existing_refs <- existing_refs[!existing_key %in% incoming_key, ]
-}
-merged_refs <- data.table::rbindlist(list(existing_refs, incoming_refs), fill = TRUE)
-merged_refs <- merged_refs[!duplicated(litxr:::.litxr_upsert_key(merged_refs))]
-litxr:::.litxr_write_project_references_index(cfg, merged_refs)
-
-incoming_links <- data.table::data.table(
-  ref_id = candidate_ref_ids,
-  collection_id = collection_id,
-  collection_title = journal$title,
-  recorded_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
-)
-incoming_links <- incoming_links[!duplicated(incoming_links$ref_id)]
-existing_links <- litxr:::.litxr_read_project_reference_collections_index(cfg)
-if (nrow(existing_links)) {
-  keep_old <- !(existing_links$collection_id == collection_id & existing_links$ref_id %in% incoming_links$ref_id)
-  merged_links <- data.table::rbindlist(list(existing_links[keep_old, ], incoming_links), fill = TRUE)
-} else {
-  merged_links <- incoming_links
-}
-link_key <- paste(merged_links$ref_id, merged_links$collection_id, sep = "\r")
-merged_links <- merged_links[!duplicated(link_key)]
-litxr:::.litxr_write_project_reference_collections_index(cfg, merged_links)
-
-emit_json(list(
-  status = "ok",
-  collection_id = collection_id,
-  collection_rows = nrow(collection_meta),
-  candidate_rows = nrow(candidate_records),
-  project_index_path = project_index_path,
-  project_links_path = project_links_path,
-  project_max_date = as.character(project_max_date),
-  refreshed = TRUE
+    project_index_path = litxr:::.litxr_project_references_index_path(cfg),
+    project_links_path = litxr:::.litxr_project_reference_collections_index_path(cfg)
+  ),
+  result
 ))

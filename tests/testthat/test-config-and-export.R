@@ -1064,7 +1064,9 @@ manual_local_path <- litxr:::.litxr_resolve_local_path(cfg_manual, litxr:::.litx
 manual_delta_path <- file.path(manual_local_path, "index", "references_delta.fst")
 stopifnot(file.exists(manual_delta_path))
 manual_index_after_add <- litxr:::.litxr_read_journal_index(manual_local_path)
-stopifnot(nrow(manual_index_after_add) == 1L)
+if (!is.null(manual_index_after_add) && nrow(manual_index_after_add)) {
+  stopifnot(!any(manual_index_after_add$title == "Manual Report"))
+}
 manual_collection_after_add <- litxr::litxr_read_collection("manual_books", cfg_manual)
 stopifnot(nrow(manual_collection_after_add) == 2L)
 project_refs_main_after_add <- litxr:::.litxr_read_project_references_main_index(cfg_manual)
@@ -1081,6 +1083,24 @@ stopifnot(!("abstract" %in% project_main_columns))
 stopifnot(!("authors_list_json" %in% project_delta_columns))
 stopifnot(!("raw_entry_json" %in% project_delta_columns))
 stopifnot(!("abstract" %in% project_delta_columns))
+refresh_result <- litxr:::.litxr_refresh_project_index_for_collection(cfg_manual, "manual_books")
+stopifnot(identical(refresh_result$mode, "collection_refresh"))
+stopifnot(!file.exists(project_refs_delta_path))
+project_refs_main_after_refresh <- litxr:::.litxr_read_project_references_main_index(cfg_manual)
+stopifnot(any(project_refs_main_after_refresh$title == "Manual Report"))
+project_links_delta_path <- file.path(litxr:::.litxr_project_root(cfg_manual), "index", "reference_collections_delta.fst")
+stopifnot(!file.exists(project_links_delta_path))
+cache_audit_after_refresh <- litxr::litxr_audit_reference_cache_state(cfg_manual)
+project_cache_row_after_refresh <- cache_audit_after_refresh$project_reference_cache[
+  cache_audit_after_refresh$project_reference_cache$scope == "project_references",
+]
+stopifnot(nrow(project_cache_row_after_refresh) >= 1L)
+stopifnot(identical(project_cache_row_after_refresh$main_missing_n[[1]], 0L))
+writeLines("broken", file.path(litxr:::.litxr_project_root(cfg_manual), "index", "references.fst"))
+refresh_rebuild <- litxr:::.litxr_refresh_project_index_for_collection(cfg_manual, "manual_books")
+stopifnot(identical(refresh_rebuild$mode, "full_rebuild"))
+rebuilt_project_refs <- litxr:::.litxr_read_project_references_main_index(cfg_manual)
+stopifnot(any(rebuilt_project_refs$title == "Manual Report"))
 cache_audit <- litxr::litxr_audit_reference_cache_state(cfg_manual)
 stopifnot(is.list(cache_audit))
 stopifnot(all(c("collection_reference_cache", "project_reference_cache") %in% names(cache_audit)))
@@ -1094,7 +1114,7 @@ project_cache_row <- cache_audit$project_reference_cache[
   cache_audit$project_reference_cache$scope == "project_references",
 ]
 stopifnot(nrow(project_cache_row) >= 1L)
-stopifnot(project_cache_row$main_missing_n[[1]] >= 1L)
+stopifnot(identical(project_cache_row$main_missing_n[[1]], 0L))
 stopifnot(identical(project_cache_row$merged_missing_n[[1]], 0L))
 candidates_after_report <- litxr::litxr_list_enrichment_candidates(config = cfg_manual, collection_id = "manual_books")
 report_row <- candidates_after_report[candidates_after_report$title == "Manual Report", ]
