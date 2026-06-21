@@ -1143,10 +1143,18 @@ candidates_stale <- litxr::litxr_list_enrichment_candidates(config = cfg_manual,
 stale_report_row <- candidates_stale[candidates_stale$title == "Manual Report", ]
 stopifnot(nrow(stale_report_row) == 1L)
 stopifnot(isTRUE(stale_report_row$has_md[[1]]))
+schema_status_stale <- litxr::litxr_read_research_schema_status(config = cfg_manual, collection_id = "manual_books")
+schema_stale_row <- schema_status_stale[schema_status_stale$title == "Manual Report", ]
+stopifnot(nrow(schema_stale_row) == 1L)
+stopifnot(isTRUE(schema_stale_row$has_md[[1]]))
 litxr:::.litxr_update_entity_status_entities(cfg_manual, manual_report_entity_id)
 entity_status_audit_fixed <- litxr::litxr_audit_entity_status_state(cfg_manual)
 stopifnot(!any(entity_status_audit_fixed$stale_entity_status$entity_id == manual_report_entity_id))
 stopifnot(!any(entity_status_audit_fixed$digest_revision_mismatch$entity_id == manual_report_entity_id))
+schema_status_fixed <- litxr::litxr_read_research_schema_status(config = cfg_manual, collection_id = "manual_books")
+schema_fixed_row <- schema_status_fixed[schema_status_fixed$title == "Manual Report", ]
+stopifnot(nrow(schema_fixed_row) == 1L)
+stopifnot(isFALSE(schema_fixed_row$has_md[[1]]))
 
 builder_fun <- function(ref, markdown, template) {
   list(

@@ -5067,8 +5067,9 @@ litxr_add_refs <- function(
     }
     full_row <- data.table::data.table()
     for (collection_id in collection_ids) {
-      local_path <- collection_paths[[collection_id]]
-      if (is.null(local_path) || !nzchar(local_path)) next
+      local_path <- unname(collection_paths[collection_id])
+      if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) next
+      local_path <- local_path[[1]]
       hydrated <- .litxr_hydrate_collection_projection_rows(local_path, row)
       if (nrow(hydrated) && all(needed_fields %in% names(hydrated))) {
         full_row <- hydrated
@@ -7250,10 +7251,15 @@ litxr_add_refs <- function(
     has_ref_json = logical(),
     has_fulltxt_md = logical(),
     has_llm_digest = logical(),
+    llm_paper_type = character(),
     has_standardized_findings = logical(),
+    n_standardized_findings = integer(),
     has_descriptive_stats = logical(),
+    n_descriptive_stats = integer(),
     has_anchor_references = logical(),
+    n_anchor_references = integer(),
     has_citation_logic_nodes = logical(),
+    n_citation_logic_nodes = integer(),
     digest_schema_version = character(),
     digest_revision_latest = integer(),
     updated_at = character()
@@ -7350,7 +7356,8 @@ litxr_add_refs <- function(
         data.table::data.table(
           entity_id = entity_id,
           digest_schema_version = as.character(rows$schema_version[[latest_idx]] %||% NA_character_),
-          digest_revision_latest = suppressWarnings(as.integer(rows$digest_revision[[latest_idx]] %||% NA_integer_))
+          digest_revision_latest = suppressWarnings(as.integer(rows$digest_revision[[latest_idx]] %||% NA_integer_)),
+          llm_paper_type = as.character(rows$paper_type[[latest_idx]] %||% NA_character_)
         )
       }), fill = TRUE)
       status <- merge(status, digest_status, by = "entity_id", all.x = TRUE, sort = FALSE)
@@ -7358,22 +7365,28 @@ litxr_add_refs <- function(
   }
   if (!("digest_schema_version" %in% names(status))) status$digest_schema_version <- NA_character_
   if (!("digest_revision_latest" %in% names(status))) status$digest_revision_latest <- NA_integer_
+  if (!("llm_paper_type" %in% names(status))) status$llm_paper_type <- NA_character_
+  status$llm_paper_type[status$has_llm_digest & (is.na(status$llm_paper_type) | !nzchar(status$llm_paper_type))] <- "unknown"
 
-  entity_any <- function(dt, flag_name) {
+  entity_count <- function(dt, count_name) {
     if (!nrow(dt) || !("ref_id" %in% names(dt))) {
-      out <- data.table::data.table(entity_id = character(), value = logical())
-      data.table::setnames(out, "value", flag_name)
+      out <- data.table::data.table(entity_id = character(), value = integer())
+      data.table::setnames(out, "value", count_name)
       return(out)
     }
     dt_view <- data.table::data.table(ref_id = as.character(dt$ref_id))
     merged <- merge(dt_view, alias_view, by = "ref_id", all.x = FALSE, all.y = FALSE, sort = FALSE)
     if (!nrow(merged)) {
-      out <- data.table::data.table(entity_id = character(), value = logical())
-      data.table::setnames(out, "value", flag_name)
+      out <- data.table::data.table(entity_id = character(), value = integer())
+      data.table::setnames(out, "value", count_name)
       return(out)
     }
-    out <- data.table::data.table(entity_id = unique(as.character(merged$entity_id)), value = TRUE)
-    data.table::setnames(out, "value", flag_name)
+    counts <- table(as.character(merged$entity_id))
+    out <- data.table::data.table(
+      entity_id = names(counts),
+      value = as.integer(counts)
+    )
+    data.table::setnames(out, "value", count_name)
     out
   }
 
@@ -7382,15 +7395,20 @@ litxr_add_refs <- function(
   anchors <- tryCatch(litxr_read_anchor_references(cfg), error = function(e) data.table::data.table())
   nodes <- tryCatch(litxr_read_citation_logic_nodes(cfg), error = function(e) data.table::data.table())
 
-  status <- merge(status, entity_any(findings, "has_standardized_findings"), by = "entity_id", all.x = TRUE, sort = FALSE)
-  status <- merge(status, entity_any(desc_stats, "has_descriptive_stats"), by = "entity_id", all.x = TRUE, sort = FALSE)
-  status <- merge(status, entity_any(anchors, "has_anchor_references"), by = "entity_id", all.x = TRUE, sort = FALSE)
-  status <- merge(status, entity_any(nodes, "has_citation_logic_nodes"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_count(findings, "n_standardized_findings"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_count(desc_stats, "n_descriptive_stats"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_count(anchors, "n_anchor_references"), by = "entity_id", all.x = TRUE, sort = FALSE)
+  status <- merge(status, entity_count(nodes, "n_citation_logic_nodes"), by = "entity_id", all.x = TRUE, sort = FALSE)
 
-  for (nm in c("has_standardized_findings", "has_descriptive_stats", "has_anchor_references", "has_citation_logic_nodes")) {
-    if (!(nm %in% names(status))) status[[nm]] <- FALSE
-    status[[nm]][is.na(status[[nm]])] <- FALSE
+  for (nm in c("n_standardized_findings", "n_descriptive_stats", "n_anchor_references", "n_citation_logic_nodes")) {
+    if (!(nm %in% names(status))) status[[nm]] <- 0L
+    status[[nm]][is.na(status[[nm]])] <- 0L
+    status[[nm]] <- as.integer(status[[nm]])
   }
+  status$has_standardized_findings <- status$n_standardized_findings > 0L
+  status$has_descriptive_stats <- status$n_descriptive_stats > 0L
+  status$has_anchor_references <- status$n_anchor_references > 0L
+  status$has_citation_logic_nodes <- status$n_citation_logic_nodes > 0L
   status$has_ref_json[is.na(status$has_ref_json)] <- FALSE
   status$has_fulltxt_md[is.na(status$has_fulltxt_md)] <- FALSE
   status$has_llm_digest[is.na(status$has_llm_digest)] <- FALSE
@@ -7516,11 +7534,26 @@ litxr_add_refs <- function(
   if (!file.exists(path)) {
     return(.litxr_entity_status_empty())
   }
-  fst::read_fst(path, as.data.table = TRUE)
+  out <- fst::read_fst(path, as.data.table = TRUE)
+  template <- .litxr_entity_status_empty()
+  for (nm in names(template)) {
+    if (!(nm %in% names(out))) {
+      out[[nm]] <- template[[nm]]
+    }
+  }
+  data.table::setcolorder(out, names(template))
+  out
 }
 
 .litxr_write_project_entity_status_index <- function(cfg, records) {
   .litxr_ensure_project_index_dir(cfg)
+  records <- data.table::as.data.table(records)
+  for (nm in names(.litxr_entity_status_empty())) {
+    if (!(nm %in% names(records))) {
+      records[[nm]] <- .litxr_entity_status_empty()[[nm]]
+    }
+  }
+  data.table::setcolorder(records, names(.litxr_entity_status_empty()))
   fst::write_fst(as.data.frame(records), .litxr_project_entity_status_index_path(cfg))
   invisible(.litxr_project_entity_status_index_path(cfg))
 }
@@ -7822,10 +7855,15 @@ litxr_add_refs <- function(
     "has_ref_json",
     "has_fulltxt_md",
     "has_llm_digest",
+    "llm_paper_type",
     "has_standardized_findings",
+    "n_standardized_findings",
     "has_descriptive_stats",
+    "n_descriptive_stats",
     "has_anchor_references",
+    "n_anchor_references",
     "has_citation_logic_nodes",
+    "n_citation_logic_nodes",
     "digest_schema_version",
     "digest_revision_latest"
   )
