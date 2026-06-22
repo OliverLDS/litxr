@@ -171,3 +171,35 @@ accepts collection ids.
 - `source_id`
 
 Missing keys now produce a warning instead of being ignored silently.
+
+## Stable Alias Policies
+
+During the staged `v0.1.0` refactor, operator-facing behavior is:
+
+- citation export prefers the published DOI-backed alias when one is linked
+- digest/full-text prompting may prefer a linked arXiv alias for source hints
+- DOI/arXiv linking preserves existing surface `ref_id` values and records the
+  equivalence through link fields and thin entity indexes
+- collection membership can now be viewed either as `ref_id` links or as thin
+  entity-level memberships
+
+See [refactor-operator-guide.md](./refactor-operator-guide.md) for the stable
+policy details.
+
+## Migration And Diagnostics
+
+For mixed or older stores:
+
+- `litxr_migrate_refactor_indexes()`
+- `Rscript scripts/migrate_refactor_indexes.R`
+
+For bundled diagnostics:
+
+- `litxr_refactor_diagnostics()`
+- `Rscript scripts/diagnose_refactor_store.R`
+
+Low-level audits remain available:
+
+- `litxr_audit_reference_cache_state()`
+- `litxr_audit_entity_indexes()`
+- `litxr_audit_entity_status_state()`

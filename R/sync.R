@@ -1197,6 +1197,52 @@ litxr_audit_entity_indexes <- function(config = NULL, oversized_mb = 25) {
   .litxr_audit_entity_indexes(cfg, oversized_mb = oversized_mb)
 }
 
+#' Diagnose current store readiness for the v0.1.0 refactor model
+#'
+#' Bundles the reference-cache, entity-index, and entity-status audits into one
+#' operator-facing report so mixed or stale stores can be inspected without
+#' calling low-level helpers one by one.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param oversized_mb Size threshold used when classifying indexes as
+#'   oversized.
+#'
+#' @return Named list containing a one-row `summary` `data.table` plus the full
+#'   audit payloads.
+#' @export
+litxr_refactor_diagnostics <- function(config = NULL, oversized_mb = 25) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_refactor_diagnostics(cfg, oversized_mb = oversized_mb)
+}
+
+#' Migrate current stores onto the thin v0.1.0 refactor indexes
+#'
+#' Rebuilds collection projection indexes, refreshes project projection caches,
+#' and rebuilds alias/entity indexes so mixed older stores move onto the current
+#' thin-index architecture without changing source JSON payloads.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param collection_ids Optional character vector of collection ids to refresh.
+#'   Default is all configured collections.
+#' @param rebuild_collection_indexes Whether to rebuild each selected collection
+#'   index from `ref_json/` before refreshing project-level caches.
+#'
+#' @return Named list describing refreshed collections, written index paths, and
+#'   resulting row counts.
+#' @export
+litxr_migrate_refactor_indexes <- function(config = NULL, collection_ids = NULL, rebuild_collection_indexes = TRUE) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_migrate_refactor_indexes(
+    cfg,
+    collection_ids = collection_ids,
+    rebuild_collection_indexes = rebuild_collection_indexes
+  )
+}
+
 #' Find references in the canonical project-level store
 #'
 #' Provides simple deterministic filtering over the project-level reference
@@ -6823,6 +6869,118 @@ litxr_add_refs <- function(
   .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
   .litxr_build_entity_status_index(cfg, aliases = aliases, refs = refs)
   invisible(NULL)
+}
+
+.litxr_migrate_refactor_indexes <- function(cfg, collection_ids = NULL, rebuild_collection_indexes = TRUE) {
+  collections <- .litxr_config_collections(cfg)
+  configured_ids <- vapply(collections, `[[`, character(1), "collection_id")
+  selected_ids <- if (is.null(collection_ids) || !length(collection_ids)) {
+    configured_ids
+  } else {
+    unique(as.character(collection_ids))
+  }
+  selected_ids <- selected_ids[!is.na(selected_ids) & nzchar(selected_ids)]
+  unknown_ids <- setdiff(selected_ids, configured_ids)
+  if (length(unknown_ids)) {
+    stop(
+      "Unknown collection_id value(s): ",
+      paste(unknown_ids, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  collection_results <- lapply(selected_ids, function(collection_id) {
+    rebuilt_path <- NA_character_
+    if (isTRUE(rebuild_collection_indexes)) {
+      rebuilt_path <- litxr_rebuild_collection_index(collection_id, cfg)
+    }
+    refresh <- .litxr_refresh_project_index_for_collection(
+      cfg,
+      collection_id = collection_id,
+      repair_collection_index = FALSE
+    )
+    c(
+      list(
+        collection_id = collection_id,
+        rebuilt_collection_index = isTRUE(rebuild_collection_indexes),
+        collection_index_path = if (isTRUE(rebuild_collection_indexes)) rebuilt_path else NA_character_
+      ),
+      refresh
+    )
+  })
+
+  refs <- .litxr_read_project_references_index(cfg)
+  links <- .litxr_read_project_reference_collections_index(cfg)
+  aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
+  entities <- .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
+  entity_collections <- .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
+  entity_status <- .litxr_build_entity_status_index(cfg, aliases = aliases, refs = refs)
+
+  list(
+    selected_collection_ids = selected_ids,
+    collection_results = collection_results,
+    project_paths = list(
+      references = .litxr_project_references_index_path(cfg),
+      reference_collections = .litxr_project_reference_collections_index_path(cfg),
+      ref_aliases = .litxr_project_ref_aliases_index_path(cfg),
+      entities = .litxr_project_entities_index_path(cfg),
+      entity_collections = .litxr_project_entity_collections_index_path(cfg),
+      entity_status = .litxr_project_entity_status_index_path(cfg)
+    ),
+    row_counts = list(
+      project_references = nrow(refs),
+      project_reference_collections = nrow(links),
+      ref_aliases = nrow(aliases),
+      entities = nrow(entities),
+      entity_collections = nrow(entity_collections),
+      entity_status = nrow(entity_status)
+    )
+  )
+}
+
+.litxr_refactor_diagnostics <- function(cfg, oversized_mb = 25) {
+  reference_cache <- .litxr_audit_reference_cache_state(cfg)
+  entity_indexes <- .litxr_audit_entity_indexes(cfg, oversized_mb = oversized_mb)
+  entity_status <- .litxr_audit_entity_status_state(cfg)
+
+  collection_cache <- reference_cache$collection_reference_cache
+  project_cache <- reference_cache$project_reference_cache
+  index_health <- entity_indexes$index_health
+
+  summary <- data.table::data.table(
+    collection_cache_scopes_with_main_mismatch = if (nrow(collection_cache)) {
+      as.integer(sum(collection_cache$main_missing_n > 0L | collection_cache$main_extra_n > 0L))
+    } else 0L,
+    collection_cache_scopes_with_merged_mismatch = if (nrow(collection_cache)) {
+      as.integer(sum(collection_cache$merged_missing_n > 0L | collection_cache$merged_extra_n > 0L))
+    } else 0L,
+    project_cache_scopes_with_main_mismatch = if (nrow(project_cache)) {
+      as.integer(sum(project_cache$main_missing_n > 0L | project_cache$main_extra_n > 0L))
+    } else 0L,
+    project_cache_scopes_with_merged_mismatch = if (nrow(project_cache)) {
+      as.integer(sum(project_cache$merged_missing_n > 0L | project_cache$merged_extra_n > 0L))
+    } else 0L,
+    alias_split_entities = as.integer(nrow(entity_indexes$alias_splits)),
+    ambiguous_alias_joins = as.integer(nrow(entity_indexes$ambiguous_alias_joins)),
+    orphan_artifacts = as.integer(nrow(entity_indexes$orphan_artifacts)),
+    damaged_or_missing_indexes = if (nrow(index_health)) {
+      as.integer(sum(index_health$status %in% c("damaged", "missing")))
+    } else 0L,
+    oversized_indexes = if (nrow(index_health)) {
+      as.integer(sum(index_health$status %in% c("oversized")))
+    } else 0L,
+    missing_entity_status_rows = as.integer(nrow(entity_status$missing_entity_status)),
+    orphan_entity_status_rows = as.integer(nrow(entity_status$orphan_entity_status)),
+    stale_entity_status_rows = as.integer(nrow(entity_status$stale_entity_status)),
+    digest_revision_mismatches = as.integer(nrow(entity_status$digest_revision_mismatch))
+  )
+
+  list(
+    summary = summary,
+    reference_cache = reference_cache,
+    entity_indexes = entity_indexes,
+    entity_status = entity_status
+  )
 }
 
 .litxr_refresh_project_index_for_collection <- function(cfg, collection_id, repair_collection_index = TRUE) {
