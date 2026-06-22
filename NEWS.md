@@ -17,6 +17,70 @@
   added architecture-focused regression coverage for projection rebuild and
   authoritative-JSON semantics.
 
+# litxr 0.0.8.23
+
+- Split the large refactor/read-projection surface out of `R/sync.R` into
+  focused internal modules for lookup/read policy and projection/index storage.
+- Added architecture-focused regression coverage for authoritative JSON
+  ownership and compatibility projection rebuild semantics.
+- Updated storage and maintenance docs to describe project reference caches as
+  compatibility projections rather than primary semantics.
+
+# litxr 0.0.8.22
+
+- Demoted project `index/references.fst` and
+  `index/reference_collections.fst` to compatibility projections.
+- Made thin alias/entity rebuilds independent of healthy project compatibility
+  caches by rebuilding from authoritative collection-backed state directly.
+- Expanded index audits to distinguish thin-index health from compatibility
+  projection health explicitly.
+
+# litxr 0.0.8.21
+
+- Moved `litxr_find_refs()` candidate resolution onto `ref_aliases.fst` and
+  `entity_collections.fst`.
+- Added entity-first exact-key and alias expansion semantics while preserving
+  the existing row-facing return shape.
+- Added focused lookup regressions for canonical arXiv ids, bare arXiv ids,
+  DOI-linked lookups, and collection-scoped alias selection.
+
+# litxr 0.0.8.20
+
+- Added release-grade migration and diagnostic helpers for the staged refactor:
+  `litxr_migrate_refactor_indexes()` and `litxr_refactor_diagnostics()`.
+- Added machine-facing maintenance nodes
+  `scripts/migrate_refactor_indexes.R` and
+  `scripts/diagnose_refactor_store.R`.
+- Documented stable alias policies for citation export, prompting, and
+  DOI/arXiv linking in the operator guide.
+
+# litxr 0.0.8.19
+
+- Moved research-schema coverage/status views onto `entity_status.fst`.
+- Expanded entity status to include digest schema version, latest digest
+  revision, latest paper type, and counts for findings, descriptive stats,
+  anchor references, and citation logic nodes.
+- Added explicit stale/orphan/revision-mismatch audits for entity status and
+  wired normal research-schema writes to incremental entity-status updates.
+
+# litxr 0.0.8.18
+
+- Shifted ingest/update behavior further toward JSON plus thin-index-first
+  writes rather than broad reference-table rewrites.
+- Added an explicit collection-to-project refresh path that rebuilds project
+  compatibility projections from authoritative collection state.
+- Hardened damaged project reference-cache rebuilds and cleared project deltas
+  after explicit refreshes.
+
+# litxr 0.0.8.17
+
+- Defined thinner collection/project reference projection schemas and removed
+  repeated heavy payload columns from those `fst` projections.
+- Added `scripts/measure_reference_projection_size.R` to quantify projection
+  size reduction on real local stores.
+- Established the refactor rule that rich payload stays in JSON while
+  projections carry only the minimal fields needed for lookup and compatibility.
+
 # litxr 0.0.8.16
 
 - Finished the `0.0.8.16` read-policy migration slice from the
@@ -90,6 +154,23 @@
 - Added a legacy exporter for cached category-query sets and now write
   `query_set.json` alongside new label-query caches so the inquiry sentences
   are visible from disk.
+
+# litxr 0.0.8.8
+
+- Extended schema-v4 structured extraction with `tables` for recognized paper
+  tables and `research_target_github_links` for GitHub artifacts or research
+  targets referenced by the paper.
+- Updated the schema-v4 prompt contract and digest rendering to surface those
+  richer extracted structures.
+
+# litxr 0.0.8.7
+
+- Replaced the interactive digest workflow with a shell wrapper plus separate
+  prompt-build, status-check, and JSON-ingest nodes.
+- Added support for multiple LLM digest return formats, including inline raw
+  JSON and file-oriented workflows.
+- Improved human-facing summary output and the machine-facing digest ingest
+  flow used by the CLI wrapper.
 
 # litxr 0.0.8.6
 
