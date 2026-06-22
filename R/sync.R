@@ -859,6 +859,31 @@ litxr_embed_collection_delta <- function(
   delta_metadata
 }
 
+#' Build a cached embedding index for one collection field
+#'
+#' Embeds one text field from `litxr_read_collection()` in batches and caches the
+#' resulting numeric matrix under `project.data_root/embeddings/`. The embedding
+#' function is user supplied so callers can use providers such as
+#' `inferencer::embed_openrouter()` or `inferencer::embed_gemini()`. Completed
+#' batches are written to append-only delta shards and compacted into the main
+#' embedding index once at the end.
+#'
+#' @param collection_id Collection identifier from `config.yaml`.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param field Text field to embed, such as `"abstract"`.
+#' @param embed_fun Function taking a character vector and returning embeddings
+#'   as a matrix, data frame, or list of numeric vectors.
+#' @param model Exact embedding model name. The same value must be used for
+#'   search queries.
+#' @param provider Optional provider label, such as `"openrouter"` or
+#'   `"gemini"`.
+#' @param batch_size Number of texts per embedding request.
+#' @param overwrite Whether to rebuild the cache from scratch.
+#' @param limit Optional maximum number of new texts to embed in this run.
+#'
+#' @return Metadata `data.table` for cached embeddings.
+#' @export
 litxr_build_embedding_index <- function(
   collection_id,
   config = NULL,

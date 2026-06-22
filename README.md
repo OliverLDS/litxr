@@ -5,7 +5,7 @@
 It is built around:
 
 - collection-level sync from sources such as Crossref and arXiv
-- a canonical project-level reference store
+- thin project-level alias/entity indexes plus compatibility reference projections
 - BibTeX export for writing workflows such as Quarto
 - project-level markdown and structured LLM digests keyed by `ref_id`
 
@@ -98,6 +98,10 @@ Collection-local storage uses:
 
 Project-level canonical data lives under `project.data_root/`, including:
 
+- `index/ref_aliases.fst`
+- `index/entities.fst`
+- `index/entity_collections.fst`
+- `index/entity_status.fst`
 - `index/references.fst`
 - `index/reference_collections.fst`
 - `index/enrichment_status.fst`
@@ -128,6 +132,11 @@ The interactive digest prompt is built by `litxr_llm_digest_prompt()` from
 package fragments under `inst/prompts/`. New interactive prompts use schema
 `v4`, which adds ranked contributions, reader-misconception checks, business
 relevance pathways, and a general `evidence_shape` field.
+
+The v0.1.0 refactor makes `entity_id` the internal identity key while keeping
+`ref_id` as the surface-facing alias used by users and scripts. Rich payload
+stays in JSON; `fst` is used for thin indexes, compatibility projections, and
+status.
 
 ## Status
 

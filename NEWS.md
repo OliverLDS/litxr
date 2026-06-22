@@ -1,3 +1,22 @@
+# litxr 0.1.0
+
+- Declared the v0.1.0 identity-first refactor complete.
+- Finalized the internal architecture around thin `entity_id`-based indexes:
+  `ref_aliases.fst`, `entities.fst`, `entity_collections.fst`, and
+  `entity_status.fst`.
+- Kept `ref_id` as the stable user-facing alias while making task-policy
+  resolution explicit:
+  - citation export prefers linked published aliases
+  - digest/full-text prompting can prefer linked arXiv aliases
+- Demoted project `references.fst` and `reference_collections.fst` to
+  compatibility projections rebuilt from authoritative collection state rather
+  than primary mutable stores.
+- Confirmed JSON remains the owner of rich payload while `fst` is used for thin
+  relationships, search projections, and status.
+- Split the old monolithic `R/sync.R` surface into focused internal modules and
+  added architecture-focused regression coverage for projection rebuild and
+  authoritative-JSON semantics.
+
 # litxr 0.0.8.16
 
 - Finished the `0.0.8.16` read-policy migration slice from the

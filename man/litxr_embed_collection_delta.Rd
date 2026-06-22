@@ -2,7 +2,7 @@
 % Please edit documentation in R/sync.R
 \name{litxr_embed_collection_delta}
 \alias{litxr_embed_collection_delta}
-\title{Build a cached embedding index for one collection field}
+\title{Build pending embedding delta shards for one collection field}
 \usage{
 litxr_embed_collection_delta(
   collection_id,
@@ -35,18 +35,15 @@ search queries.}
 
 \item{batch_size}{Number of texts per embedding request.}
 
-\item{overwrite}{Whether to rebuild the cache from scratch.}
+\item{overwrite}{Whether to rebuild the delta target set from scratch.}
 
 \item{limit}{Optional maximum number of new texts to embed in this run.}
 }
 \value{
-Metadata \code{data.table} for cached embeddings.
+Metadata \code{data.table} for the merged main-plus-delta embedding state.
 }
 \description{
-Embeds one text field from \code{litxr_read_collection()} in batches and caches the
-resulting numeric matrix under \verb{project.data_root/embeddings/}. The embedding
-function is user supplied so callers can use providers such as
-\code{inferencer::embed_openrouter()} or \code{inferencer::embed_gemini()}. Completed
-batches are written to append-only delta shards and compacted into the main
-embedding index once at the end.
+Embeds only records that are not already present in the main cache or delta
+shards, then appends those batches to the delta layer without compacting the
+main cache.
 }

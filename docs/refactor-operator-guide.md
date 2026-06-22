@@ -1,7 +1,7 @@
 # Refactor Operator Guide
 
-This note documents the stable operator-facing behavior during the staged
-`v0.1.0` refactor.
+This note documents the stable operator-facing behavior after the completed
+`v0.1.0` identity-first refactor.
 
 ## Alias Policies
 
