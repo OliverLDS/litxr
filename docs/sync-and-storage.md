@@ -19,13 +19,22 @@ durable collection-local storage.
 
 Under `project.data_root/`:
 
-- `index/references.fst`: canonical reference table
-- `index/reference_collections.fst`: reference-to-collection memberships
+- `index/ref_aliases.fst`: thin alias-to-entity index
+- `index/entities.fst`: thin entity-level search projection
+- `index/entity_collections.fst`: thin entity-to-collection memberships
+- `index/entity_status.fst`: thin entity-level artifact status
+- `index/references.fst`: compatibility projection of project references
+- `index/reference_collections.fst`: compatibility projection of ref-to-collection memberships
 - `index/enrichment_status.fst`: markdown/digest coverage
 - `index/sync_state.fst`: sync and repair history
 - `embeddings/`: cached embedding metadata, matrices, and manifests
 - `llm/`: project-level structured digests keyed by `ref_id`
 - `md/`: project-level markdown keyed by `ref_id`
+
+The thin `entity_*` and `ref_aliases` indexes are the operational identity
+layer. The heavy project `references.fst` and `reference_collections.fst`
+files remain for backward compatibility and are rebuilt as compatibility
+projections when needed.
 
 ## Sync APIs
 
