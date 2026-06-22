@@ -727,6 +727,20 @@ litxr:::.litxr_write_project_references_index(cfg_export, project_refs_without_a
 found_arxiv_fallback <- litxr::litxr_find_refs(ref_id = "2501.00001", config = cfg_export)
 stopifnot(nrow(found_arxiv_fallback) == 1L)
 stopifnot(identical(found_arxiv_fallback$ref_id[[1]], "arxiv:2501.00001"))
+found_journal_via_arxiv <- litxr::litxr_find_refs(
+  collection_id = journal$journal_id,
+  ref_id = "2501.00001",
+  config = cfg_export
+)
+stopifnot(nrow(found_journal_via_arxiv) == 1L)
+stopifnot(identical(found_journal_via_arxiv$ref_id[[1]], "doi:10.1000/published-example"))
+found_arxiv_via_doi <- litxr::litxr_find_refs(
+  collection_id = arxiv_collection$collection_id,
+  ref_id = "10.1000/published-example",
+  config = cfg_export
+)
+stopifnot(nrow(found_arxiv_via_doi) == 1L)
+stopifnot(identical(found_arxiv_via_doi$ref_id[[1]], "arxiv:2501.00001"))
 
 index_path <- file.path(local_path, "index", "references.fst")
 file.remove(index_path)
