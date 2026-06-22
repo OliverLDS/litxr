@@ -1105,7 +1105,7 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
       return(out)
     }
   }
-  ref_links <- .litxr_read_project_reference_collections_index(cfg)
+  ref_links <- .litxr_read_project_compatibility_links_safe(cfg)
   if (nrow(ref_links)) {
     keep_ref_ids <- unique(as.character(ref_links$ref_id[ref_links$collection_id %in% collection_ids]))
     keep_ref_ids <- keep_ref_ids[!is.na(keep_ref_ids) & nzchar(keep_ref_ids)]
@@ -1135,6 +1135,36 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   out
 }
 
+.litxr_read_project_compatibility_refs_safe <- function(cfg) {
+  tryCatch(
+    .litxr_read_project_references_index(cfg),
+    error = function(e) {
+      warning(
+        "Project reference compatibility cache is unreadable and will be rebuilt from authoritative collection state: ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+      .litxr_rebuild_project_reference_indexes(cfg)
+      .litxr_read_project_references_index(cfg)
+    }
+  )
+}
+
+.litxr_read_project_compatibility_links_safe <- function(cfg) {
+  tryCatch(
+    .litxr_read_project_reference_collections_index(cfg),
+    error = function(e) {
+      warning(
+        "Project reference-collection compatibility cache is unreadable and will be rebuilt from authoritative collection state: ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+      .litxr_rebuild_project_reference_indexes(cfg)
+      .litxr_read_project_reference_collections_index(cfg)
+    }
+  )
+}
+
 #' Read the canonical project-level reference index
 #'
 #' @param config Optional parsed config list or a direct config path. When
@@ -1145,7 +1175,7 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
 litxr_read_references <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_read_project_references_index(cfg)
+  .litxr_read_project_compatibility_refs_safe(cfg)
 }
 
 #' Read the project-level reference-collection membership index
@@ -1158,7 +1188,7 @@ litxr_read_references <- function(config = NULL) {
 litxr_read_reference_collections <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_read_project_reference_collections_index(cfg)
+  .litxr_read_project_compatibility_links_safe(cfg)
 }
 
 #' Read the thin alias-to-entity index
@@ -6589,6 +6619,12 @@ litxr_add_refs <- function(
   links[!duplicated(link_key), ]
 }
 
+.litxr_authoritative_entity_inputs <- function(cfg) {
+  refs <- .litxr_authoritative_project_records(cfg)
+  links <- .litxr_authoritative_project_reference_links(cfg)
+  list(refs = refs, links = links)
+}
+
 .litxr_rebuild_project_reference_indexes <- function(cfg, repair_collection_indexes = TRUE) {
   collections <- .litxr_config_collections(cfg)
   if (!length(collections)) {
@@ -6918,6 +6954,7 @@ litxr_add_refs <- function(
     .litxr_reference_projection(records),
     conflict_path = .litxr_project_reference_conflict_path(cfg)
   )
+  delta <- .litxr_reference_projection(delta)
   fst::write_fst(as.data.frame(.litxr_index_encode(delta)), .litxr_project_references_delta_index_path(cfg))
   invisible(.litxr_project_references_delta_index_path(cfg))
 }
@@ -6983,8 +7020,9 @@ litxr_add_refs <- function(
 }
 
 .litxr_refresh_entity_indexes_from_project_indexes <- function(cfg) {
-  refs <- .litxr_read_project_references_index(cfg)
-  links <- .litxr_read_project_reference_collections_index(cfg)
+  inputs <- .litxr_authoritative_entity_inputs(cfg)
+  refs <- inputs$refs
+  links <- inputs$links
   aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
   .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
   .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
@@ -7030,8 +7068,9 @@ litxr_add_refs <- function(
     )
   })
 
-  refs <- .litxr_read_project_references_index(cfg)
-  links <- .litxr_read_project_reference_collections_index(cfg)
+  inputs <- .litxr_authoritative_entity_inputs(cfg)
+  refs <- inputs$refs
+  links <- inputs$links
   aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
   entities <- .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
   entity_collections <- .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
@@ -7067,6 +7106,8 @@ litxr_add_refs <- function(
   collection_cache <- reference_cache$collection_reference_cache
   project_cache <- reference_cache$project_reference_cache
   index_health <- entity_indexes$index_health
+  thin_index_health <- entity_indexes$thin_index_health
+  compatibility_projection_health <- entity_indexes$compatibility_projection_health
 
   summary <- data.table::data.table(
     collection_cache_scopes_with_main_mismatch = if (nrow(collection_cache)) {
@@ -7086,6 +7127,12 @@ litxr_add_refs <- function(
     orphan_artifacts = as.integer(nrow(entity_indexes$orphan_artifacts)),
     damaged_or_missing_indexes = if (nrow(index_health)) {
       as.integer(sum(index_health$status %in% c("damaged", "missing")))
+    } else 0L,
+    damaged_or_missing_thin_indexes = if (nrow(thin_index_health)) {
+      as.integer(sum(thin_index_health$status %in% c("damaged", "missing")))
+    } else 0L,
+    damaged_or_missing_compatibility_indexes = if (nrow(compatibility_projection_health)) {
+      as.integer(sum(compatibility_projection_health$status %in% c("damaged", "missing")))
     } else 0L,
     oversized_indexes = if (nrow(index_health)) {
       as.integer(sum(index_health$status %in% c("oversized")))
@@ -7746,9 +7793,9 @@ litxr_add_refs <- function(
 
 .litxr_build_entity_indexes <- function(cfg) {
   .litxr_ensure_project_index_dir(cfg)
-  .litxr_rebuild_project_reference_indexes(cfg)
-  refs <- .litxr_read_project_references_index(cfg)
-  links <- .litxr_read_project_reference_collections_index(cfg)
+  inputs <- .litxr_authoritative_entity_inputs(cfg)
+  refs <- inputs$refs
+  links <- inputs$links
   aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
   entities <- .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
   entity_collections <- .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
@@ -7932,56 +7979,84 @@ litxr_add_refs <- function(
   out[which(out$n_links > 1L), , drop = FALSE]
 }
 
-.litxr_index_health_report <- function(cfg, oversized_mb = 25) {
-  collections <- .litxr_config_collections(cfg)
-  collection_rows <- lapply(collections, function(collection) {
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    path <- .litxr_index_path(local_path)
-    info <- if (file.exists(path)) file.info(path) else NULL
-    readable <- !is.null(.litxr_read_index_columns_safe(path))
-    size_bytes <- if (is.null(info)) NA_real_ else as.numeric(info$size)
-    data.table::data.table(
-      index_name = paste0("collection:", collection$collection_id),
-      path = path,
-      exists = file.exists(path),
-      readable = readable,
-      size_bytes = size_bytes,
-      size_mb = size_bytes / (1024^2),
-      status = if (!file.exists(path)) "missing" else if (!readable) "damaged" else if (!is.na(size_bytes) && size_bytes / (1024^2) > oversized_mb) "oversized" else "ok"
-    )
-  })
-  project_paths <- data.table::data.table(
-    index_name = c("project_references", "project_reference_collections", "ref_aliases", "entities", "entity_collections", "entity_status"),
+.litxr_index_health_rows <- function(index_name, path, oversized_mb = 25, reader = c("fst", "encoded_fst")) {
+  reader <- match.arg(reader)
+  info <- if (file.exists(path)) file.info(path) else NULL
+  readable <- if (!file.exists(path)) {
+    FALSE
+  } else if (identical(reader, "encoded_fst")) {
+    !is.null(.litxr_read_index_columns_safe(path))
+  } else {
+    isTRUE(tryCatch({
+      fst::metadata_fst(path)
+      TRUE
+    }, error = function(e) FALSE))
+  }
+  size_bytes <- if (is.null(info)) NA_real_ else as.numeric(info$size)
+  data.table::data.table(
+    index_name = index_name,
+    path = path,
+    exists = file.exists(path),
+    readable = readable,
+    size_bytes = size_bytes,
+    size_mb = size_bytes / (1024^2),
+    status = if (!file.exists(path)) "missing" else if (!readable) "damaged" else if (!is.na(size_bytes) && size_bytes / (1024^2) > oversized_mb) "oversized" else "ok"
+  )
+}
+
+.litxr_thin_index_health_report <- function(cfg, oversized_mb = 25) {
+  thin_paths <- data.table::data.table(
+    index_name = c("ref_aliases", "entities", "entity_collections", "entity_status"),
     path = c(
-      .litxr_project_references_index_path(cfg),
-      .litxr_project_reference_collections_index_path(cfg),
       .litxr_project_ref_aliases_index_path(cfg),
       .litxr_project_entities_index_path(cfg),
       .litxr_project_entity_collections_index_path(cfg),
       .litxr_project_entity_status_index_path(cfg)
+    ),
+    reader = c("fst", "fst", "fst", "fst")
+  )
+  data.table::rbindlist(lapply(seq_len(nrow(thin_paths)), function(i) {
+    .litxr_index_health_rows(
+      index_name = as.character(thin_paths$index_name[[i]]),
+      path = as.character(thin_paths$path[[i]]),
+      oversized_mb = oversized_mb,
+      reader = as.character(thin_paths$reader[[i]])
     )
+  }), fill = TRUE)
+}
+
+.litxr_compatibility_projection_health_report <- function(cfg, oversized_mb = 25) {
+  collections <- .litxr_config_collections(cfg)
+  collection_rows <- lapply(collections, function(collection) {
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    .litxr_index_health_rows(
+      index_name = paste0("collection:", collection$collection_id),
+      path = .litxr_index_path(local_path),
+      oversized_mb = oversized_mb,
+      reader = "encoded_fst"
+    )
+  })
+  project_paths <- data.table::data.table(
+    index_name = c("project_references", "project_reference_collections"),
+    path = c(
+      .litxr_project_references_index_path(cfg),
+      .litxr_project_reference_collections_index_path(cfg)
+    ),
+    reader = c("encoded_fst", "fst")
   )
   project_rows <- data.table::rbindlist(lapply(seq_len(nrow(project_paths)), function(i) {
-    index_name <- as.character(project_paths$index_name[[i]])
-    path <- as.character(project_paths$path[[i]])
-    info <- if (file.exists(path)) file.info(path) else NULL
-    readable <- !is.null(.litxr_read_index_columns_safe(path))
-    size_bytes <- if (is.null(info)) NA_real_ else as.numeric(info$size)
-    data.table::data.table(
-      index_name = index_name,
-      path = path,
-      exists = file.exists(path),
-      readable = readable,
-      size_bytes = size_bytes,
-      size_mb = size_bytes / (1024^2),
-      status = if (!file.exists(path)) "missing" else if (!readable) "damaged" else if (!is.na(size_bytes) && size_bytes / (1024^2) > oversized_mb) "oversized" else "ok"
+    .litxr_index_health_rows(
+      index_name = as.character(project_paths$index_name[[i]]),
+      path = as.character(project_paths$path[[i]]),
+      oversized_mb = oversized_mb,
+      reader = as.character(project_paths$reader[[i]])
     )
   }), fill = TRUE)
   data.table::rbindlist(c(collection_rows, list(project_rows)), fill = TRUE)
 }
 
 .litxr_audit_entity_indexes <- function(cfg, oversized_mb = 25) {
-  refs <- .litxr_read_project_references_index(cfg)
+  refs <- .litxr_authoritative_project_records(cfg)
   aliases <- .litxr_read_project_ref_aliases_index(cfg)
   if (!nrow(aliases) && nrow(refs)) {
     aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
@@ -8011,11 +8086,16 @@ litxr_add_refs <- function(
     alias_splits_dt[which(alias_splits_dt$n_aliases > 1L), , drop = FALSE]
   }
 
+  thin_index_health <- .litxr_thin_index_health_report(cfg, oversized_mb = oversized_mb)
+  compatibility_projection_health <- .litxr_compatibility_projection_health_report(cfg, oversized_mb = oversized_mb)
+
   list(
     alias_splits = alias_splits,
     ambiguous_alias_joins = .litxr_audit_ambiguous_alias_joins(refs),
     orphan_artifacts = .litxr_orphan_project_artifacts(cfg, aliases = aliases),
-    index_health = .litxr_index_health_report(cfg, oversized_mb = oversized_mb)
+    index_health = data.table::rbindlist(list(thin_index_health, compatibility_projection_health), fill = TRUE),
+    thin_index_health = thin_index_health,
+    compatibility_projection_health = compatibility_projection_health
   )
 }
 
