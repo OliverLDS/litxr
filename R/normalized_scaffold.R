@@ -117,6 +117,63 @@
   keep
 }
 
+.litxr_ref_entity_resolution_map <- function(cfg, entities = NULL, ref_ids = NULL, entity_ids = NULL) {
+  if (is.null(entities)) {
+    entities <- .litxr_read_project_entities_index(cfg)
+  }
+  entities <- data.table::as.data.table(entities)
+  if (!is.null(ref_ids) && length(ref_ids) && nrow(entities)) {
+    ref_ids <- unique(as.character(ref_ids))
+    ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+    if (length(ref_ids)) {
+      keep <- as.character(entities$primary_ref_id) %in% ref_ids |
+        as.character(entities$preferred_citation_ref_id) %in% ref_ids |
+        as.character(entities$arxiv_id) %in% ref_ids |
+        paste0("doi:", as.character(entities$doi)) %in% ref_ids
+      entities <- entities[keep, ]
+    }
+  }
+  if (!is.null(entity_ids) && length(entity_ids) && nrow(entities)) {
+    entity_ids <- unique(as.character(entity_ids))
+    entity_ids <- entity_ids[!is.na(entity_ids) & nzchar(entity_ids)]
+    if (length(entity_ids)) {
+      entities <- entities[as.character(entities$entity_id) %in% entity_ids, ]
+    }
+  }
+  if (!nrow(entities)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      entity_id = character()
+    ))
+  }
+
+  arxiv_ids <- if ("arxiv_id" %in% names(entities)) as.character(entities$arxiv_id) else rep(NA_character_, nrow(entities))
+  doi_ids <- if ("doi" %in% names(entities)) as.character(entities$doi) else rep(NA_character_, nrow(entities))
+  doi_ids <- ifelse(is.na(doi_ids) | !nzchar(doi_ids), NA_character_, paste0("doi:", doi_ids))
+
+  rows <- data.table::rbindlist(list(
+    data.table::data.table(
+      ref_id = as.character(entities$primary_ref_id),
+      entity_id = as.character(entities$entity_id)
+    ),
+    data.table::data.table(
+      ref_id = as.character(entities$preferred_citation_ref_id),
+      entity_id = as.character(entities$entity_id)
+    ),
+    data.table::data.table(
+      ref_id = arxiv_ids,
+      entity_id = as.character(entities$entity_id)
+    ),
+    data.table::data.table(
+      ref_id = doi_ids,
+      entity_id = as.character(entities$entity_id)
+    )
+  ), fill = TRUE)
+  rows <- rows[!is.na(rows$ref_id) & nzchar(rows$ref_id), ]
+  rows <- rows[!duplicated(paste(rows$ref_id, rows$entity_id, sep = "\r")), ]
+  rows
+}
+
 .litxr_ref_entities_projection <- function(cfg, refs = NULL, aliases = NULL) {
   if (is.null(refs)) {
     refs <- .litxr_authoritative_project_records(cfg)
@@ -148,13 +205,17 @@
     ))
   }
 
+  refs <- data.table::as.data.table(refs)
+  aliases <- data.table::as.data.table(aliases)
   alias_view <- data.table::data.table(
     ref_id = aliases$ref_id,
     entity_id = aliases$entity_id,
     is_primary_ref_id = aliases$is_primary_ref_id,
     is_published_form = aliases$is_published_form
   )
-  rows <- merge(refs, alias_view, by = "ref_id", all.x = TRUE, sort = FALSE)
+  data.table::setkey(refs, ref_id)
+  data.table::setkey(alias_view, ref_id)
+  rows <- alias_view[refs, nomatch = 0L]
   rows <- rows[!is.na(rows$entity_id) & nzchar(rows$entity_id), ]
   if (!nrow(rows)) {
     return(data.table::data.table(
@@ -168,28 +229,41 @@
     ))
   }
 
-  entity_ids <- unique(as.character(rows$entity_id))
-  out <- data.table::rbindlist(lapply(entity_ids, function(entity_id) {
-    entity_rows <- rows[rows$entity_id == entity_id, ]
-    primary_idx <- which(entity_rows$is_primary_ref_id %in% TRUE)
-    primary_row <- if (length(primary_idx)) entity_rows[primary_idx[[1]], ] else entity_rows[1L, ]
-    preferred_idx <- which(entity_rows$is_published_form %in% TRUE)
-    preferred_row <- if (length(preferred_idx)) entity_rows[preferred_idx[[1]], ] else primary_row
-    arxiv_id <- entity_rows$ref_id[grepl("^arxiv:", entity_rows$ref_id)]
-    doi_id <- entity_rows$ref_id[grepl("^doi:", entity_rows$ref_id)]
-    if (!length(arxiv_id) && !length(doi_id)) {
-      return(NULL)
+  rows[, primary_rank := as.integer(is_primary_ref_id %in% TRUE)]
+  rows[, preferred_rank := as.integer(is_published_form %in% TRUE)]
+  rows[, arxiv_surface := ifelse(grepl("^arxiv:", ref_id), ref_id, NA_character_)]
+  rows[, doi_surface := ifelse(grepl("^doi:", ref_id), sub("^doi:", "", ref_id, ignore.case = TRUE), NA_character_)]
+
+  primary_rows <- rows[order(entity_id, -primary_rank, ref_id), .SD[1L], by = entity_id]
+  preferred_rows <- rows[order(entity_id, -preferred_rank, ref_id), .SD[1L], by = entity_id]
+  entity_surface <- rows[, .(
+    arxiv_id = {
+      hit <- arxiv_surface[!is.na(arxiv_surface) & nzchar(arxiv_surface)]
+      if (length(hit)) hit[[1L]] else NA_character_
+    },
+    doi = {
+      hit <- doi_surface[!is.na(doi_surface) & nzchar(doi_surface)]
+      if (length(hit)) hit[[1L]] else NA_character_
     }
-    data.table::data.table(
-      entity_id = entity_id,
-      arxiv_id = if (length(arxiv_id)) as.character(arxiv_id[[1]]) else NA_character_,
-      doi = if (length(doi_id)) sub("^doi:", "", as.character(doi_id[[1]]), ignore.case = TRUE) else NA_character_,
-      primary_ref_id = as.character(primary_row$ref_id[[1]] %||% NA_character_),
-      preferred_citation_ref_id = as.character(preferred_row$ref_id[[1]] %||% NA_character_),
-      display_title = as.character(preferred_row$title[[1]] %||% primary_row$title[[1]] %||% NA_character_),
-      updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
-    )
-  }), fill = TRUE)
+  ), by = entity_id]
+
+  out <- primary_rows[preferred_rows[, .(entity_id, preferred_citation_ref_id = ref_id, preferred_title = title)], on = "entity_id"]
+  out <- out[entity_surface, on = "entity_id", nomatch = 0L]
+  out[, `:=`(
+    primary_ref_id = as.character(ref_id),
+    preferred_citation_ref_id = as.character(preferred_citation_ref_id %||% ref_id),
+    display_title = as.character(preferred_title %||% title %||% NA_character_),
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )]
+  out <- out[, .(
+    entity_id,
+    arxiv_id = as.character(arxiv_id),
+    doi = as.character(doi),
+    primary_ref_id,
+    preferred_citation_ref_id,
+    display_title,
+    updated_at
+  )]
 
   if (!nrow(out)) {
     return(data.table::data.table(

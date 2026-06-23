@@ -1,3 +1,15 @@
+# litxr 0.1.4
+
+- Removed the live alias-table dependency from the entity/status read path and
+  kept canonical resolution on the thin `entity_id` layer.
+- Reworked the entity-index builders to use keyed joins and grouped
+  aggregation in the main path, while keeping compatibility-only helpers out
+  of the hot path.
+- Made entity-status freshness updates incremental and narrowed the refresh
+  path to touched rows instead of full rebuilds.
+- Added smoke coverage for the narrow-first enrichment path and the entity
+  status/report readers.
+
 # litxr 0.1.3
 
 - Rewrote the common upsert core around keyed `data.table` joins so the normal

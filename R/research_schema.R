@@ -2590,7 +2590,6 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
-  .litxr_entity_index_maybe_refresh(cfg)
   refs <- if (!is.null(ref_ids) && length(ref_ids) && is.null(collection_id)) {
     .litxr_read_project_references_by_keys(cfg, ref_ids)
   } else {
@@ -2617,7 +2616,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     ))
   }
 
-  aliases <- .litxr_read_project_ref_aliases_index(cfg, columns = c("ref_id", "entity_id"))
+  aliases <- data.table::as.data.table(.litxr_ref_entity_resolution_map(cfg, ref_ids = if (nrow(refs)) refs$ref_id else character()))
   entity_status <- .litxr_read_project_entity_status_index(
     cfg,
     columns = c(
@@ -2636,56 +2635,43 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
       "digest_schema_version"
     )
   )
-  entity_links <- .litxr_read_project_entity_collections_index(cfg, columns = c("entity_id", "collection_id"))
-
-  alias_map <- if (nrow(aliases)) {
-    data.table::data.table(
-      ref_id = as.character(aliases$ref_id),
-      entity_id = as.character(aliases$entity_id)
-    )
-  } else {
-    data.table::data.table(ref_id = character(), entity_id = character())
-  }
-
-  collection_map <- if (nrow(entity_links)) {
-    split_ids <- split(as.character(entity_links$collection_id), as.character(entity_links$entity_id))
-    data.table::data.table(
-      entity_id = names(split_ids),
-      collection_ids = vapply(split_ids, function(x) paste(sort(unique(x)), collapse = ","), character(1))
-    )
-  } else {
-    data.table::data.table(entity_id = character(), collection_ids = character())
-  }
+  entity_links <- data.table::as.data.table(.litxr_read_project_entity_collections_index(cfg, columns = c("entity_id", "collection_id")))
 
   out <- data.table::data.table(
     ref_id = as.character(refs$ref_id),
     title = if ("title" %in% names(refs)) as.character(refs$title) else NA_character_,
     entry_type = if ("entry_type" %in% names(refs)) as.character(refs$entry_type) else NA_character_
   )
-  out <- merge(out, alias_map, by = "ref_id", all.x = TRUE, sort = FALSE)
-  out <- merge(out, collection_map, by = "entity_id", all.x = TRUE, sort = FALSE)
+  out$entity_id <- aliases$entity_id[match(out$ref_id, aliases$ref_id)]
   if (nrow(entity_status)) {
-    out <- merge(
-      out,
-      data.table::data.table(
-        entity_id = as.character(entity_status$entity_id),
-        has_md = as.logical(entity_status$has_fulltxt_md),
-        has_llm_digest = as.logical(entity_status$has_llm_digest),
-        llm_schema_version = as.character(entity_status$digest_schema_version),
-        llm_paper_type = as.character(entity_status$llm_paper_type),
-        has_standardized_findings = as.logical(entity_status$has_standardized_findings),
-        n_standardized_findings = suppressWarnings(as.integer(entity_status$n_standardized_findings)),
-        has_descriptive_stats = as.logical(entity_status$has_descriptive_stats),
-        n_descriptive_stats = suppressWarnings(as.integer(entity_status$n_descriptive_stats)),
-        has_anchor_references = as.logical(entity_status$has_anchor_references),
-        n_anchor_references = suppressWarnings(as.integer(entity_status$n_anchor_references)),
-        has_citation_logic_nodes = as.logical(entity_status$has_citation_logic_nodes),
-        n_citation_logic_nodes = suppressWarnings(as.integer(entity_status$n_citation_logic_nodes))
-      ),
-      by = "entity_id",
-      all.x = TRUE,
-      sort = FALSE
+    status_view <- data.table::data.table(
+      entity_id = as.character(entity_status$entity_id),
+      has_md = as.logical(entity_status$has_fulltxt_md),
+      has_llm_digest = as.logical(entity_status$has_llm_digest),
+      llm_schema_version = as.character(entity_status$digest_schema_version),
+      llm_paper_type = as.character(entity_status$llm_paper_type),
+      has_standardized_findings = as.logical(entity_status$has_standardized_findings),
+      n_standardized_findings = suppressWarnings(as.integer(entity_status$n_standardized_findings)),
+      has_descriptive_stats = as.logical(entity_status$has_descriptive_stats),
+      n_descriptive_stats = suppressWarnings(as.integer(entity_status$n_descriptive_stats)),
+      has_anchor_references = as.logical(entity_status$has_anchor_references),
+      n_anchor_references = suppressWarnings(as.integer(entity_status$n_anchor_references)),
+      has_citation_logic_nodes = as.logical(entity_status$has_citation_logic_nodes),
+      n_citation_logic_nodes = suppressWarnings(as.integer(entity_status$n_citation_logic_nodes))
     )
+    idx <- match(out$entity_id, status_view$entity_id)
+    out$has_md <- status_view$has_md[idx]
+    out$has_llm_digest <- status_view$has_llm_digest[idx]
+    out$llm_schema_version <- status_view$llm_schema_version[idx]
+    out$llm_paper_type <- status_view$llm_paper_type[idx]
+    out$has_standardized_findings <- status_view$has_standardized_findings[idx]
+    out$n_standardized_findings <- status_view$n_standardized_findings[idx]
+    out$has_descriptive_stats <- status_view$has_descriptive_stats[idx]
+    out$n_descriptive_stats <- status_view$n_descriptive_stats[idx]
+    out$has_anchor_references <- status_view$has_anchor_references[idx]
+    out$n_anchor_references <- status_view$n_anchor_references[idx]
+    out$has_citation_logic_nodes <- status_view$has_citation_logic_nodes[idx]
+    out$n_citation_logic_nodes <- status_view$n_citation_logic_nodes[idx]
   } else {
     out$has_md <- FALSE
     out$has_llm_digest <- FALSE
@@ -2699,6 +2685,26 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     out$n_anchor_references <- 0L
     out$has_citation_logic_nodes <- FALSE
     out$n_citation_logic_nodes <- 0L
+  }
+
+  collection_map <- if (nrow(entity_links)) {
+    entity_links_df <- as.data.frame(entity_links)
+    stats::aggregate(
+      collection_id ~ entity_id,
+      data = entity_links_df,
+      FUN = function(x) paste(sort(unique(as.character(x))), collapse = ",")
+    )
+  } else {
+    data.table::data.table(entity_id = character(), collection_ids = character())
+  }
+  if (nrow(collection_map) && "collection_id" %in% names(collection_map)) {
+    data.table::setnames(collection_map, "collection_id", "collection_ids")
+  }
+  if (nrow(collection_map)) {
+    idx <- match(out$entity_id, collection_map$entity_id)
+    out$collection_ids <- collection_map$collection_ids[idx]
+  } else {
+    out$collection_ids <- ""
   }
 
   if (!("llm_schema_version" %in% names(out))) out$llm_schema_version <- rep(NA_character_, nrow(out))
