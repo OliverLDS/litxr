@@ -1,5 +1,10 @@
 #!/usr/bin/env Rscript
 
+script_arg <- commandArgs(trailingOnly = FALSE)
+script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1])
+script_dir <- dirname(script_file)
+source(file.path(script_dir, "_diagnostics.R"), local = TRUE)
+
 normalize_arxiv_input <- function(x) {
   x <- as.character(x)
   if (!length(x) || is.na(x[[1]])) return(NA_character_)
@@ -37,6 +42,7 @@ usage <- function() {
       "                     Bare arXiv ids like 2505.10468 are accepted.",
       "  --doi DOI          Published DOI to link to the arXiv paper.",
       "                     Bare DOIs, doi:... values, and doi.org URLs are accepted.",
+      "  --diagnose         Emit step timings and I/O metadata to stderr.",
       "  -h, --help         Show this help message.",
       "",
       "Behavior:",
@@ -53,7 +59,8 @@ parse_args <- function(args) {
   out <- list(
     help = FALSE,
     arxiv_ref_id = NA_character_,
-    doi = NA_character_
+    doi = NA_character_,
+    diagnose = FALSE
   )
 
   i <- 1L
@@ -61,6 +68,11 @@ parse_args <- function(args) {
     arg <- args[[i]]
     if (identical(arg, "-h") || identical(arg, "--help")) {
       out$help <- TRUE
+      i <- i + 1L
+      next
+    }
+    if (identical(arg, "--diagnose")) {
+      out$diagnose <- TRUE
       i <- i + 1L
       next
     }
@@ -85,8 +97,23 @@ parse_args <- function(args) {
   out
 }
 
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  if (exists("diag_state", inherits = FALSE)) {
+    litxr_diag_emit(litxr_diag_finish(diag_state, status = "error", error = err))
+  }
+  cat(jsonlite::toJSON(list(status = "error", error = err), auto_unbox = TRUE, null = "null", pretty = FALSE), "\n", sep = "")
+  quit(save = "no", status = 1L)
+})
+
 args <- commandArgs(trailingOnly = TRUE)
 parsed <- parse_args(args)
+diag_state <- litxr_diag_init(
+  "scripts/human/enrich_arxiv_with_doi.R",
+  enabled = parsed$diagnose,
+  args = list(arxiv_ref_id = parsed$arxiv_ref_id, doi = parsed$doi)
+)
 
 if (isTRUE(parsed$help)) {
   usage()
@@ -105,9 +132,16 @@ if (is.na(doi_ref_id) || !nzchar(doi_ref_id)) {
 }
 
 cat(sprintf("Linking %s -> %s\n", arxiv_ref_id, doi_ref_id))
+link_started <- Sys.time()
 result <- litxr::litxr_enrich_arxiv_with_doi(
   arxiv_ref_id = arxiv_ref_id,
   doi = doi_ref_id
+)
+diag_state <- litxr_diag_step(
+  diag_state,
+  "litxr_enrich_arxiv_with_doi",
+  link_started,
+  inputs = list(list(arxiv_ref_id = arxiv_ref_id, doi_ref_id = doi_ref_id))
 )
 
 cat("status: ok\n")
@@ -115,3 +149,13 @@ cat(sprintf("arxiv_ref_id: %s\n", result$arxiv_ref_id))
 cat(sprintf("doi_ref_id: %s\n", result$doi_ref_id))
 cat(sprintf("arxiv_title: %s\n", result$arxiv_title))
 cat(sprintf("doi_title: %s\n", result$doi_title))
+litxr_diag_emit(
+  litxr_diag_finish(
+    diag_state,
+    status = "ok",
+    details = list(
+      arxiv_ref_id = result$arxiv_ref_id,
+      doi_ref_id = result$doi_ref_id
+    )
+  )
+)

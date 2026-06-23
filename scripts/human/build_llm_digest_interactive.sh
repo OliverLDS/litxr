@@ -5,9 +5,11 @@ set -eu
 script_dir="${0:A:h}"
 repo_root="${script_dir:A:h:h}"
 script_root="${repo_root}/scripts"
+source "${script_dir}/_diagnostics.zsh"
 json_path_default="~/Downloads/litxr_schema.json"
 prompt_version_default="v4.0"
 return_format_default="download_json_file"
+diagnose=false
 
 usage() {
   cat <<'EOF'
@@ -28,6 +30,7 @@ Options:
                         `markdown_fenced_json` asks for a fenced JSON block
                         in chat; you must paste that raw content manually at
                         ingest time.
+  --diagnose         Emit step timings and I/O metadata to stderr.
   -h, --help            Show this help message.
 
 Workflow:
@@ -81,6 +84,10 @@ while [[ $# -gt 0 ]]; do
       return_format="$2"
       shift 2
       ;;
+    --diagnose)
+      diagnose=true
+      shift
+      ;;
     --*)
       print -u2 "Unknown argument: $1"
       exit 1
@@ -115,14 +122,29 @@ normalize_ref_id() {
 
 ref_id="$(normalize_ref_id "$ref_id")"
 
+if $diagnose; then
+  diag_log "script=build_llm_digest_interactive.sh ref_id=${ref_id} return_format=${return_format} prompt_version=${prompt_version}"
+fi
+
+status_started="$(diag_now)"
 status_json="$(Rscript "$script_root/check_llm_digest_status.R" --ref-id "$ref_id")"
+if $diagnose; then
+  diag_log "step=check_llm_digest_status elapsed_sec=$(diag_elapsed "$status_started" "$(diag_now)")"
+fi
 if [[ "$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[1]); if (!identical(x$status, "ok")) quit(save="no", status=1L); cat(if (isTRUE(x$already_digested)) "yes" else "no")' "$status_json")" == "yes" ]]; then
   print -u2 "Warning: $ref_id already has a digest; the workflow will continue in revise mode."
 fi
 mode="$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[1]); if (!identical(x$status, "ok")) quit(save="no", status=1L); cat(if (isTRUE(x$already_digested)) "revise" else "create")' "$status_json")"
 
+prompt_started="$(diag_now)"
 prompt_json="$(Rscript "$script_root/build_llm_digest_prompt.R" --ref-id "$ref_id" --mode "$mode" --prompt-version "$prompt_version" --return-format "$return_format")"
+if $diagnose; then
+  diag_log "step=build_llm_digest_prompt elapsed_sec=$(diag_elapsed "$prompt_started" "$(diag_now)")"
+fi
 prompt_text="$(Rscript -e 'x<-jsonlite::fromJSON(commandArgs(trailingOnly=TRUE)[1]); if (!identical(x$status, "ok")) quit(save="no", status=1L); cat(x$prompt)' "$prompt_json")"
+if $diagnose; then
+  diag_log "prompt_bytes=$(printf '%s' "$prompt_text" | wc -c | tr -d ' ')"
+fi
 
 printf '%s' "$prompt_text" | pbcopy
 print "Prompt copied to clipboard with pbcopy."
@@ -158,8 +180,19 @@ if [[ "$return_format" == "inline_raw_json" || "$return_format" == "markdown_fen
     exit 1
   fi
   ingest_args+=( --json-raw "$json_raw" )
+  if $diagnose; then
+    diag_log "input_mode=clipboard json_bytes=$(printf '%s' "$json_raw" | wc -c | tr -d ' ')"
+  fi
 else
   ingest_args+=( --json-path "$json_path" )
+  if $diagnose; then
+    json_abs_path="${json_path/#\~/$HOME}"
+    diag_log "input_mode=file $(diag_file_meta "$json_abs_path")"
+  fi
 fi
 
+ingest_started="$(diag_now)"
 Rscript "${ingest_args[@]}"
+if $diagnose; then
+  diag_log "step=ingest_llm_digest_json elapsed_sec=$(diag_elapsed "$ingest_started" "$(diag_now)")"
+fi

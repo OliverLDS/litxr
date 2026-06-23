@@ -4,6 +4,11 @@ log_line <- function(...) {
   cat(..., "\n", file = stderr(), sep = "")
 }
 
+script_arg <- commandArgs(trailingOnly = FALSE)
+script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1])
+script_dir <- dirname(script_file)
+source(file.path(script_dir, "_diagnostics.R"), local = TRUE)
+
 usage <- function() {
   cat(
     paste(
@@ -16,6 +21,7 @@ usage <- function() {
       "  --bibtex PATH   Input BibTeX file path.",
       "  --ref-ids LIST  Comma-separated litxr ref_ids, arXiv ids, or DOIs.",
       "  --output PATH   Output markdown file path. Default: same path with .md suffix.",
+      "  --diagnose      Emit step timings and I/O metadata to stderr.",
       "  -h, --help      Show this help message.",
       "",
       "Behavior:",
@@ -32,6 +38,7 @@ usage <- function() {
 parse_args <- function(args) {
   out <- list(
     help = FALSE,
+    diagnose = FALSE,
     bibtex = NULL,
     ref_ids = NULL,
     output = NULL
@@ -43,6 +50,11 @@ parse_args <- function(args) {
     arg <- args[[i]]
     if (identical(arg, "-h") || identical(arg, "--help")) {
       out$help <- TRUE
+      i <- i + 1L
+      next
+    }
+    if (identical(arg, "--diagnose")) {
+      out$diagnose <- TRUE
       i <- i + 1L
       next
     }
@@ -86,6 +98,15 @@ parse_args <- function(args) {
 
   out
 }
+
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  if (exists("diag_state", inherits = FALSE)) {
+    litxr_diag_emit(litxr_diag_finish(diag_state, status = "error", error = err))
+  }
+  quit(save = "no", status = 1L)
+})
 
 parse_ref_ids <- function(x) {
   if (is.null(x) || !length(x)) {
@@ -235,13 +256,32 @@ scalar_methods <- function(x) {
 
 args <- commandArgs(trailingOnly = TRUE)
 parsed <- parse_args(args)
+diag_state <- litxr_diag_init(
+  "scripts/human/report_ref_identification_strategy_from_bibtex.R",
+  enabled = parsed$diagnose,
+  args = list(
+    bibtex = parsed$bibtex,
+    ref_ids = parsed$ref_ids,
+    output = parsed$output
+  )
+)
 
 if (isTRUE(parsed$help)) {
   usage()
   quit(save = "no", status = 0L)
 }
 
+config_started <- Sys.time()
 cfg <- litxr::litxr_read_config()
+diag_state <- litxr_diag_step(
+  diag_state,
+  "read_config",
+  config_started,
+  outputs = list(list(
+    config_path = attr(cfg, "config_path", exact = TRUE),
+    config_root = attr(cfg, "config_root", exact = TRUE)
+  ))
+)
 input_mode <- if (!is.null(parsed$ref_ids)) "ref_ids" else "bibtex"
 
 if (identical(input_mode, "bibtex")) {
@@ -278,6 +318,14 @@ if (identical(input_mode, "bibtex")) {
   entries <- list(entries = as.list(ref_ids), keys = ref_ids)
 }
 
+diag_state <- litxr_diag_step(
+  diag_state,
+  "read_inputs",
+  config_started,
+  inputs = list(if (identical(input_mode, "bibtex")) litxr_diag_file_meta(bibtex_path) else list(ref_ids = entries$keys)),
+  outputs = list(list(entry_count = length(entries$entries), input_mode = input_mode))
+)
+
 report_lines <- c(
   "# Reference Identification Strategy",
   "",
@@ -305,6 +353,7 @@ report_lines <- c(
 missing <- character()
 resolved_entries <- vector("list", length(entries$entries))
 resolved_ref_ids <- character()
+resolve_started <- Sys.time()
 
 for (i in seq_along(entries$entries)) {
   entry_lines <- if (identical(input_mode, "bibtex")) {
@@ -347,6 +396,16 @@ for (i in seq_along(entries$entries)) {
 }
 
 digest_map <- read_digests_by_ref_ids(resolved_ref_ids, cfg)
+diag_state <- litxr_diag_step(
+  diag_state,
+  "resolve_refs_and_load_identification_strategy",
+  resolve_started,
+  outputs = list(list(
+    resolved_ref_ids = unique(resolved_ref_ids),
+    digest_count = length(digest_map),
+    missing_count = length(unique(missing))
+  ))
+)
 
 for (entry in resolved_entries) {
   if (!length(entry)) {
@@ -369,11 +428,29 @@ for (entry in resolved_entries) {
   )
 }
 
+write_started <- Sys.time()
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
 writeLines(report_lines, output_path)
+diag_state <- litxr_diag_step(
+  diag_state,
+  "write_output",
+  write_started,
+  outputs = list(litxr_diag_file_meta(output_path))
+)
 
 log_line(sprintf("written=%s", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
 if (length(missing)) {
   label <- if (identical(input_mode, "bibtex")) "unresolved_bib_keys" else "unresolved_ref_ids"
   log_line(sprintf("%s=%s", label, paste(unique(missing), collapse = ", ")))
 }
+litxr_diag_emit(
+  litxr_diag_finish(
+    diag_state,
+    status = "ok",
+    details = list(
+      output_path = normalizePath(output_path, winslash = "/", mustWork = FALSE),
+      missing = unique(missing),
+      resolved_ref_ids = unique(resolved_ref_ids)
+    )
+  )
+)

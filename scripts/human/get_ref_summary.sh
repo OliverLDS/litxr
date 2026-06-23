@@ -2,6 +2,10 @@
 
 set -eu
 
+script_dir="${0:A:h}"
+source "${script_dir}/_diagnostics.zsh"
+diagnose=false
+
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   cat <<'EOF'
 Usage:
@@ -12,6 +16,7 @@ Options:
   --report MODE  Report mode: key or complete. Default: key.
   --key          Report key research-schema fields only. This is the default.
   --complete     Report the complete research-schema digest.
+  --diagnose     Emit step timings and I/O metadata to stderr.
   -h, --help     Show this help message.
 
 Notes:
@@ -46,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       fi
       report_mode="$2"
       shift 2
+      ;;
+    --diagnose)
+      diagnose=true
+      shift
       ;;
     --key)
       report_mode="key"
@@ -84,7 +93,12 @@ if [[ "$report_mode" != "key" && "$report_mode" != "complete" ]]; then
   exit 1
 fi
 
-Rscript - "$ref_key" "$report_mode" <<'EOF'
+if $diagnose; then
+  diag_log "script=get_ref_summary.sh ref_key=${ref_key} report_mode=${report_mode}"
+fi
+
+report_started="$(diag_now)"
+report_md="$(Rscript - "$ref_key" "$report_mode" <<'EOF'
 args <- commandArgs(trailingOnly = TRUE)
 ref_key <- args[[1]]
 report_mode <- args[[2]]
@@ -374,3 +388,11 @@ if (is.null(digest)) {
   cat(paste(to_md_lines(digest, report_mode = report_mode), collapse = "\n"), "\n", sep = "")
 }
 EOF
+)"
+
+if $diagnose; then
+  diag_log "step=render_summary elapsed_sec=$(diag_elapsed "$report_started" "$(diag_now)")"
+  diag_log "report_bytes=$(printf '%s' "$report_md" | wc -c | tr -d ' ')"
+fi
+
+printf '%s\n' "$report_md"

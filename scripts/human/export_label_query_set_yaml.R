@@ -4,6 +4,11 @@ log_line <- function(...) {
   cat(..., "\n", file = stderr(), sep = "")
 }
 
+script_arg <- commandArgs(trailingOnly = FALSE)
+script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1])
+script_dir <- dirname(script_file)
+source(file.path(script_dir, "_diagnostics.R"), local = TRUE)
+
 usage <- function() {
   cat(
     paste(
@@ -13,6 +18,7 @@ usage <- function() {
       "Options:",
       "  --cache-dir PATH   Existing label-query model cache directory containing metadata.fst.",
       "  --output PATH      Output query_set.yaml path. Default: <parent>/query_set.yaml",
+      "  --diagnose         Emit step timings and I/O metadata to stderr.",
       "  -h, --help         Show this help message.",
       "",
       "Behavior:",
@@ -25,12 +31,17 @@ usage <- function() {
 }
 
 parse_args <- function(args) {
-  out <- list(help = FALSE, cache_dir = NULL, output = NULL)
+  out <- list(help = FALSE, diagnose = FALSE, cache_dir = NULL, output = NULL)
   i <- 1L
   while (i <= length(args)) {
     key <- args[[i]]
     if (identical(key, "-h") || identical(key, "--help")) {
       out$help <- TRUE
+      i <- i + 1L
+      next
+    }
+    if (identical(key, "--diagnose")) {
+      out$diagnose <- TRUE
       i <- i + 1L
       next
     }
@@ -50,6 +61,16 @@ parse_args <- function(args) {
   }
   out
 }
+
+options(error = function() {
+  err <- trimws(geterrmessage())
+  if (!nzchar(err)) err <- "Unknown error"
+  if (exists("diag_state", inherits = FALSE)) {
+    litxr_diag_emit(litxr_diag_finish(diag_state, status = "error", error = err))
+  }
+  emit_json(list(status = "error", error = err))
+  quit(save = "no", status = 1L)
+})
 
 query_set_from_metadata <- function(metadata) {
   metadata <- data.table::as.data.table(metadata)
@@ -77,6 +98,11 @@ emit_json <- function(x) {
 
 args <- commandArgs(trailingOnly = TRUE)
 parsed <- parse_args(args)
+diag_state <- litxr_diag_init(
+  "scripts/human/export_label_query_set_yaml.R",
+  enabled = parsed$diagnose,
+  args = list(cache_dir = parsed$cache_dir, output = parsed$output)
+)
 
 if (isTRUE(parsed$help)) {
   usage()
@@ -100,16 +126,44 @@ output_path <- if (is.null(parsed$output) || !nzchar(trimws(parsed$output))) {
   path.expand(parsed$output)
 }
 
+read_started <- Sys.time()
 metadata <- fst::read_fst(metadata_path, as.data.table = TRUE)
+diag_state <- litxr_diag_step(
+  diag_state,
+  "read_metadata",
+  read_started,
+  inputs = list(litxr_diag_file_meta(metadata_path))
+)
+
 query_set <- query_set_from_metadata(metadata)
 
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+write_started <- Sys.time()
 litxr:::.litxr_write_yaml_atomic(query_set, output_path)
+diag_state <- litxr_diag_step(
+  diag_state,
+  "write_yaml",
+  write_started,
+  inputs = list(litxr_diag_file_meta(metadata_path)),
+  outputs = list(litxr_diag_file_meta(output_path))
+)
 
 log_line(sprintf("cache_dir=%s", cache_dir))
 log_line(sprintf("metadata_path=%s", metadata_path))
 log_line(sprintf("output_path=%s", normalizePath(output_path, winslash = "/", mustWork = FALSE)))
 log_line(sprintf("categories=%d", length(query_set)))
+litxr_diag_emit(
+  litxr_diag_finish(
+    diag_state,
+    status = "ok",
+    details = list(
+      cache_dir = cache_dir,
+      metadata_path = metadata_path,
+      output_path = normalizePath(output_path, winslash = "/", mustWork = FALSE),
+      categories = length(query_set)
+    )
+  )
+)
 
 emit_json(list(
   status = "ok",
