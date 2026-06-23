@@ -93,6 +93,13 @@
   links[!duplicated(link_key), ]
 }
 
+.litxr_runtime_project_compatibility_projection <- function(cfg) {
+  list(
+    refs = .litxr_authoritative_project_records(cfg),
+    links = .litxr_authoritative_project_reference_links(cfg)
+  )
+}
+
 .litxr_authoritative_entity_inputs <- function(cfg) {
   collections <- .litxr_config_collections(cfg)
   empty_links <- data.table::data.table(
@@ -271,98 +278,28 @@
 }
 
 .litxr_read_project_references_index <- function(cfg, columns = NULL) {
-  main <- .litxr_read_project_references_main_index(cfg, columns = columns)
-  delta <- .litxr_read_project_references_delta_index(cfg, columns = columns)
-  if (!nrow(delta)) {
-    return(main)
+  refs <- .litxr_runtime_project_compatibility_projection(cfg)$refs
+  if (!nrow(refs)) {
+    return(refs)
   }
-  .litxr_upsert_records(
-    main,
-    delta,
-    conflict_path = .litxr_project_reference_conflict_path(cfg)
-  )
+  if (is.null(columns) || !length(columns)) {
+    return(refs)
+  }
+  keep <- intersect(columns, names(refs))
+  if (!length(keep)) {
+    return(refs[, 0, with = FALSE])
+  }
+  refs[, keep, with = FALSE]
 }
 
 .litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL, hydrate = FALSE, wide_projection_limit = 300L, keyed_fst_read_threshold = getOption("litxr.keyed_fst_read_threshold", 32L)) {
-  path <- .litxr_project_references_index_path(cfg)
-  delta_path <- .litxr_project_references_delta_index_path(cfg)
   read_columns <- .litxr_project_reference_lookup_columns(columns)
-  if (file.exists(delta_path)) {
-    refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
-    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    if (isTRUE(hydrate)) {
-      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
-    }
-    return(out)
+  refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
+  if (!nrow(refs)) {
+    return(refs)
   }
-  if (!file.exists(path)) {
-    return(data.table::data.table())
-  }
-
-  index_columns <- .litxr_read_index_columns_safe(path)
-  if (is.null(index_columns)) {
-    warning(
-      "Project reference index is damaged and will be rebuilt from collection indexes before keyed lookup: ",
-      path,
-      call. = FALSE
-    )
-    .litxr_rebuild_project_reference_indexes(cfg)
-    refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
-    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    if (isTRUE(hydrate)) {
-      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
-    }
-    return(out)
-  }
-  if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
-    refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
-    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    if (isTRUE(hydrate)) {
-      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
-    }
-    return(out)
-  }
-
-  keyed_fst_read_threshold <- .litxr_keyed_fst_read_threshold(keyed_fst_read_threshold)
-  if (length(keys) > keyed_fst_read_threshold) {
-    subset_columns <- unique(c(read_columns, "ref_id", "source_id"))
-    refs <- .litxr_read_fst_subset(path, columns = subset_columns)
-    if (!nrow(refs)) {
-      return(data.table::data.table())
-    }
-    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    if (!nrow(out)) {
-      return(out)
-    }
-    key <- .litxr_upsert_key(out)
-    out <- out[!duplicated(key), ]
-    if (isTRUE(hydrate)) {
-      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
-    }
-    return(out)
-  }
-
-  idx <- integer()
-  if ("ref_id" %in% index_columns) {
-    ref_data <- fst::read_fst(path, columns = "ref_id", as.data.table = TRUE)
-    idx <- which(ref_data$ref_id %in% keys)
-  }
-  if (!length(idx) && "source_id" %in% index_columns) {
-    source_data <- fst::read_fst(path, columns = "source_id", as.data.table = TRUE)
-    idx <- which(source_data$source_id %in% keys)
-  }
-  if (!length(idx)) {
-    return(data.table::data.table())
-  }
-
-  rows <- lapply(idx, function(i) {
-    .litxr_index_decode(fst::read_fst(path, from = i, to = i, as.data.table = TRUE))
-  })
-  out <- data.table::rbindlist(rows, fill = TRUE)
+  source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+  out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
   key <- .litxr_upsert_key(out)
   out <- out[!duplicated(key), ]
   if (isTRUE(hydrate)) {
@@ -375,16 +312,23 @@
   entities_path <- .litxr_project_entities_index_path(cfg)
   entity_collections_path <- .litxr_project_entity_collections_index_path(cfg)
   entity_status_path <- .litxr_project_entity_status_index_path(cfg)
-  refs_path <- .litxr_project_references_index_path(cfg)
-  links_path <- .litxr_project_reference_collections_index_path(cfg)
+  collections <- .litxr_config_collections(cfg)
   needs_build <- !file.exists(entities_path) ||
     !file.exists(entity_collections_path) ||
     !file.exists(entity_status_path)
-  if (!needs_build && file.exists(refs_path) && file.exists(links_path)) {
-    refs_mtime <- file.info(refs_path)$mtime
-    links_mtime <- file.info(links_path)$mtime
+  if (!needs_build && length(collections)) {
     entity_mtime <- file.info(entities_path)$mtime
-    needs_build <- isTRUE(entity_mtime < refs_mtime) || isTRUE(entity_mtime < links_mtime)
+    collection_mtimes <- vapply(collections, function(collection) {
+      local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+      index_path <- .litxr_index_path(local_path)
+      if (!file.exists(index_path)) {
+        return(as.POSIXct(NA))
+      }
+      file.info(index_path)$mtime
+    }, as.POSIXct(NA))
+    if (length(collection_mtimes)) {
+      needs_build <- any(vapply(collection_mtimes, function(x) isTRUE(entity_mtime < x), logical(1)))
+    }
   }
   if (isTRUE(needs_build)) {
     .litxr_build_entity_indexes(cfg)
@@ -425,17 +369,18 @@
 }
 
 .litxr_read_project_reference_collections_index <- function(cfg, columns = NULL) {
-  main <- .litxr_read_project_reference_collections_main_index(cfg, columns = columns)
-  delta <- .litxr_read_project_reference_collections_delta_index(cfg, columns = columns)
-  if (!nrow(delta)) {
-    return(main)
+  links <- .litxr_runtime_project_compatibility_projection(cfg)$links
+  if (!nrow(links)) {
+    return(links)
   }
-  if (!nrow(main)) {
-    return(delta)
+  if (is.null(columns) || !length(columns)) {
+    return(links)
   }
-  merged <- data.table::rbindlist(list(main, delta), fill = TRUE)
-  link_key <- paste(merged$ref_id, merged$collection_id, sep = "\r")
-  merged[!duplicated(link_key, fromLast = TRUE), ]
+  keep <- intersect(columns, names(links))
+  if (!length(keep)) {
+    return(links[, 0, with = FALSE])
+  }
+  links[, keep, with = FALSE]
 }
 
 .litxr_write_project_reference_collections_index <- function(cfg, links) {

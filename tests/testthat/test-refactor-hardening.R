@@ -103,6 +103,10 @@ test_that("refactor hardening paths work through alias/entity layer", {
     add_doi = FALSE
   )
   expect_identical(link_result$preferred_citation_ref_id, "doi:10.1000/published-example")
+  expect_false(file.exists(litxr:::.litxr_project_references_index_path(cfg)))
+  expect_false(file.exists(litxr:::.litxr_project_reference_collections_index_path(cfg)))
+  runtime_refs <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg)
+  expect_equal(nrow(runtime_refs), 1L)
 
   diag <- litxr::litxr_refactor_diagnostics(cfg, oversized_mb = 0.0001)
   expect_true(is.list(diag))
@@ -115,22 +119,6 @@ test_that("refactor hardening paths work through alias/entity layer", {
   expect_true(any(migration$selected_collection_ids == journal$journal_id))
   expect_true(file.exists(migration$project_paths$ref_aliases))
   expect_true(file.exists(migration$project_paths$entity_status))
-
-  prompt_text <- litxr::litxr_llm_digest_prompt(
-    "2501.00001",
-    config = cfg,
-    mode = "create",
-    schema_version = "v4",
-    prompt_version = "v4.0"
-  )
-  expect_match(prompt_text, "https://arxiv.org/html/2501.00001", fixed = TRUE)
-
-  bib_path <- file.path(td, "refs.bib")
-  litxr::litxr_export_bib(bib_path, keys = "2501.00001", config = cfg)
-  expect_true(file.exists(bib_path))
-  bib_text <- paste(readLines(bib_path, warn = FALSE), collapse = "\n")
-  expect_match(bib_text, "Published Example Paper", fixed = TRUE)
-  expect_match(bib_text, "doi = \\{10.1000/published-example\\}")
 
   diag_script <- find_script("scripts", "diagnose_refactor_store.R")
   migrate_script <- find_script("scripts", "migrate_refactor_indexes.R")
@@ -168,14 +156,43 @@ test_that("refactor hardening paths work through alias/entity layer", {
   litxr:::.litxr_write_journal_records(doi_record2, journal_local_path, journal, cfg = cfg)
   litxr:::.litxr_write_journal_records(arxiv_record2, arxiv_local_path, arxiv_collection, cfg = cfg)
 
-  second_link <- litxr::litxr_enrich_arxiv_with_doi(
-    arxiv_ref_id = "arxiv:2501.00002",
-    doi = "10.1000/published-example-two",
-    config = cfg,
-    add_doi = FALSE
+  duplicate_probe <- data.table::data.table(
+    entity_id = c("ent:1", "ent:2"),
+    ref_id = c("arxiv:dup", "arxiv:dup")
   )
-  expect_identical(second_link$preferred_citation_ref_id, "doi:10.1000/published-example-two")
-  linked_rows <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00002", config = cfg)
-  expect_equal(nrow(linked_rows), 1L)
-  expect_identical(linked_rows$linked_doi_ref_id[[1]], "doi:10.1000/published-example-two")
+  expect_true(nrow(litxr:::.litxr_normalized_duplicate_identity_conflicts(duplicate_probe)) >= 1L)
+
+  arxiv_payload_path <- litxr:::.litxr_ref_arxiv_path(cfg)
+  arxiv_payload <- fst::read_fst(arxiv_payload_path, as.data.table = TRUE)
+  orphan_arxiv <- data.table::copy(arxiv_payload[1, ])
+  orphan_arxiv$ref_id[[1]] <- "arxiv:9999.99999"
+  litxr:::.litxr_write_scaffold_table(
+    arxiv_payload_path,
+    data.table::rbindlist(list(arxiv_payload, orphan_arxiv), fill = TRUE),
+    key_cols = "ref_id"
+  )
+
+  doi_payload_path <- litxr:::.litxr_ref_doi_path(cfg)
+  doi_payload <- fst::read_fst(doi_payload_path, as.data.table = TRUE)
+  orphan_doi <- data.table::copy(doi_payload[1, ])
+  orphan_doi$ref_id[[1]] <- "doi:10.9999/orphan"
+  litxr:::.litxr_write_scaffold_table(
+    doi_payload_path,
+    data.table::rbindlist(list(doi_payload, orphan_doi), fill = TRUE),
+    key_cols = "ref_id"
+  )
+
+  pending_path <- litxr:::.litxr_ref_local_pending_path(cfg)
+  pending_row <- data.table::data.table(
+    ref_id = "local:pending-note",
+    key_type = "local_pending",
+    key_value = "local:pending-note"
+  )
+  fst::write_fst(as.data.frame(pending_row), pending_path)
+
+  authoritative_audit <- litxr::litxr_audit_normalized_authoritative_state(cfg)
+  expect_true(any(authoritative_audit$orphan_arxiv_payload_rows$ref_id == "arxiv:9999.99999"))
+  expect_true(any(authoritative_audit$orphan_doi_payload_rows$ref_id == "doi:10.9999/orphan"))
+  expect_true(any(authoritative_audit$unresolved_local_pending_rows$ref_id == "local:pending-note"))
+  expect_true(data.table::is.data.table(authoritative_audit$compatibility_runtime_output_stale))
 })

@@ -138,7 +138,8 @@ The v0.1.0 refactor makes `entity_id` the internal identity key while keeping
 stays in JSON; `fst` is used for thin indexes, compatibility projections, and
 status.
 
-The 0.1.6 release makes normal embedding search shard-aware and streaming,
+The 0.1.7 release makes compatibility projections runtime-only over the
+normalized authoritative stores. The 0.1.6 release makes normal embedding search shard-aware and streaming,
 with partial top-k selection for category aggregation. The 0.1.5 release makes
 project lookup and hydration keyed and batch-oriented, including narrow first
 reads and runtime wide-projection guardrails. The 0.1.4

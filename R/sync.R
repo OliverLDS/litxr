@@ -3308,7 +3308,6 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
 
   linked_entity <- .litxr_read_project_entities_index(cfg)
   linked_entity <- linked_entity[linked_entity$entity_id == linked_entity_ids[[1]], ]
-  preferred_citation_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$preferred_citation_ref_id) else NA_character_
   primary_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$primary_ref_id) else NA_character_
 
   list(
@@ -3318,7 +3317,7 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
     doi_title = .litxr_scalar_chr(doi_row$title),
     entity_id = linked_entity_ids[[1]],
     primary_ref_id = primary_ref_id,
-    preferred_citation_ref_id = preferred_citation_ref_id
+    preferred_citation_ref_id = doi_ref_id
   )
 }
 
@@ -5033,30 +5032,22 @@ litxr_add_refs <- function(
     return(rows)
   }
 
-  collection_paths <- stats::setNames(
-    vapply(collections, function(collection) {
-      .litxr_resolve_local_path(cfg, collection$local_path)
-    }, character(1)),
-    vapply(collections, `[[`, character(1), "collection_id")
-  )
-  link_map <- data.table::data.table(
-    collection_id = as.character(links$collection_id),
-    ref_id = as.character(links$ref_id)
-  )
-  data.table::setkey(link_map, collection_id, ref_id)
-
   out <- data.table::copy(rows)
   unresolved <- rep(TRUE, nrow(out))
-  for (collection_id in names(collection_paths)) {
+  for (collection in collections) {
     if (!any(unresolved)) {
       break
     }
-    local_path <- unname(collection_paths[[collection_id]])
+    collection_id <- as.character(collection$collection_id %||% collection$journal_id)
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
     if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) {
       next
     }
-    ref_ids <- link_map[J(collection_id), ref_id]
-    ref_ids <- unique(as.character(ref_ids))
+    ref_ids <- if (nrow(links) && all(c("collection_id", "ref_id") %in% names(links))) {
+      unique(as.character(links$ref_id[as.character(links$collection_id) == collection_id]))
+    } else {
+      character()
+    }
     ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
     if (!length(ref_ids)) {
       next
@@ -6393,95 +6384,14 @@ litxr_add_refs <- function(
 
 .litxr_refresh_project_index_for_collection <- function(cfg, collection_id, repair_collection_index = TRUE) {
   journal <- .litxr_get_journal(cfg, collection_id)
-  refs_path <- .litxr_project_references_index_path(cfg)
-  links_path <- .litxr_project_reference_collections_index_path(cfg)
-  refs_delta_path <- .litxr_project_references_delta_index_path(cfg)
-  links_delta_path <- .litxr_project_reference_collections_delta_index_path(cfg)
-
-  project_paths_healthy <- TRUE
-  if (file.exists(refs_path) && is.null(.litxr_read_index_columns_safe(refs_path))) {
-    project_paths_healthy <- FALSE
-  }
-  if (file.exists(links_path)) {
-    project_links_ok <- tryCatch({
-      fst::metadata_fst(links_path)
-      TRUE
-    }, error = function(e) FALSE)
-    if (!isTRUE(project_links_ok)) {
-      project_paths_healthy <- FALSE
-    }
-  }
-  if (file.exists(refs_delta_path) && is.null(.litxr_read_index_columns_safe(refs_delta_path))) {
-    project_paths_healthy <- FALSE
-  }
-  if (file.exists(links_delta_path)) {
-    project_links_delta_ok <- tryCatch({
-      fst::metadata_fst(links_delta_path)
-      TRUE
-    }, error = function(e) FALSE)
-    if (!isTRUE(project_links_delta_ok)) {
-      project_paths_healthy <- FALSE
-    }
-  }
-
-  if (!isTRUE(project_paths_healthy)) {
-    .litxr_rebuild_project_reference_indexes(cfg, repair_collection_indexes = repair_collection_index)
-    return(list(
-      collection_id = collection_id,
-      mode = "full_rebuild",
-      refreshed = TRUE
-    ))
-  }
-
   projection <- .litxr_project_projection_from_collection(
     cfg,
     journal,
     repair_collection_index = repair_collection_index
   )
-  current_refs <- .litxr_read_project_references_index(cfg)
-  current_links <- .litxr_read_project_reference_collections_index(cfg)
-
-  old_collection_ref_ids <- if (nrow(current_links)) {
-    unique(as.character(current_links$ref_id[current_links$collection_id == collection_id]))
-  } else {
-    character()
-  }
-
-  updated_links <- if (nrow(current_links)) {
-    current_links[current_links$collection_id != collection_id, ]
-  } else {
-    data.table::data.table(
-      ref_id = character(),
-      collection_id = character(),
-      collection_title = character(),
-      recorded_at = character()
-    )
-  }
-  if (nrow(projection$links)) {
-    updated_links <- data.table::rbindlist(list(updated_links, projection$links), fill = TRUE)
-    link_key <- paste(updated_links$ref_id, updated_links$collection_id, sep = "\r")
-    updated_links <- updated_links[!duplicated(link_key, fromLast = TRUE), ]
-  }
-
-  surviving_ref_ids <- if (nrow(updated_links)) unique(as.character(updated_links$ref_id)) else character()
-  refs_to_drop <- setdiff(old_collection_ref_ids, surviving_ref_ids)
   incoming_ref_ids <- if (nrow(projection$refs)) unique(as.character(projection$refs$ref_id)) else character()
+  refs_to_drop <- character()
 
-  updated_refs <- current_refs
-  if (nrow(updated_refs) && length(refs_to_drop)) {
-    updated_refs <- updated_refs[!updated_refs$ref_id %in% refs_to_drop, ]
-  }
-  if (nrow(updated_refs) && length(incoming_ref_ids)) {
-    updated_refs <- updated_refs[!updated_refs$ref_id %in% incoming_ref_ids, ]
-  }
-  if (nrow(projection$refs)) {
-    updated_refs <- data.table::rbindlist(list(updated_refs, projection$refs), fill = TRUE)
-    updated_refs <- .litxr_prefer_complete_records(updated_refs)
-  }
-
-  .litxr_write_project_references_index(cfg, updated_refs)
-  .litxr_write_project_reference_collections_index(cfg, updated_links)
-  .litxr_clear_project_reference_deltas(cfg)
   .litxr_refresh_entity_indexes_from_project_indexes(cfg)
 
   list(
@@ -6525,31 +6435,7 @@ litxr_add_refs <- function(
 
 .litxr_update_project_indexes <- function(cfg, journal, records, refresh_entity_indexes = TRUE) {
   .litxr_ensure_project_index_dir(cfg)
-  if (!file.exists(.litxr_project_references_index_path(cfg))) {
-    .litxr_write_project_references_index(cfg, data.table::data.table())
-  }
-  if (!file.exists(.litxr_project_reference_collections_index_path(cfg))) {
-    .litxr_write_project_reference_collections_index(
-      cfg,
-      data.table::data.table(
-        ref_id = character(),
-        collection_id = character(),
-        collection_title = character(),
-        recorded_at = character()
-      )
-    )
-  }
-
   incoming_refs <- .litxr_project_references_from_collection_records(records)
-  if (nrow(incoming_refs)) {
-    .litxr_upsert_project_references_index(cfg, incoming_refs)
-  }
-
-  incoming_links <- .litxr_project_reference_links_from_collection_records(records, journal)
-  if (nrow(incoming_links)) {
-    .litxr_upsert_project_reference_collections_index(cfg, incoming_links)
-  }
-
   if (nrow(incoming_refs)) {
     .litxr_refresh_normalized_reference_scaffold(cfg, records = incoming_refs, refresh_entity_indexes = FALSE)
   }

@@ -401,3 +401,89 @@
     ref_local_pending = .litxr_ref_local_pending_path(cfg)
   ))
 }
+
+.litxr_read_scaffold_table_safe <- function(path) {
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  tryCatch(
+    data.table::as.data.table(fst::read_fst(path, as.data.table = TRUE)),
+    error = function(e) data.table::data.table()
+  )
+}
+
+.litxr_normalized_duplicate_identity_conflicts <- function(entities) {
+  entities <- data.table::as.data.table(entities)
+  if (!nrow(entities) || !("ref_id" %in% names(entities))) {
+    return(data.table::data.table(
+      id_type = character(),
+      id_value = character(),
+      n_entities = integer(),
+      entity_ids = character()
+    ))
+  }
+  ref_ids <- as.character(entities$ref_id)
+  ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+  entity_ids <- as.character(entities$entity_id)[!is.na(as.character(entities$ref_id)) & nzchar(as.character(entities$ref_id))]
+  if (!length(ref_ids)) {
+    return(data.table::data.table(
+      id_type = character(),
+      id_value = character(),
+      n_entities = integer(),
+      entity_ids = character()
+    ))
+  }
+  grouped <- split(entity_ids, ref_ids)
+  counts <- vapply(grouped, function(x) data.table::uniqueN(x), integer(1))
+  keep <- counts > 1L
+  if (!any(keep)) {
+    return(data.table::data.table(
+      id_type = character(),
+      id_value = character(),
+      n_entities = integer(),
+      entity_ids = character()
+    ))
+  }
+  data.table::data.table(
+    id_type = "ref_id",
+    id_value = names(counts)[keep],
+    n_entities = unname(counts[keep]),
+    entity_ids = vapply(grouped[names(counts)[keep]], function(x) paste(sort(unique(x)), collapse = ", "), character(1))
+  )
+}
+
+.litxr_normalized_orphan_payload_rows <- function(payload, entity_ref_ids, id_type = c("arxiv", "doi")) {
+  id_type <- match.arg(id_type)
+  payload <- data.table::as.data.table(payload)
+  if (!nrow(payload)) {
+    return(payload[0, ])
+  }
+  if (!("ref_id" %in% names(payload))) {
+    return(payload[0, ])
+  }
+  entity_ref_ids <- unique(as.character(entity_ref_ids))
+  entity_ref_ids <- entity_ref_ids[!is.na(entity_ref_ids) & nzchar(entity_ref_ids)]
+  keep <- as.character(payload$ref_id)
+  keep <- keep[!is.na(keep) & nzchar(keep)]
+  payload[!(payload$ref_id %in% entity_ref_ids), ]
+}
+
+.litxr_normalized_authoritative_state_audit <- function(cfg) {
+  entities <- .litxr_read_project_entities_index(cfg)
+  entity_links <- .litxr_ref_entity_resolution_map(cfg, entities = entities)
+  entity_ref_ids <- unique(as.character(entity_links$ref_id))
+  entity_ref_ids <- entity_ref_ids[!is.na(entity_ref_ids) & nzchar(entity_ref_ids)]
+
+  arxiv_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_arxiv_path(cfg))
+  doi_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_doi_path(cfg))
+  pending_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_local_pending_path(cfg))
+  compatibility_state <- .litxr_audit_reference_cache_state(cfg)
+
+  list(
+    duplicate_identity_conflicts = .litxr_normalized_duplicate_identity_conflicts(entities),
+    orphan_arxiv_payload_rows = .litxr_normalized_orphan_payload_rows(arxiv_payload, entity_ref_ids, id_type = "arxiv"),
+    orphan_doi_payload_rows = .litxr_normalized_orphan_payload_rows(doi_payload, entity_ref_ids, id_type = "doi"),
+    unresolved_local_pending_rows = pending_payload,
+    compatibility_runtime_output_stale = compatibility_state$project_reference_cache
+  )
+}

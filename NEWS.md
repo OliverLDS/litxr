@@ -1,3 +1,11 @@
+# litxr 0.1.7
+
+- Made normalized authoritative stores the runtime source for compatibility
+  projections instead of persisting the wide project-reference view as normal
+  truth.
+- Kept DOI/arXiv linkage link-first while hardening the normalized identity
+  audit surface.
+
 # litxr 0.1.6
 
 - Made normal embedding search shard-aware so the common path scores one shard

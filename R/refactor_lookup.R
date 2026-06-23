@@ -421,6 +421,23 @@ litxr_audit_entity_indexes <- function(config = NULL, oversized_mb = 25) {
   .litxr_audit_entity_indexes(cfg, oversized_mb = oversized_mb)
 }
 
+#' Audit normalized authoritative store state
+#'
+#' Reports identity conflicts, orphan arXiv/DOI payload rows, unresolved local
+#' pending rows, and runtime compatibility output freshness versus current
+#' authoritative state.
+#'
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'
+#' @return Named list of `data.table` audit reports.
+#' @export
+litxr_audit_normalized_authoritative_state <- function(config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  .litxr_normalized_authoritative_state_audit(cfg)
+}
+
 #' Diagnose current store readiness for the v0.1.0 refactor model
 #'
 #' Bundles the reference-cache, entity-index, and entity-status audits into one
