@@ -305,6 +305,90 @@ embed_search_vec <- litxr::litxr_search_embeddings(
 stopifnot(nrow(embed_search_vec) == 1L)
 stopifnot(identical(embed_search_vec$ref_id[[1]], "arxiv:2501.00001"))
 
+stream_paths <- litxr:::.litxr_embedding_index_paths(
+  cfg_export,
+  arxiv_collection$collection_id,
+  "abstract",
+  "mock-embedding-stream-v1"
+)
+stream_meta <- data.table::data.table(
+  ref_id = c("arxiv:2501.10001", "arxiv:2501.10002"),
+  source = "arxiv",
+  source_id = c("2501.10001", "2501.10002"),
+  title = c("Tie Alpha", "Tie Beta"),
+  year = c(2025L, 2026L),
+  collection_id = arxiv_collection$collection_id,
+  field = "abstract",
+  model = "mock-embedding-stream-v1",
+  provider = "mock",
+  text_nchar = c(10L, 10L),
+  embedded_at = c("2026-01-01 00:00:00 UTC", "2026-01-01 00:00:01 UTC")
+)
+stream_matrix <- matrix(c(1, 0, 0, 1, 0, 0), nrow = 2L, byrow = TRUE)
+stream_manifest <- list(
+  collection_id = arxiv_collection$collection_id,
+  field = "abstract",
+  model = "mock-embedding-stream-v1",
+  provider = "mock",
+  dimension = 3L,
+  records = 2L,
+  updated_at = "2026-01-01 00:00:00 UTC"
+)
+litxr:::.litxr_write_embedding_sharded_index(stream_paths, stream_meta, stream_matrix, stream_manifest)
+stream_top0 <- litxr::litxr_search_embeddings(
+  query = NULL,
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  query_vec = c(1, 0, 0),
+  model = "mock-embedding-stream-v1",
+  top_n = 0L
+)
+stopifnot(nrow(stream_top0) == 0L)
+stopifnot("score" %in% names(stream_top0))
+stream_tie <- litxr::litxr_search_embeddings(
+  query = NULL,
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  query_vec = c(1, 0, 0),
+  model = "mock-embedding-stream-v1",
+  top_n = 1L
+)
+stopifnot(nrow(stream_tie) == 1L)
+stopifnot(identical(stream_tie$ref_id[[1]], "arxiv:2501.10001"))
+stream_na <- litxr:::.litxr_top_n_scored_candidates(
+  data.table::data.table(ref_id = c("na", "ok"), title = c("NA row", "Good row")),
+  c(NA_real_, 0.5),
+  1L
+)
+stopifnot(nrow(stream_na) == 1L)
+stopifnot(identical(stream_na$ref_id[[1]], "ok"))
+stopifnot(!is.na(stream_na$score[[1]]))
+stream_legacy_index <- litxr::litxr_read_embedding_index(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-v1"
+)
+stream_legacy_query <- c(1, 0, nchar("neural retrieval") / 100)
+stream_legacy_expected <- litxr:::.litxr_top_n_scored_candidates(
+  stream_legacy_index$metadata,
+  litxr::litxr_cosine_similarity(stream_legacy_query, stream_legacy_index$matrix),
+  2L
+)
+stream_legacy_actual <- litxr::litxr_search_embeddings(
+  query = NULL,
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  query_vec = stream_legacy_query,
+  model = "mock-embedding-v1",
+  top_n = 2L
+)
+stopifnot(identical(stream_legacy_actual$ref_id, stream_legacy_expected$ref_id))
+stopifnot(all.equal(stream_legacy_actual$score, stream_legacy_expected$score))
+
 label_query_set <- list(
   neural_methods = c(
     "This paper studies neural retrieval methods.",

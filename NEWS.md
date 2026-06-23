@@ -1,3 +1,12 @@
+# litxr 0.1.6
+
+- Made normal embedding search shard-aware so the common path scores one shard
+  at a time and only keeps shard-local top-N candidates before the final merge.
+- Replaced row-wise full sorting in `top_k_mean` aggregation with partial
+  top-k selection and kept query-score materialization opt-in.
+- Added regression coverage for `top_n = 0`, ties, `NA` scores, score-column
+  presence, and parity with the old small-corpus search behavior.
+
 # litxr 0.1.5
 
 - Reworked project lookup and hydration to use keyed batch reads instead of
