@@ -138,11 +138,13 @@ The v0.1.0 refactor makes `entity_id` the internal identity key while keeping
 stays in JSON; `fst` is used for thin indexes, compatibility projections, and
 status.
 
-The 0.1.2.1 release adds narrow-first project lookup so wide projection
-materialization happens only after canonical filtering, while the 0.1.2
-release adds the normalized `ref_entities` / `ref_arxiv` / `ref_doi`
-scaffold and narrow append-shard handling for expensive derived artifacts
-such as embeddings and research-schema digests.
+The 0.1.3 release rewrites the common upsert path around keyed joins and
+keeps conflict logging and arXiv version precedence intact. The 0.1.2.1
+release adds narrow-first project lookup so wide projection materialization
+happens only after canonical filtering, while the 0.1.2 release adds the
+normalized `ref_entities` / `ref_arxiv` / `ref_doi` scaffold and narrow
+append-shard handling for expensive derived artifacts such as embeddings and
+research-schema digests.
 
 ## Status
 

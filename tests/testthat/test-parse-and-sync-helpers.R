@@ -172,6 +172,103 @@ stopifnot(nrow(merged_arxiv_doi_mismatch) == 1L)
 stopifnot(identical(merged_arxiv_doi_mismatch$ref_id[[1]], "arxiv:2501.12345"))
 stopifnot(identical(merged_arxiv_doi_mismatch$arxiv_version[[1]], 2L))
 
+incoming_only_merge <- litxr:::.litxr_upsert_records(
+  existing = data.table::data.table(),
+  incoming = arxiv_row,
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(incoming_only_merge) == 1L)
+stopifnot(identical(incoming_only_merge$ref_id[[1]], "arxiv:2501.12345"))
+
+existing_only_merge <- litxr:::.litxr_upsert_records(
+  existing = arxiv_row,
+  incoming = data.table::data.table(),
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(existing_only_merge) == 1L)
+stopifnot(identical(existing_only_merge$ref_id[[1]], "arxiv:2501.12345"))
+
+identical_conflict_path <- tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+identical_merge <- litxr:::.litxr_upsert_records(
+  existing = arxiv_row,
+  incoming = data.table::copy(arxiv_row),
+  conflict_path = identical_conflict_path
+)
+stopifnot(nrow(identical_merge) == 1L)
+stopifnot(identical(identical_merge$title[[1]], arxiv_row$title[[1]]))
+stopifnot(!file.exists(identical_conflict_path) || length(readLines(identical_conflict_path, warn = FALSE)) == 0L)
+
+note_existing <- data.table::copy(arxiv_row)
+note_existing$note[[1]] <- "local note"
+note_incoming <- data.table::copy(arxiv_row)
+note_incoming$note[[1]] <- "incoming note"
+note_conflict_path <- tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+note_merge <- litxr:::.litxr_upsert_records(
+  existing = note_existing,
+  incoming = note_incoming,
+  conflict_path = note_conflict_path
+)
+stopifnot(nrow(note_merge) == 1L)
+stopifnot(identical(note_merge$note[[1]], "local note"))
+stopifnot(!file.exists(note_conflict_path) || length(readLines(note_conflict_path, warn = FALSE)) == 0L)
+
+conflict_existing <- data.table::copy(arxiv_row)
+conflict_incoming <- data.table::copy(arxiv_row)
+conflict_incoming$title[[1]] <- "Conflicting arXiv title"
+conflict_path <- tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+conflict_merge <- litxr:::.litxr_upsert_records(
+  existing = conflict_existing,
+  incoming = conflict_incoming,
+  conflict_path = conflict_path
+)
+stopifnot(nrow(conflict_merge) == 1L)
+stopifnot(identical(conflict_merge$title[[1]], "Conflicting arXiv title"))
+stopifnot(file.exists(conflict_path))
+stopifnot(any(grepl('"field":"title"', readLines(conflict_path, warn = FALSE), fixed = TRUE)))
+
+older_existing <- data.table::copy(arxiv_row)
+older_incoming <- data.table::copy(arxiv_row)
+older_existing$arxiv_version[[1]] <- 2L
+older_existing$arxiv_id_versioned[[1]] <- "2501.12345v2"
+older_existing$url[[1]] <- "http://arxiv.org/abs/2501.12345v2"
+older_existing$url_landing[[1]] <- "http://arxiv.org/abs/2501.12345v2"
+older_existing$title[[1]] <- "Preferred newer title"
+older_incoming$arxiv_version[[1]] <- 1L
+older_incoming$arxiv_id_versioned[[1]] <- "2501.12345v1"
+older_incoming$url[[1]] <- "http://arxiv.org/abs/2501.12345v1"
+older_incoming$url_landing[[1]] <- "http://arxiv.org/abs/2501.12345v1"
+older_incoming$title[[1]] <- "Older title"
+older_merge <- litxr:::.litxr_upsert_records(
+  existing = older_existing,
+  incoming = older_incoming,
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(older_merge) == 1L)
+stopifnot(identical(older_merge$arxiv_version[[1]], 2L))
+stopifnot(identical(older_merge$title[[1]], "Preferred newer title"))
+
+dup_incoming_a <- data.table::copy(arxiv_row)
+dup_incoming_b <- data.table::copy(arxiv_row)
+dup_incoming_a$publisher[[1]] <- NA_character_
+dup_incoming_b$publisher[[1]] <- "Preferred Publisher"
+dup_incoming <- data.table::rbindlist(list(dup_incoming_a, dup_incoming_b), fill = TRUE)
+dup_merge <- litxr:::.litxr_upsert_records(
+  existing = arxiv_row,
+  incoming = dup_incoming,
+  conflict_path = tempfile("litxr-arxiv-conflicts-", fileext = ".jsonl")
+)
+stopifnot(nrow(dup_merge) == 1L)
+stopifnot(identical(dup_merge$publisher[[1]], "Preferred Publisher"))
+
+storage_payload <- litxr:::.litxr_row_to_storage_payload(
+  arxiv_row,
+  list(collection_id = "arxiv_cs_ai", collection_type = "journal", title = "arXiv cs.AI", remote_channel = "arxiv")
+)
+stopifnot(is.character(storage_payload$authors_list))
+stopifnot(length(storage_payload$authors_list) >= 1L)
+stopifnot(!is.list(storage_payload$authors_list))
+stopifnot(!is.list(storage_payload$raw_entry))
+
 td_arxiv <- tempfile("litxr-arxiv-")
 dir.create(td_arxiv)
 journal_arxiv <- list(

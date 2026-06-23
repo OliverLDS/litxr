@@ -4152,6 +4152,167 @@ litxr_add_refs <- function(
   length(x) == 0L || is.null(x) || (length(x) == 1L && is.na(x)) || identical(x, "")
 }
 
+.litxr_column_missing_mask <- function(x) {
+  if (is.list(x)) {
+    return(vapply(x, .litxr_nullish, logical(1)))
+  }
+  if (inherits(x, c("POSIXct", "POSIXt"))) {
+    return(is.na(x))
+  }
+  if (is.character(x)) {
+    return(is.na(x) | !nzchar(x))
+  }
+  if (is.factor(x)) {
+    x <- as.character(x)
+    return(is.na(x) | !nzchar(x))
+  }
+  is.na(x)
+}
+
+.litxr_missing_column_like <- function(field, template, n) {
+  if (identical(field, "authors_list")) {
+    return(rep(list(character()), n))
+  }
+  if (identical(field, "raw_entry")) {
+    return(rep(list(NULL), n))
+  }
+  if (is.list(template)) {
+    return(rep(list(NULL), n))
+  }
+  if (inherits(template, c("POSIXct", "POSIXt"))) {
+    return(rep(as.POSIXct(NA, tz = "UTC"), n))
+  }
+  if (is.integer(template)) {
+    return(rep(NA_integer_, n))
+  }
+  if (is.numeric(template)) {
+    return(rep(NA_real_, n))
+  }
+  if (is.logical(template)) {
+    return(rep(NA, n))
+  }
+  rep(NA_character_, n)
+}
+
+.litxr_column_equal_mask <- function(existing, incoming) {
+  if (is.list(existing) || is.list(incoming)) {
+    return(vapply(seq_along(existing), function(i) {
+      .litxr_scalar_equal(existing[[i]], incoming[[i]])
+    }, logical(1)))
+  }
+
+  if (inherits(existing, c("POSIXct", "POSIXt")) || inherits(incoming, c("POSIXct", "POSIXt"))) {
+    existing <- as.character(existing)
+    incoming <- as.character(incoming)
+  } else if (is.factor(existing)) {
+    existing <- as.character(existing)
+  } else if (is.factor(incoming)) {
+    incoming <- as.character(incoming)
+  }
+
+  equal <- existing == incoming
+  equal[is.na(existing) & is.na(incoming)] <- TRUE
+  equal[is.na(equal)] <- FALSE
+  equal
+}
+
+.litxr_upsert_match_masks <- function(existing_rows, incoming_rows, key) {
+  fields <- setdiff(union(names(existing_rows), names(incoming_rows)), c(key))
+  if (!length(fields) || !nrow(existing_rows)) {
+    return(list(
+      identical = logical(nrow(existing_rows)),
+      simple_coalesce = logical(nrow(existing_rows)),
+      conflict = logical(nrow(existing_rows))
+    ))
+  }
+
+  identical_mask <- rep(TRUE, nrow(existing_rows))
+  conflict_mask <- rep(FALSE, nrow(existing_rows))
+  local_priority_fields <- c("note")
+  conflict_ignored_fields <- c("authors_list", "raw_entry")
+
+  for (field in fields) {
+    existing_col <- if (field %in% names(existing_rows)) existing_rows[[field]] else .litxr_missing_column_like(field, incoming_rows[[field]], nrow(existing_rows))
+    incoming_col <- if (field %in% names(incoming_rows)) incoming_rows[[field]] else .litxr_missing_column_like(field, existing_rows[[field]], nrow(existing_rows))
+    existing_missing <- .litxr_column_missing_mask(existing_col)
+    incoming_missing <- .litxr_column_missing_mask(incoming_col)
+    equal_mask <- .litxr_column_equal_mask(existing_col, incoming_col)
+
+    identical_mask <- identical_mask & equal_mask
+
+    if (field %in% local_priority_fields || field %in% conflict_ignored_fields || is.list(existing_col) || is.list(incoming_col)) {
+      next
+    }
+
+    version_order <- rep(0L, nrow(existing_rows))
+    if (
+      "source" %in% names(existing_rows) &&
+      "source" %in% names(incoming_rows) &&
+      "arxiv_version" %in% names(existing_rows) &&
+      "arxiv_version" %in% names(incoming_rows)
+    ) {
+      existing_source <- existing_rows[["source"]]
+      incoming_source <- incoming_rows[["source"]]
+      existing_version <- suppressWarnings(as.integer(existing_rows[["arxiv_version"]]))
+      incoming_version <- suppressWarnings(as.integer(incoming_rows[["arxiv_version"]]))
+      arxiv_rows <- !.litxr_column_missing_mask(existing_source) &
+        !.litxr_column_missing_mask(incoming_source) &
+        as.character(existing_source) == "arxiv" &
+        as.character(incoming_source) == "arxiv"
+      version_order[arxiv_rows] <- ifelse(
+        !is.na(existing_version[arxiv_rows]) &
+          !is.na(incoming_version[arxiv_rows]) &
+          incoming_version[arxiv_rows] > existing_version[arxiv_rows],
+        1L,
+        ifelse(
+          !is.na(existing_version[arxiv_rows]) &
+            !is.na(incoming_version[arxiv_rows]) &
+            incoming_version[arxiv_rows] < existing_version[arxiv_rows],
+          -1L,
+          0L
+        )
+      )
+    }
+
+    conflict_mask <- conflict_mask | (!existing_missing & !incoming_missing & !equal_mask & version_order >= 0L)
+  }
+
+  list(
+    identical = identical_mask,
+    simple_coalesce = !identical_mask & !conflict_mask,
+    conflict = conflict_mask
+  )
+}
+
+.litxr_merge_record_rows_vectorized <- function(existing_rows, incoming_rows, key, prefer_existing_rows) {
+  if (!nrow(existing_rows)) {
+    return(incoming_rows)
+  }
+  out <- data.table::copy(existing_rows)
+  fields <- setdiff(union(names(existing_rows), names(incoming_rows)), c(key))
+
+  for (field in fields) {
+    existing_col <- if (field %in% names(existing_rows)) existing_rows[[field]] else .litxr_missing_column_like(field, incoming_rows[[field]], nrow(existing_rows))
+    incoming_col <- if (field %in% names(incoming_rows)) incoming_rows[[field]] else .litxr_missing_column_like(field, existing_rows[[field]], nrow(existing_rows))
+
+    if (field %in% c("note")) {
+      use_existing <- !.litxr_column_missing_mask(existing_col)
+    } else {
+      existing_missing <- .litxr_column_missing_mask(existing_col)
+      incoming_missing <- .litxr_column_missing_mask(incoming_col)
+      use_existing <- (prefer_existing_rows & !existing_missing) | (!prefer_existing_rows & incoming_missing)
+    }
+
+    result <- incoming_col
+    if (any(use_existing)) {
+      result[use_existing] <- existing_col[use_existing]
+    }
+    out[[field]] <- result
+  }
+
+  out
+}
+
 .litxr_scalar_equal <- function(a, b) {
   if (.litxr_nullish(a) && .litxr_nullish(b)) return(TRUE)
   if (inherits(a, "POSIXct") || inherits(b, "POSIXct")) {
@@ -4259,34 +4420,92 @@ litxr_add_refs <- function(
   existing <- data.table::as.data.table(existing)
   incoming <- data.table::as.data.table(incoming)
 
+  key_col <- ".__litxr_upsert_key__"
   existing_keys <- .litxr_upsert_key(existing)
   incoming_keys <- .litxr_upsert_key(incoming)
-  all_keys <- union(existing_keys, incoming_keys)
   conflicts <- new.env(parent = emptyenv())
   conflicts$rows <- list()
-  if (!length(all_keys)) {
+  if (!length(existing_keys) && !length(incoming_keys)) {
     return(data.table::data.table())
   }
 
-  existing_idx <- stats::setNames(seq_along(existing_keys), existing_keys)
-  incoming_idx <- stats::setNames(seq_along(incoming_keys), incoming_keys)
+  existing_map <- data.table::data.table(
+    `.__litxr_upsert_key__` = existing_keys,
+    existing_row_id__ = seq_len(nrow(existing))
+  )
+  incoming_map <- data.table::data.table(
+    `.__litxr_upsert_key__` = incoming_keys,
+    incoming_row_id__ = seq_len(nrow(incoming))
+  )
 
-  merged <- lapply(all_keys, function(key) {
-    existing_row_idx <- unname(existing_idx[key])
-    incoming_row_idx <- unname(incoming_idx[key])
+  matched_idx <- merge(
+    existing_map,
+    incoming_map,
+    by = key_col,
+    all = FALSE,
+    sort = FALSE
+  )
 
-    if (is.na(existing_row_idx)) {
-      return(incoming[incoming_row_idx, ])
+  existing_only_idx <- which(!(existing_keys %in% incoming_keys))
+  incoming_only_idx <- which(!(incoming_keys %in% existing_keys))
+  matched_existing_idx <- matched_idx[["existing_row_id__"]]
+  matched_incoming_idx <- matched_idx[["incoming_row_id__"]]
+
+  out <- list()
+  if (length(existing_only_idx)) {
+    out[[length(out) + 1L]] <- existing[existing_only_idx, ]
+  }
+
+  if (length(matched_existing_idx)) {
+    matched_existing <- existing[matched_existing_idx, ]
+    matched_incoming <- incoming[matched_incoming_idx, ]
+    prefer_existing_rows <- rep(FALSE, nrow(matched_existing))
+    if ("source" %in% names(matched_existing) && "source" %in% names(matched_incoming) &&
+        "arxiv_version" %in% names(matched_existing) && "arxiv_version" %in% names(matched_incoming)) {
+      existing_source <- matched_existing[["source"]]
+      incoming_source <- matched_incoming[["source"]]
+      existing_version <- suppressWarnings(as.integer(matched_existing[["arxiv_version"]]))
+      incoming_version <- suppressWarnings(as.integer(matched_incoming[["arxiv_version"]]))
+      is_arxiv_pair <- !.litxr_column_missing_mask(existing_source) &
+        !.litxr_column_missing_mask(incoming_source) &
+        as.character(existing_source) == "arxiv" &
+        as.character(incoming_source) == "arxiv"
+      prefer_existing_rows <- is_arxiv_pair & !is.na(existing_version) & !is.na(incoming_version) & incoming_version < existing_version
     }
-    if (is.na(incoming_row_idx)) {
-      return(existing[existing_row_idx, ])
+
+    masks <- .litxr_upsert_match_masks(matched_existing, matched_incoming, key_col)
+    merged_matched <- .litxr_merge_record_rows_vectorized(
+      matched_existing,
+      matched_incoming,
+      key = key_col,
+      prefer_existing_rows = prefer_existing_rows
+    )
+
+    if (any(masks$conflict)) {
+      conflict_idx <- which(masks$conflict)
+      conflict_rows <- data.table::rbindlist(lapply(conflict_idx, function(i) {
+        .litxr_merge_record_row(matched_existing[i, ], matched_incoming[i, ], matched_idx[[".__litxr_upsert_key__"]][[i]], conflicts)
+      }), fill = TRUE)
+      merged_matched[[".__litxr_order__"]] <- seq_len(nrow(merged_matched))
+      conflict_rows[[".__litxr_order__"]] <- conflict_idx
+      merged_matched <- data.table::rbindlist(
+        list(merged_matched[!masks$conflict, ], conflict_rows),
+        fill = TRUE
+      )
+      data.table::setorder(merged_matched, ".__litxr_order__")
+      merged_matched[[".__litxr_order__"]] <- NULL
     }
 
-    .litxr_merge_record_row(existing[existing_row_idx, ], incoming[incoming_row_idx, ], key, conflicts)
-  })
+    out[[length(out) + 1L]] <- merged_matched
+  }
 
+  if (length(incoming_only_idx)) {
+    out[[length(out) + 1L]] <- incoming[incoming_only_idx, ]
+  }
+
+  merged <- data.table::rbindlist(out, fill = TRUE)
   .litxr_write_upsert_conflicts(conflicts, conflict_path = conflict_path)
-  data.table::rbindlist(merged, fill = TRUE)
+  merged
 }
 
 .litxr_upsert_journal_records <- function(existing, incoming, local_path) {

@@ -1,3 +1,15 @@
+# litxr 0.1.3
+
+- Rewrote the common upsert core around keyed `data.table` joins so the normal
+  path no longer iterates key-by-key.
+- Split upsert handling into existing-only, incoming-only, and matched rows,
+  with vectorized fast paths for identical, coalescing, and local-priority
+  cases.
+- Kept arXiv version precedence and conflict logging semantics intact while
+  restricting the row-wise merge helper to true conflict rows only.
+- Added regression coverage for key-only, conflict, local-priority, version
+  precedence, and duplicate-incoming-key cases.
+
 # litxr 0.1.2.1
 
 - Human-facing release label: `v0.1.2a`.
