@@ -1,3 +1,14 @@
+# litxr 0.1.2
+
+- Introduced the normalized identity/payload scaffold for `ref_entities`,
+  `ref_arxiv`, `ref_doi`, and `ref_local_pending`.
+- Retired normal bibliographic delta-cache ingest in favor of direct keyed
+  upsert into authoritative payload tables.
+- Added narrow derived-artifact append-shard helpers and compaction behavior
+  for expensive stores such as embeddings and research-schema digests.
+- Kept the earlier entity/status and refactor-compatibility machinery while
+  tightening downstream canonical-only lookup policy.
+
 # litxr 0.1.1
 
 - Thinned the core exact-key lookup and research-schema/status read paths so

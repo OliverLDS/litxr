@@ -110,18 +110,6 @@
   if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
     if (!is.null(cfg)) {
       linked_arxiv_ref_id <- .litxr_task_ref_id(cfg, ref_id, task = "fulltext")
-      if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
-        refs <- tryCatch(.litxr_read_project_references_index(cfg), error = function(e) data.table::data.table())
-        if (nrow(refs) && "linked_doi_ref_id" %in% names(refs)) {
-          fallback <- refs[grepl("^arxiv:", refs$ref_id) & as.character(refs$linked_doi_ref_id) == ref_id, ]
-          if (!nrow(fallback) && "doi" %in% names(refs) && !is.na(doi) && nzchar(doi)) {
-            fallback <- refs[grepl("^arxiv:", refs$ref_id) & as.character(refs$doi) == doi, ]
-          }
-          if (nrow(fallback)) {
-            linked_arxiv_ref_id <- .litxr_prompt_scalar(fallback$ref_id)
-          }
-        }
-      }
     }
   }
 
@@ -201,12 +189,12 @@ litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "r
     cfg <- litxr_read_config()
   }
 
-  ref <- litxr_find_refs(ref_id = ref_id, config = cfg)
+  ref <- litxr:::.litxr_task_ref_row_for_keys(cfg, ref_id, task = "citation")
   if (!nrow(ref)) {
-    stop("Reference not found in local litxr cache: ", ref_id, call. = FALSE)
+    stop("Reference not found in canonical litxr store: ", ref_id, call. = FALSE)
   }
   if (nrow(ref) > 1L) {
-    stop("Expected exactly one reference row for ", ref_id, " but found ", nrow(ref), ".", call. = FALSE)
+    stop("Expected exactly one canonical reference row for ", ref_id, " but found ", nrow(ref), ".", call. = FALSE)
   }
 
   existing_digest <- litxr_read_llm_digest(ref_id, cfg)

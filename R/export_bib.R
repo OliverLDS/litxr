@@ -27,6 +27,7 @@
 }
 
 .litxr_entry_type_from_source <- function(source) {
+  source <- .litxr_scalar_chr(source)
   switch(source,
     blog = "misc",
     web = "misc",
@@ -173,17 +174,18 @@ row_to_bibtex <- function(row) {
   if (data.table::is.data.table(row)) {
     row <- stats::setNames(lapply(names(row), function(name) row[[name]]), names(row))
   }
+  scalar <- .litxr_scalar_chr
 
-  entry_type <- row[["entry_type"]]
+  entry_type <- scalar(row[["entry_type"]])
   if (is.null(entry_type) || is.na(entry_type) || !nzchar(entry_type)) {
     entry_type <- .litxr_entry_type_from_source(row[["source"]])
   }
 
-  key   <- .make_citekey(row[["doi"]], row[["source_id"]], row[["ref_id"]])
-  title <- .bibtex_escape(row[["title"]])
+  key   <- .make_citekey(scalar(row[["doi"]]), scalar(row[["source_id"]]), scalar(row[["ref_id"]]))
+  title <- .bibtex_escape(scalar(row[["title"]]))
   authors_list <- row[["authors_list"]]
   if (is.null(authors_list) || !length(authors_list) || !length(authors_list[[1]])) {
-    authors_chr <- row[["authors"]]
+    authors_chr <- scalar(row[["authors"]])
     if (!is.null(authors_chr) && !is.na(authors_chr) && nzchar(authors_chr)) {
       authors_list <- list(trimws(strsplit(as.character(authors_chr), ";", fixed = TRUE)[[1]]))
     } else {
@@ -191,22 +193,23 @@ row_to_bibtex <- function(row) {
     }
   }
   auth  <- .bibtex_escape(.format_authors_bib(authors_list[[1]]))
-  year  <- as.character(row[["year"]])
+  year  <- as.character(scalar(row[["year"]]))
 
-  journal   <- row[["journal"]]
-  container <- row[["container_title"]]
-  publisher <- row[["publisher"]]
-  volume <- row[["volume"]]
-  number <- row[["issue"]]
-  pages  <- row[["pages"]]
-  doi    <- row[["doi"]]
-  isbn   <- row[["isbn"]]
-  issn   <- row[["issn"]]
-  note   <- row[["note"]]
+  journal   <- scalar(row[["journal"]])
+  container <- scalar(row[["container_title"]])
+  publisher <- scalar(row[["publisher"]])
+  volume <- scalar(row[["volume"]])
+  number <- scalar(row[["issue"]])
+  pages  <- scalar(row[["pages"]])
+  doi    <- scalar(row[["doi"]])
+  isbn   <- scalar(row[["isbn"]])
+  issn   <- scalar(row[["issn"]])
+  note   <- scalar(row[["note"]])
 
-  url <- row[["url"]]
-  if (is.null(url) || is.na(url) || !nzchar(url)) url <- row[["url_landing"]]
-  if (is.na(url) || !nzchar(url)) url <- row[["url_pdf"]]
+  url <- scalar(row[["url"]])
+  if (is.null(url) || is.na(url) || !nzchar(url)) url <- scalar(row[["url_landing"]])
+  if (is.na(url) || !nzchar(url)) url <- scalar(row[["url_pdf"]])
+  if (is.na(journal) || !nzchar(journal)) journal <- container
 
   fields <- c(
     title=title, author=auth, year=year,

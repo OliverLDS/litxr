@@ -121,6 +121,8 @@
   .litxr_write_project_references_index(cfg, refs)
   .litxr_write_project_reference_collections_index(cfg, links)
   .litxr_clear_project_reference_deltas(cfg)
+  .litxr_refresh_entity_indexes_from_project_indexes(cfg)
+  .litxr_refresh_normalized_reference_scaffold(cfg, refresh_entity_indexes = TRUE)
   invisible(NULL)
 }
 
@@ -213,11 +215,40 @@
   )
 }
 
-.litxr_read_project_references_by_keys <- function(cfg, keys) {
+.litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL) {
   path <- .litxr_project_references_index_path(cfg)
   delta_path <- .litxr_project_references_delta_index_path(cfg)
+  read_columns <- unique(c(
+    "ref_id",
+    "source",
+    "source_id",
+    "entry_type",
+    "title",
+    "authors",
+    "authors_list",
+    "year",
+    "journal",
+    "container_title",
+    "publisher",
+    "volume",
+    "issue",
+    "pages",
+    "doi",
+    "isbn",
+    "issn",
+    "url",
+    "url_landing",
+    "url_pdf",
+    "note",
+    "abstract",
+    "linked_doi_ref_id",
+    "linked_arxiv_ref_id",
+    "arxiv_version",
+    "arxiv_id_base",
+    columns
+  ))
   if (file.exists(delta_path)) {
-    refs <- .litxr_read_project_references_index(cfg, columns = c("ref_id", "source_id", "title", "entry_type", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id"))
+    refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
     return(.litxr_hydrate_project_projection_rows(cfg, out))
@@ -234,13 +265,13 @@
       call. = FALSE
     )
     .litxr_rebuild_project_reference_indexes(cfg)
-    refs <- .litxr_read_project_references_index(cfg, columns = c("ref_id", "source_id", "title", "entry_type", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id"))
+    refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
     return(.litxr_hydrate_project_projection_rows(cfg, out))
   }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
-    refs <- .litxr_read_project_references_index(cfg, columns = c("ref_id", "source_id", "title", "entry_type", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id"))
+    refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
     return(.litxr_hydrate_project_projection_rows(cfg, out))

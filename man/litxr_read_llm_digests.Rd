@@ -4,7 +4,7 @@
 \alias{litxr_read_llm_digests}
 \title{Read all project-level LLM digests}
 \usage{
-litxr_read_llm_digests(config = NULL, ref_ids = NULL)
+litxr_read_llm_digests(config = NULL, ref_ids = NULL, columns = NULL)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When

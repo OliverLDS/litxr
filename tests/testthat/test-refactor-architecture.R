@@ -105,6 +105,7 @@ test_that("authoritative projections own rich payload boundaries and rebuild com
   expect_true(is.list(build_result))
   expect_true(file.exists(build_result$ref_aliases_path))
   expect_true(file.exists(build_result$entities_path))
+  expect_true(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "ref_entities.fst")))
 
   expect_warning(
     refs <- litxr::litxr_read_references(cfg),
