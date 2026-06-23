@@ -4660,10 +4660,36 @@ litxr_add_refs <- function(
   .litxr_hydrate_rows_from_json_dir(rows, json_dir)
 }
 
-.litxr_hydrate_project_projection_rows <- function(cfg, rows) {
+.litxr_runtime_wide_projection_limit <- function(limit = getOption("litxr.runtime_wide_projection_limit", 300L)) {
+  if (missing(limit) || is.null(limit) || !length(limit)) {
+    return(300L)
+  }
+  if (is.numeric(limit) && length(limit) && is.infinite(limit[[1L]])) {
+    return(Inf)
+  }
+  limit <- suppressWarnings(as.integer(limit[[1L]]))
+  if (is.na(limit) || limit < 1L) {
+    return(300L)
+  }
+  limit
+}
+
+.litxr_hydrate_project_projection_rows <- function(cfg, rows, wide_projection_limit = getOption("litxr.runtime_wide_projection_limit", 300L)) {
   rows <- data.table::as.data.table(rows)
   if (!nrow(rows)) {
     return(rows)
+  }
+
+  wide_projection_limit <- .litxr_runtime_wide_projection_limit(wide_projection_limit)
+  if (is.finite(wide_projection_limit) && nrow(rows) > wide_projection_limit) {
+    stop(
+      "Refusing to materialize ",
+      nrow(rows),
+      " wide project-reference rows because it exceeds the runtime wide-projection limit of ",
+      wide_projection_limit,
+      ". Filter more narrowly or raise the limit explicitly for this call.",
+      call. = FALSE
+    )
   }
 
   needed_fields <- c("abstract", "authors_list")

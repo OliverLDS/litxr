@@ -10,6 +10,38 @@
   data.table::copy(records)[, cols, with = FALSE]
 }
 
+.litxr_project_reference_lookup_columns <- function(extra = NULL) {
+  unique(c(
+    "ref_id",
+    "source",
+    "source_id",
+    "entry_type",
+    "title",
+    "authors",
+    "year",
+    "journal",
+    "container_title",
+    "publisher",
+    "volume",
+    "issue",
+    "pages",
+    "doi",
+    "isbn",
+    "issn",
+    "url",
+    "url_landing",
+    "url_pdf",
+    "note",
+    "linked_doi_ref_id",
+    "linked_arxiv_ref_id",
+    "arxiv_version",
+    "arxiv_id_base",
+    "collection_id",
+    "collection_title",
+    extra
+  ))
+}
+
 .litxr_authoritative_project_records <- function(cfg) {
   collections <- .litxr_config_collections(cfg)
   if (!length(collections)) {
@@ -215,43 +247,18 @@
   )
 }
 
-.litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL) {
+.litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL, hydrate = FALSE, wide_projection_limit = 300L) {
   path <- .litxr_project_references_index_path(cfg)
   delta_path <- .litxr_project_references_delta_index_path(cfg)
-  read_columns <- unique(c(
-    "ref_id",
-    "source",
-    "source_id",
-    "entry_type",
-    "title",
-    "authors",
-    "authors_list",
-    "year",
-    "journal",
-    "container_title",
-    "publisher",
-    "volume",
-    "issue",
-    "pages",
-    "doi",
-    "isbn",
-    "issn",
-    "url",
-    "url_landing",
-    "url_pdf",
-    "note",
-    "abstract",
-    "linked_doi_ref_id",
-    "linked_arxiv_ref_id",
-    "arxiv_version",
-    "arxiv_id_base",
-    columns
-  ))
+  read_columns <- .litxr_project_reference_lookup_columns(columns)
   if (file.exists(delta_path)) {
     refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    return(.litxr_hydrate_project_projection_rows(cfg, out))
+    if (isTRUE(hydrate)) {
+      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
+    }
+    return(out)
   }
   if (!file.exists(path)) {
     return(data.table::data.table())
@@ -268,13 +275,19 @@
     refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    return(.litxr_hydrate_project_projection_rows(cfg, out))
+    if (isTRUE(hydrate)) {
+      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
+    }
+    return(out)
   }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
     refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
-    return(.litxr_hydrate_project_projection_rows(cfg, out))
+    if (isTRUE(hydrate)) {
+      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
+    }
+    return(out)
   }
 
   idx <- integer()
@@ -296,7 +309,10 @@
   out <- data.table::rbindlist(rows, fill = TRUE)
   key <- .litxr_upsert_key(out)
   out <- out[!duplicated(key), ]
-  .litxr_hydrate_project_projection_rows(cfg, out)
+  if (isTRUE(hydrate)) {
+    return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
+  }
+  out
 }
 
 .litxr_entity_index_maybe_refresh <- function(cfg) {
@@ -386,12 +402,12 @@
   refs[keep, ]
 }
 
-.litxr_read_project_references_by_alias_keys <- function(cfg, keys) {
+.litxr_read_project_references_by_alias_keys <- function(cfg, keys, hydrate = FALSE, wide_projection_limit = 300L) {
   alias_rows <- .litxr_match_alias_rows_by_keys(cfg, keys)
   if (!nrow(alias_rows)) {
     return(data.table::data.table())
   }
-  refs <- .litxr_read_project_references_index(cfg)
+  refs <- .litxr_read_project_references_index(cfg, columns = .litxr_project_reference_lookup_columns())
   if (!nrow(refs)) {
     return(refs)
   }
@@ -401,7 +417,10 @@
   }
   key <- .litxr_upsert_key(out)
   out <- out[!duplicated(key), ]
-  .litxr_hydrate_project_projection_rows(cfg, out)
+  if (isTRUE(hydrate)) {
+    return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
+  }
+  out
 }
 
 .litxr_write_project_references_index <- function(cfg, records) {

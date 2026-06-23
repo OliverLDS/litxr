@@ -1,3 +1,11 @@
+# litxr 0.1.2.1
+
+- Human-facing release label: `v0.1.2a`.
+- Narrowed project-level lookup so wide projection materialization happens only
+  after canonical filtering and only for the final matched set.
+- Added a runtime wide-projection guardrail for project lookup and a focused
+  regression test for narrow-first resolution.
+
 # litxr 0.1.2
 
 - Introduced the normalized identity/payload scaffold for `ref_entities`,

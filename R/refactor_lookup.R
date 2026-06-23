@@ -30,23 +30,63 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
 }
 
 .litxr_canonical_ref_rows_for_keys <- function(cfg, keys, journal_ids = NULL) {
-  refs <- .litxr_read_project_references_index(cfg)
-  if (!nrow(refs)) {
-    return(refs[0, ])
-  }
-
   keys <- unique(unlist(lapply(keys, .litxr_lookup_candidates), use.names = FALSE))
   keys <- keys[!is.na(keys) & nzchar(keys)]
   if (!length(keys)) {
-    return(refs[0, ])
+    return(data.table::data.table())
   }
 
-  ref_ids <- if ("ref_id" %in% names(refs)) as.character(refs$ref_id) else rep(NA_character_, nrow(refs))
-  out <- refs[ref_ids %in% keys, ]
+  rows <- lapply(keys, function(key) {
+    row <- tryCatch(
+      litxr_find_refs(ref_id = key, config = cfg),
+      error = function(e) data.table::data.table()
+    )
+    if (!nrow(row)) {
+      return(row)
+    }
+    if (grepl("^arxiv:", as.character(row$ref_id[[1L]])) && "linked_doi_ref_id" %in% names(row)) {
+      linked <- as.character(row$linked_doi_ref_id[[1L]])
+      if (is.na(linked) || !nzchar(linked)) {
+        aliases <- tryCatch(
+          .litxr_read_project_ref_aliases_index(cfg, columns = c("ref_id", "entity_id")),
+          error = function(e) data.table::data.table()
+        )
+        entity_ids <- .litxr_entity_ids_for_ref_ids(cfg, row$ref_id[[1L]], aliases = aliases)
+        if (length(entity_ids) && nrow(aliases)) {
+          doi_aliases <- unique(as.character(
+            aliases$ref_id[aliases$entity_id %in% entity_ids & grepl("^doi:", aliases$ref_id)]
+          ))
+          if (length(doi_aliases)) {
+            linked <- doi_aliases[[1L]]
+          }
+        }
+      }
+      if (!is.na(linked) && nzchar(linked)) {
+        doi_row <- tryCatch(
+          .litxr_find_collection_refs_by_keys(cfg, linked, collection_id = NULL),
+          error = function(e) data.table::data.table()
+        )
+        if (nrow(doi_row) && "ref_id" %in% names(doi_row)) {
+          doi_only <- doi_row[grepl("^doi:", as.character(doi_row$ref_id)), ]
+          if (nrow(doi_only)) {
+            doi_row <- doi_only
+          }
+        }
+        if (nrow(doi_row)) {
+          row <- doi_row
+        }
+      }
+    }
+    row
+  })
+  rows <- rows[vapply(rows, nrow, integer(1)) > 0L]
+  if (!length(rows)) {
+    return(data.table::data.table())
+  }
+  out <- data.table::rbindlist(rows, fill = TRUE)
   if (!nrow(out)) {
     return(out)
   }
-
   if (!is.null(journal_ids) && length(journal_ids) && "collection_id" %in% names(out)) {
     keep_collections <- unique(as.character(journal_ids))
     keep_collections <- keep_collections[!is.na(keep_collections) & nzchar(keep_collections)]
@@ -56,11 +96,21 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
       out <- out[0, ]
     }
   }
-
+  if (nrow(out)) {
+    out <- out[!duplicated(as.character(out$ref_id)), ]
+  }
   out
 }
 
 .litxr_export_bib_rows <- function(cfg, journal_ids = NULL, keys = NULL) {
+  if (!is.null(keys) && length(keys)) {
+    refs <- .litxr_canonical_ref_rows_for_keys(cfg, keys = keys, journal_ids = journal_ids)
+    if (!nrow(refs)) {
+      return(refs[0, ])
+    }
+    return(refs)
+  }
+
   if (!is.null(journal_ids) && length(journal_ids)) {
     refs_all <- data.table::rbindlist(lapply(unique(as.character(journal_ids)), function(journal_id) {
       if (is.na(journal_id) || !nzchar(journal_id)) {
@@ -78,70 +128,7 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   if (!nrow(refs_all)) {
     return(refs_all[0, ])
   }
-
-  refs <- refs_all
-  if (!is.null(journal_ids) && length(journal_ids) && "collection_id" %in% names(refs_all)) {
-    keep_collections <- unique(as.character(journal_ids))
-    keep_collections <- keep_collections[!is.na(keep_collections) & nzchar(keep_collections)]
-    if (length(keep_collections)) {
-      refs <- refs_all[refs_all$collection_id %in% keep_collections, ]
-    } else {
-      refs <- refs_all[0, ]
-    }
-  }
-
-  if (!is.null(keys) && length(keys)) {
-    keys <- unique(unlist(lapply(keys, .litxr_lookup_candidates), use.names = FALSE))
-    keys <- keys[!is.na(keys) & nzchar(keys)]
-    if (!length(keys)) {
-      return(refs[0, ])
-    }
-    ref_ids <- if ("ref_id" %in% names(refs)) as.character(refs$ref_id) else rep(NA_character_, nrow(refs))
-    refs <- refs[ref_ids %in% keys, ]
-  }
-
-  if (!nrow(refs)) {
-    return(refs[0, ])
-  }
-
-  if ("linked_doi_ref_id" %in% names(refs_all)) {
-    ref_ids_all <- as.character(refs_all$ref_id)
-    linked_doi_ref_id_all <- as.character(refs_all$linked_doi_ref_id)
-    linked_doi_ref_id_all[is.na(linked_doi_ref_id_all) | !nzchar(linked_doi_ref_id_all)] <- NA_character_
-    selected_keys <- as.character(refs$ref_id)
-    selected_keys <- selected_keys[!is.na(selected_keys) & nzchar(selected_keys)]
-    if (length(selected_keys)) {
-      preferred_keys <- unique(vapply(selected_keys, function(ref_id) {
-        row <- refs_all[ref_ids_all == ref_id, ]
-        if (!nrow(row)) return(ref_id)
-        if (!grepl("^arxiv:", ref_id) || !("linked_doi_ref_id" %in% names(row))) {
-          return(ref_id)
-        }
-        linked <- as.character(row$linked_doi_ref_id[[1L]])
-        if (is.na(linked) || !nzchar(linked) || !(linked %in% ref_ids_all)) {
-          return(ref_id)
-        }
-        linked
-      }, character(1)))
-      preferred_rows <- lapply(preferred_keys, function(key) {
-        hit <- refs_all[ref_ids_all == key, ]
-        if (nrow(hit)) {
-          return(hit[1L, ])
-        }
-        NULL
-      })
-      preferred_rows <- preferred_rows[!vapply(preferred_rows, is.null, logical(1))]
-      if (length(preferred_rows)) {
-        refs <- data.table::rbindlist(preferred_rows, fill = TRUE)
-      }
-    }
-  }
-
-  if (nrow(refs)) {
-    refs <- refs[!duplicated(as.character(refs$ref_id)), ]
-  }
-
-  refs
+  refs_all[!duplicated(as.character(refs_all$ref_id)), ]
 }
 
 .litxr_preferred_rows_for_keys <- function(cfg, keys, journal_ids = NULL) {
@@ -581,6 +568,9 @@ litxr_migrate_refactor_indexes <- function(config = NULL, collection_ids = NULL,
 #' @param issn Optional ISSN substring filter.
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
+#' @param runtime_wide_projection_limit Maximum number of project-reference rows
+#'   that may be wide-materialized in one lookup before the call aborts. The
+#'   default is `300`.
 #'
 #' @return Filtered `data.table` of references.
 #' @export
@@ -593,13 +583,24 @@ litxr_find_refs <- function(
   ref_id = NULL,
   isbn = NULL,
   issn = NULL,
-  config = NULL
+  config = NULL,
+  runtime_wide_projection_limit = 300L
 ) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
+  old_wide_projection_limit <- getOption("litxr.runtime_wide_projection_limit", NULL)
+  on.exit({
+    if (is.null(old_wide_projection_limit)) {
+      options(litxr.runtime_wide_projection_limit = NULL)
+    } else {
+      options(litxr.runtime_wide_projection_limit = old_wide_projection_limit)
+    }
+  }, add = TRUE)
+  options(litxr.runtime_wide_projection_limit = runtime_wide_projection_limit)
   .litxr_entity_index_maybe_refresh(cfg)
   aliases <- .litxr_read_project_ref_aliases_index(cfg)
   entity_links <- .litxr_read_project_entity_collections_index(cfg)
+  lookup_columns <- .litxr_project_reference_lookup_columns()
   target_collection <- NULL
   if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
     target_collection <- Filter(function(collection) {
@@ -632,7 +633,7 @@ litxr_find_refs <- function(
         return(.litxr_finalize_find_refs_rows(cfg, doi_refs, hydrate = TRUE))
       }
     }
-    refs <- .litxr_read_project_references_by_keys(cfg, ref_keys)
+    refs <- .litxr_read_project_references_by_keys(cfg, ref_keys, columns = lookup_columns, hydrate = FALSE)
     if (nrow(refs)) {
       refs <- .litxr_attach_entity_ids_to_refs(refs, aliases = aliases)
       if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
@@ -741,7 +742,7 @@ litxr_find_refs <- function(
         return(.litxr_finalize_find_refs_rows(cfg, alias_collection_refs, hydrate = TRUE))
       }
     }
-    alias_refs <- .litxr_read_project_references_by_alias_keys(cfg, ref_keys)
+    alias_refs <- .litxr_read_project_references_by_alias_keys(cfg, ref_keys, hydrate = FALSE)
     if (nrow(alias_refs)) {
       if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
         alias_refs <- .litxr_filter_refs_by_collection_scope(
@@ -759,7 +760,10 @@ litxr_find_refs <- function(
     return(.litxr_find_collection_refs_by_keys(cfg, ref_keys, collection_id = collection_id))
   }
 
-  refs <- .litxr_attach_entity_ids_to_refs(litxr_read_references(cfg), aliases = aliases)
+  refs <- .litxr_attach_entity_ids_to_refs(
+    .litxr_read_project_references_index(cfg, columns = lookup_columns),
+    aliases = aliases
+  )
   if (!nrow(refs)) {
     if (length(ref_keys)) {
       return(.litxr_find_collection_refs_by_keys(cfg, ref_keys, collection_id = collection_id))
@@ -861,5 +865,5 @@ litxr_find_refs <- function(
     refs <- refs[keep, ]
   }
 
-  .litxr_finalize_find_refs_rows(cfg, refs, hydrate = FALSE)
+  .litxr_finalize_find_refs_rows(cfg, refs, hydrate = TRUE)
 }
