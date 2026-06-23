@@ -1,3 +1,12 @@
+# litxr 0.1.1
+
+- Thinned the core exact-key lookup and research-schema/status read paths so
+  they read only the columns they need from the project fst layers.
+- Added a reusable fst subset reader plus column-projected project index
+  helpers to reduce I/O and memory use in refactor hot paths.
+- Kept the public return shapes stable while moving export, lookup, and status
+  computation onto narrower internal reads.
+
 # litxr 0.1.0
 
 - Declared the v0.1.0 identity-first refactor complete.

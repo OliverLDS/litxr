@@ -144,20 +144,14 @@
   links[!duplicated(links$ref_id), ]
 }
 
-.litxr_read_project_references_main_index <- function(cfg) {
+.litxr_read_project_references_main_index <- function(cfg, columns = NULL) {
   path <- .litxr_project_references_index_path(cfg)
-  if (!file.exists(path)) {
-    return(data.table::data.table())
-  }
-  .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
+  .litxr_index_decode(.litxr_read_fst_subset(path, columns = columns))
 }
 
-.litxr_read_project_references_delta_index <- function(cfg) {
+.litxr_read_project_references_delta_index <- function(cfg, columns = NULL) {
   path <- .litxr_project_references_delta_index_path(cfg)
-  if (!file.exists(path)) {
-    return(data.table::data.table())
-  }
-  .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
+  .litxr_index_decode(.litxr_read_fst_subset(path, columns = columns))
 }
 
 .litxr_read_collection_projection_main_index_safe <- function(local_path) {
@@ -206,9 +200,9 @@
   list(refs = projection, links = links)
 }
 
-.litxr_read_project_references_index <- function(cfg) {
-  main <- .litxr_read_project_references_main_index(cfg)
-  delta <- .litxr_read_project_references_delta_index(cfg)
+.litxr_read_project_references_index <- function(cfg, columns = NULL) {
+  main <- .litxr_read_project_references_main_index(cfg, columns = columns)
+  delta <- .litxr_read_project_references_delta_index(cfg, columns = columns)
   if (!nrow(delta)) {
     return(main)
   }
@@ -223,7 +217,7 @@
   path <- .litxr_project_references_index_path(cfg)
   delta_path <- .litxr_project_references_delta_index_path(cfg)
   if (file.exists(delta_path)) {
-    refs <- .litxr_read_project_references_index(cfg)
+    refs <- .litxr_read_project_references_index(cfg, columns = c("ref_id", "source_id", "title", "entry_type", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id"))
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
     return(.litxr_hydrate_project_projection_rows(cfg, out))
@@ -240,13 +234,13 @@
       call. = FALSE
     )
     .litxr_rebuild_project_reference_indexes(cfg)
-    refs <- .litxr_read_project_references_index(cfg)
+    refs <- .litxr_read_project_references_index(cfg, columns = c("ref_id", "source_id", "title", "entry_type", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id"))
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
     return(.litxr_hydrate_project_projection_rows(cfg, out))
   }
   if (!("ref_id" %in% index_columns) && !("source_id" %in% index_columns)) {
-    refs <- .litxr_read_project_references_index(cfg)
+    refs <- .litxr_read_project_references_index(cfg, columns = c("ref_id", "source_id", "title", "entry_type", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id"))
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
     return(.litxr_hydrate_project_projection_rows(cfg, out))
@@ -401,25 +395,19 @@
   invisible(.litxr_project_references_delta_index_path(cfg))
 }
 
-.litxr_read_project_reference_collections_main_index <- function(cfg) {
+.litxr_read_project_reference_collections_main_index <- function(cfg, columns = NULL) {
   path <- .litxr_project_reference_collections_index_path(cfg)
-  if (!file.exists(path)) {
-    return(data.table::data.table())
-  }
-  fst::read_fst(path, as.data.table = TRUE)
+  .litxr_read_fst_subset(path, columns = columns)
 }
 
-.litxr_read_project_reference_collections_delta_index <- function(cfg) {
+.litxr_read_project_reference_collections_delta_index <- function(cfg, columns = NULL) {
   path <- .litxr_project_reference_collections_delta_index_path(cfg)
-  if (!file.exists(path)) {
-    return(data.table::data.table())
-  }
-  fst::read_fst(path, as.data.table = TRUE)
+  .litxr_read_fst_subset(path, columns = columns)
 }
 
-.litxr_read_project_reference_collections_index <- function(cfg) {
-  main <- .litxr_read_project_reference_collections_main_index(cfg)
-  delta <- .litxr_read_project_reference_collections_delta_index(cfg)
+.litxr_read_project_reference_collections_index <- function(cfg, columns = NULL) {
+  main <- .litxr_read_project_reference_collections_main_index(cfg, columns = columns)
+  delta <- .litxr_read_project_reference_collections_delta_index(cfg, columns = columns)
   if (!nrow(delta)) {
     return(main)
   }

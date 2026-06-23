@@ -1329,11 +1329,29 @@ litxr_validate_paper_type <- function(x) {
   out[!duplicated(key), ]
 }
 
-.litxr_read_fst_or_empty <- function(path, empty_fun) {
+.litxr_read_fst_or_empty <- function(path, empty_fun, columns = NULL) {
   if (!file.exists(path)) {
     return(empty_fun())
   }
-  data.table::as.data.table(fst::read_fst(path, as.data.table = TRUE))
+  if (is.null(columns) || !length(columns)) {
+    return(data.table::as.data.table(fst::read_fst(path, as.data.table = TRUE)))
+  }
+  available <- .litxr_read_index_columns_safe(path)
+  if (is.null(available)) {
+    return(empty_fun())
+  }
+  keep <- intersect(unique(as.character(columns)), available)
+  if (!length(keep)) {
+    return(empty_fun())
+  }
+  data.table::as.data.table(fst::read_fst(path, columns = keep, as.data.table = TRUE))
+}
+
+.litxr_read_key_table <- function(main_path, delta_path, empty_fun, key_cols, columns = NULL) {
+  read_cols <- unique(c(key_cols, columns))
+  main <- .litxr_read_fst_or_empty(main_path, empty_fun, columns = read_cols)
+  delta <- .litxr_read_fst_or_empty(delta_path, empty_fun, columns = read_cols)
+  .litxr_upsert_table_by_key(main, delta, key_cols)
 }
 
 .litxr_research_query_keep <- function(values, query) {
@@ -2573,7 +2591,11 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   if (is.null(cfg)) cfg <- litxr_read_config()
 
   .litxr_entity_index_maybe_refresh(cfg)
-  refs <- litxr_read_references(cfg)
+  refs <- if (!is.null(ref_ids) && length(ref_ids) && is.null(collection_id)) {
+    .litxr_read_project_references_by_keys(cfg, ref_ids)
+  } else {
+    .litxr_read_project_references_index(cfg, columns = c("ref_id", "title", "entry_type"))
+  }
   if (!nrow(refs)) {
     return(data.table::data.table(
       ref_id = character(),
@@ -2595,9 +2617,26 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     ))
   }
 
-  aliases <- litxr_read_ref_aliases(cfg)
-  entity_status <- litxr_read_entity_status(cfg)
-  entity_links <- litxr_read_entity_collections(cfg)
+  aliases <- .litxr_read_project_ref_aliases_index(cfg, columns = c("ref_id", "entity_id"))
+  entity_status <- .litxr_read_project_entity_status_index(
+    cfg,
+    columns = c(
+      "entity_id",
+      "has_fulltxt_md",
+      "has_llm_digest",
+      "llm_paper_type",
+      "has_standardized_findings",
+      "n_standardized_findings",
+      "has_descriptive_stats",
+      "n_descriptive_stats",
+      "has_anchor_references",
+      "n_anchor_references",
+      "has_citation_logic_nodes",
+      "n_citation_logic_nodes",
+      "digest_schema_version"
+    )
+  )
+  entity_links <- .litxr_read_project_entity_collections_index(cfg, columns = c("entity_id", "collection_id"))
 
   alias_map <- if (nrow(aliases)) {
     data.table::data.table(
@@ -2631,8 +2670,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
       data.table::data.table(
         entity_id = as.character(entity_status$entity_id),
         has_md = as.logical(entity_status$has_fulltxt_md),
-        has_llm_digest = as.logical(entity_status$has_llm_digest)
-        ,
+        has_llm_digest = as.logical(entity_status$has_llm_digest),
         llm_schema_version = as.character(entity_status$digest_schema_version),
         llm_paper_type = as.character(entity_status$llm_paper_type),
         has_standardized_findings = as.logical(entity_status$has_standardized_findings),

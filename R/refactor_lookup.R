@@ -30,9 +30,9 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
 }
 
 .litxr_resolve_export_entity_ids <- function(cfg, journal_ids = NULL, keys = NULL) {
-  entities <- .litxr_read_project_entities_index(cfg)
-  aliases <- .litxr_read_project_ref_aliases_index(cfg)
-  entity_links <- .litxr_read_project_entity_collections_index(cfg)
+  entities <- .litxr_read_project_entities_index(cfg, columns = c("entity_id", "primary_ref_id", "preferred_citation_ref_id"))
+  aliases <- .litxr_read_project_ref_aliases_index(cfg, columns = c("ref_id", "entity_id"))
+  entity_links <- .litxr_read_project_entity_collections_index(cfg, columns = c("entity_id", "collection_id"))
 
   candidate_ids <- if (nrow(entities)) unique(as.character(entities$entity_id)) else character()
   if (!is.null(journal_ids) && length(journal_ids)) {
@@ -78,13 +78,8 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
     return(data.table::data.table())
   }
 
-  entities <- .litxr_read_project_entities_index(cfg)
-  refs <- .litxr_read_project_references_index(cfg)
-  aliases <- .litxr_read_project_ref_aliases_index(cfg)
-  if (!nrow(entities) || !nrow(refs)) {
-    return(data.table::data.table())
-  }
-
+  entities <- .litxr_read_project_entities_index(cfg, columns = c("entity_id", "primary_ref_id", "preferred_citation_ref_id"))
+  aliases <- .litxr_read_project_ref_aliases_index(cfg, columns = c("ref_id", "entity_id"))
   entity_rows <- entities[entities$entity_id %in% entity_ids, ]
   if (!nrow(entity_rows)) {
     return(data.table::data.table())
@@ -93,25 +88,24 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   chosen_ref_ids <- as.character(entity_rows$preferred_citation_ref_id)
   chosen_ref_ids[is.na(chosen_ref_ids) | !nzchar(chosen_ref_ids)] <- as.character(entity_rows$primary_ref_id[is.na(chosen_ref_ids) | !nzchar(chosen_ref_ids)])
 
-  rows <- refs[refs$ref_id %in% chosen_ref_ids, ]
+  rows <- .litxr_read_project_references_by_keys(cfg, unique(chosen_ref_ids))
   if (nrow(rows) < nrow(entity_rows) && nrow(aliases)) {
     alias_subset <- aliases[aliases$entity_id %in% entity_rows$entity_id, ]
     alias_split <- split(as.character(alias_subset$ref_id), as.character(alias_subset$entity_id))
-    fallback_ids <- vapply(as.character(entity_rows$entity_id), function(entity_id) {
+    candidate_ids <- unique(c(
+      chosen_ref_ids,
+      unlist(alias_split, use.names = FALSE)
+    ))
+    candidate_ids <- candidate_ids[!is.na(candidate_ids) & nzchar(candidate_ids)]
+    rows <- .litxr_read_project_references_by_keys(cfg, candidate_ids)
+    chosen_ref_ids <- vapply(as.character(entity_rows$entity_id), function(entity_id) {
       preferred <- chosen_ref_ids[[match(entity_id, as.character(entity_rows$entity_id))]]
-      if (preferred %in% rows$ref_id) {
-        return(preferred)
-      }
-      candidates <- alias_split[[entity_id]]
-      if (is.null(candidates) || !length(candidates)) {
-        return(NA_character_)
-      }
-      hit <- candidates[candidates %in% refs$ref_id]
+      candidates <- c(preferred, alias_split[[entity_id]])
+      candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+      hit <- candidates[candidates %in% rows$ref_id]
       if (!length(hit)) NA_character_ else hit[[1]]
     }, character(1))
-    fallback_ids <- fallback_ids[!is.na(fallback_ids) & nzchar(fallback_ids)]
-    rows <- refs[refs$ref_id %in% unique(fallback_ids), ]
-    chosen_ref_ids <- fallback_ids
+    chosen_ref_ids <- chosen_ref_ids[!is.na(chosen_ref_ids) & nzchar(chosen_ref_ids)]
   }
 
   out <- merge(
@@ -600,11 +594,7 @@ litxr_find_refs <- function(
   .litxr_entity_index_maybe_refresh(cfg)
   aliases <- .litxr_read_project_ref_aliases_index(cfg)
   entity_links <- .litxr_read_project_entity_collections_index(cfg)
-  ref_keys <- if (!is.null(ref_id) && any(nzchar(as.character(ref_id)))) {
-    .litxr_expand_reference_keys(ref_id)
-  } else {
-    character()
-  }
+  ref_keys <- if (!is.null(ref_id) && any(nzchar(as.character(ref_id)))) .litxr_expand_reference_keys(ref_id) else character()
   exact_ref_only <- length(ref_keys) &&
     is.null(query) &&
     is.null(entry_type) &&
@@ -614,22 +604,23 @@ litxr_find_refs <- function(
     is.null(isbn) &&
     is.null(issn)
   if (isTRUE(exact_ref_only)) {
-    refs <- .litxr_attach_entity_ids_to_refs(litxr_read_references(cfg), aliases = aliases)
-    alias_rows <- .litxr_match_alias_rows_by_keys(cfg, ref_keys)
+    refs <- .litxr_read_project_references_by_keys(cfg, ref_keys)
     if (nrow(refs)) {
-      source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
-      exact <- refs[refs$ref_id %in% ref_keys | source_id %in% ref_keys, ]
-      if (nrow(exact)) {
-        return(.litxr_finalize_find_refs_rows(cfg, exact, hydrate = TRUE))
+      refs <- .litxr_attach_entity_ids_to_refs(refs, aliases = aliases)
+      if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+        refs <- .litxr_filter_refs_by_collection_scope(
+          cfg,
+          refs,
+          collection_id = collection_id,
+          aliases = aliases,
+          entity_links = entity_links
+        )
       }
-      if (nrow(alias_rows)) {
-        exact <- .litxr_filter_refs_by_alias_rows(refs, alias_rows, ref_keys)
-        if (nrow(exact)) {
-          return(.litxr_finalize_find_refs_rows(cfg, exact, hydrate = TRUE))
-        }
+      if (nrow(refs)) {
+        return(.litxr_finalize_find_refs_rows(cfg, refs, hydrate = TRUE))
       }
     }
-    return(.litxr_find_collection_refs_by_keys(cfg, ref_keys))
+    return(.litxr_find_collection_refs_by_keys(cfg, ref_keys, collection_id = collection_id))
   }
 
   refs <- .litxr_attach_entity_ids_to_refs(litxr_read_references(cfg), aliases = aliases)
