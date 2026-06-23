@@ -283,7 +283,7 @@
   )
 }
 
-.litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL, hydrate = FALSE, wide_projection_limit = 300L) {
+.litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL, hydrate = FALSE, wide_projection_limit = 300L, keyed_fst_read_threshold = getOption("litxr.keyed_fst_read_threshold", 32L)) {
   path <- .litxr_project_references_index_path(cfg)
   delta_path <- .litxr_project_references_delta_index_path(cfg)
   read_columns <- .litxr_project_reference_lookup_columns(columns)
@@ -320,6 +320,26 @@
     refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
     source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
     out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
+    if (isTRUE(hydrate)) {
+      return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
+    }
+    return(out)
+  }
+
+  keyed_fst_read_threshold <- .litxr_keyed_fst_read_threshold(keyed_fst_read_threshold)
+  if (length(keys) > keyed_fst_read_threshold) {
+    subset_columns <- unique(c(read_columns, "ref_id", "source_id"))
+    refs <- .litxr_read_fst_subset(path, columns = subset_columns)
+    if (!nrow(refs)) {
+      return(data.table::data.table())
+    }
+    source_id <- if ("source_id" %in% names(refs)) refs$source_id else rep(NA_character_, nrow(refs))
+    out <- refs[refs$ref_id %in% keys | source_id %in% keys, ]
+    if (!nrow(out)) {
+      return(out)
+    }
+    key <- .litxr_upsert_key(out)
+    out <- out[!duplicated(key), ]
     if (isTRUE(hydrate)) {
       return(.litxr_hydrate_project_projection_rows(cfg, out, wide_projection_limit = wide_projection_limit))
     }

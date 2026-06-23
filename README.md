@@ -138,9 +138,11 @@ The v0.1.0 refactor makes `entity_id` the internal identity key while keeping
 stays in JSON; `fst` is used for thin indexes, compatibility projections, and
 status.
 
-The 0.1.4 release removes the live alias-table dependency from the entity
-builder/read path, keeps entity-status refresh incremental, and preserves the
-keyed upsert rewrite from 0.1.3. The 0.1.2.1
+The 0.1.5 release makes project lookup and hydration keyed and batch-oriented,
+including narrow first reads and runtime wide-projection guardrails. The 0.1.4
+release removes the live alias-table dependency from the entity builder/read
+path, keeps entity-status refresh incremental, and preserves the keyed upsert
+rewrite from 0.1.3. The 0.1.2.1
 release adds narrow-first project lookup so wide projection materialization
 happens only after canonical filtering, while the 0.1.2 release adds the
 normalized `ref_entities` / `ref_arxiv` / `ref_doi` scaffold and narrow

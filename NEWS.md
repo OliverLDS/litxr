@@ -1,3 +1,13 @@
+# litxr 0.1.5
+
+- Reworked project lookup and hydration to use keyed batch reads instead of
+  row-wise file probing in the common path.
+- Added keyed hydration coverage for missing JSON, partial JSON, duplicate
+  slug files, duplicate canonical ids, multi-collection rows, and runtime
+  wide-projection guardrails.
+- Kept list-column hydration stable at the API/export boundary while limiting
+  wide materialization to the final matched result set.
+
 # litxr 0.1.4
 
 - Removed the live alias-table dependency from the entity/status read path and

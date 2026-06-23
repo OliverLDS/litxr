@@ -3998,6 +3998,24 @@ litxr_add_refs <- function(
   core
 }
 
+.litxr_record_slugs <- function(ref_id, doi = NULL) {
+  ref_id <- as.character(ref_id)
+  if (is.null(doi)) {
+    doi <- rep(NA_character_, length(ref_id))
+  } else {
+    doi <- as.character(doi)
+    if (length(doi) != length(ref_id)) {
+      doi <- rep(doi[[1L]], length(ref_id))
+    }
+  }
+  core <- ifelse(!is.na(doi) & nzchar(doi), doi, ref_id)
+  core <- tolower(core)
+  core <- gsub("[^a-z0-9]+", "_", core)
+  core <- gsub("^_+|_+$", "", core)
+  core[!nzchar(core)] <- "record"
+  core
+}
+
 .litxr_record_key <- function(records) {
   records <- .litxr_normalize_record_identity(records)
   doi <- records[["doi"]]
@@ -4818,15 +4836,30 @@ litxr_add_refs <- function(
     return(rows)
   }
 
-  json_slugs <- sub("\\.json$", "", basename(json_paths))
-  row_slugs <- vapply(seq_len(nrow(rows)), function(i) .litxr_record_slug(rows[i, ]), character(1))
-  matched_paths <- json_paths[match(row_slugs, json_slugs)]
-  matched_paths <- matched_paths[!is.na(matched_paths)]
-  if (!length(matched_paths)) {
+  file_map <- data.table::data.table(
+    slug = sub("\\.json$", "", basename(json_paths)),
+    path = json_paths
+  )
+  row_map <- data.table::data.table(
+    ref_id = if ("ref_id" %in% names(rows)) as.character(rows$ref_id) else rep(NA_character_, nrow(rows)),
+    slug = .litxr_record_slugs(
+      if ("ref_id" %in% names(rows)) rows$ref_id else rep(NA_character_, nrow(rows)),
+      if ("doi" %in% names(rows)) rows$doi else NULL
+    ),
+    row_idx = seq_len(nrow(rows))
+  )
+  matched_idx <- match(row_map$slug, file_map$slug)
+  matched_idx <- matched_idx[!is.na(matched_idx)]
+  if (!length(matched_idx)) {
     return(rows)
   }
+  matched <- data.table::data.table(
+    ref_id = row_map$ref_id[!is.na(row_map$slug) & !is.na(match(row_map$slug, file_map$slug))],
+    slug = row_map$slug[!is.na(row_map$slug) & !is.na(match(row_map$slug, file_map$slug))],
+    path = file_map$path[matched_idx]
+  )
 
-  full_rows <- lapply(unique(matched_paths), function(json_path) {
+  full_rows <- lapply(unique(matched$path), function(json_path) {
     tryCatch(.litxr_storage_payload_to_row(json_path), error = function(e) data.table::data.table())
   })
   full_rows <- full_rows[vapply(full_rows, nrow, integer(1)) > 0L]
@@ -4899,6 +4932,17 @@ litxr_add_refs <- function(
   limit
 }
 
+.litxr_keyed_fst_read_threshold <- function(limit = getOption("litxr.keyed_fst_read_threshold", 32L)) {
+  if (missing(limit) || is.null(limit) || !length(limit)) {
+    return(32L)
+  }
+  limit <- suppressWarnings(as.integer(limit[[1L]]))
+  if (is.na(limit) || limit < 1L) {
+    return(32L)
+  }
+  limit
+}
+
 .litxr_hydrate_project_projection_rows <- function(cfg, rows, wide_projection_limit = getOption("litxr.runtime_wide_projection_limit", 300L)) {
   rows <- data.table::as.data.table(rows)
   if (!nrow(rows)) {
@@ -4918,8 +4962,7 @@ litxr_add_refs <- function(
   }
 
   needed_fields <- c("abstract", "authors_list")
-  needs_hydration <- !all(needed_fields %in% names(rows))
-  if (!isTRUE(needs_hydration)) {
+  if (all(needed_fields %in% names(rows))) {
     return(rows)
   }
 
@@ -4928,21 +4971,36 @@ litxr_add_refs <- function(
     return(rows)
   }
 
-  out <- data.table::copy(rows)
-  collection_map <- split(as.character(links$ref_id), as.character(links$collection_id))
   collections <- .litxr_config_collections(cfg)
+  if (!length(collections)) {
+    return(rows)
+  }
+
   collection_paths <- stats::setNames(
     vapply(collections, function(collection) {
       .litxr_resolve_local_path(cfg, collection$local_path)
     }, character(1)),
     vapply(collections, `[[`, character(1), "collection_id")
   )
+  link_map <- data.table::data.table(
+    collection_id = as.character(links$collection_id),
+    ref_id = as.character(links$ref_id)
+  )
+  data.table::setkey(link_map, collection_id, ref_id)
+
+  out <- data.table::copy(rows)
   unresolved <- rep(TRUE, nrow(out))
   for (collection_id in names(collection_paths)) {
     if (!any(unresolved)) {
       break
     }
-    ref_ids <- unique(collection_map[[collection_id]] %||% character())
+    local_path <- unname(collection_paths[[collection_id]])
+    if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) {
+      next
+    }
+    ref_ids <- link_map[J(collection_id), ref_id]
+    ref_ids <- unique(as.character(ref_ids))
+    ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
     if (!length(ref_ids)) {
       next
     }
@@ -4950,15 +5008,12 @@ litxr_add_refs <- function(
     if (!length(batch_idx)) {
       next
     }
-    local_path <- unname(collection_paths[collection_id])
-    if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) {
+    candidate <- out[batch_idx, ]
+    hydrated <- .litxr_hydrate_collection_projection_rows(local_path[[1]], candidate)
+    if (!nrow(hydrated)) {
       next
     }
-    hydrated <- .litxr_hydrate_collection_projection_rows(local_path[[1]], out[batch_idx, ])
-    hit_ref_ids <- attr(hydrated, "hydrated_ref_ids") %||% character()
-    if (!length(hit_ref_ids)) {
-      next
-    }
+    hit_ref_ids <- unique(as.character(hydrated$ref_id))
     hit_idx <- batch_idx[out$ref_id[batch_idx] %in% hit_ref_ids]
     if (!length(hit_idx)) {
       next
@@ -4968,9 +5023,8 @@ litxr_add_refs <- function(
       next
     }
     data.table::setkey(hydrated_hits, ref_id)
-    assign_cols <- setdiff(names(hydrated_hits), "ref_id")
     match_idx <- match(out$ref_id[hit_idx], hydrated_hits$ref_id)
-    for (field in assign_cols) {
+    for (field in setdiff(names(hydrated_hits), "ref_id")) {
       if (!(field %in% names(out))) {
         if (is.list(hydrated_hits[[field]])) {
           out[[field]] <- rep(list(NULL), nrow(out))
@@ -4980,8 +5034,8 @@ litxr_add_refs <- function(
           out[[field]] <- rep(NA_integer_, nrow(out))
         } else if (is.numeric(hydrated_hits[[field]])) {
           out[[field]] <- rep(NA_real_, nrow(out))
-      } else {
-        out[[field]] <- rep(NA_character_, nrow(out))
+        } else {
+          out[[field]] <- rep(NA_character_, nrow(out))
         }
       }
       value <- hydrated_hits[[field]][match_idx]
@@ -4994,7 +5048,7 @@ litxr_add_refs <- function(
   out
 }
 
-.litxr_read_journal_records_by_keys <- function(local_path, keys) {
+.litxr_read_journal_records_by_keys <- function(local_path, keys, keyed_fst_read_threshold = getOption("litxr.keyed_fst_read_threshold", 32L)) {
   keys <- .litxr_expand_reference_keys(keys)
   index_path <- .litxr_index_path(local_path)
   if (!file.exists(index_path)) {
@@ -5024,6 +5078,22 @@ litxr_add_refs <- function(
       return(data.table::data.table())
     }
     out <- .litxr_subset_records_by_lookup_keys(records, keys)
+    return(.litxr_hydrate_collection_projection_rows(local_path, out))
+  }
+
+  keyed_fst_read_threshold <- .litxr_keyed_fst_read_threshold(keyed_fst_read_threshold)
+  if (length(keys) > keyed_fst_read_threshold) {
+    read_columns <- unique(c(.litxr_project_reference_lookup_columns(), "ref_id", "source_id", "doi"))
+    records <- .litxr_read_fst_subset(index_path, columns = read_columns)
+    if (!nrow(records)) {
+      return(data.table::data.table())
+    }
+    out <- .litxr_subset_records_by_lookup_keys(records, keys)
+    if (!nrow(out)) {
+      return(out)
+    }
+    key <- .litxr_upsert_key(out)
+    out <- out[!duplicated(key), ]
     return(.litxr_hydrate_collection_projection_rows(local_path, out))
   }
 
@@ -6584,10 +6654,14 @@ litxr_add_refs <- function(
     status_code = "active"
   )
 
-  root_by_entity <- out[, list(root_ref_id = .litxr_choose_entity_root_ref(ref_id)), by = entity_id]
-  data.table::setkey(out, entity_id)
-  data.table::setkey(root_by_entity, entity_id)
-  out[root_by_entity, root_ref_id := i.root_ref_id]
+  root_by_entity <- stats::aggregate(
+    ref_id ~ entity_id,
+    data = as.data.frame(out[, c("entity_id", "ref_id"), drop = FALSE]),
+    FUN = function(x) .litxr_choose_entity_root_ref(as.character(x))
+  )
+  root_by_entity <- data.table::as.data.table(root_by_entity)
+  data.table::setnames(root_by_entity, "ref_id", "root_ref_id")
+  out$root_ref_id <- root_by_entity$root_ref_id[match(out$entity_id, root_by_entity$entity_id)]
   out[["is_primary_ref_id"]] <- out$ref_id == out$root_ref_id
   out[["root_ref_id"]] <- NULL
   data.table::setcolorder(out, c(
@@ -6657,84 +6731,100 @@ litxr_add_refs <- function(
   out$has_published_metadata <- !is.na(out$doi) & nzchar(out$doi)
   out$updated_at <- now
   if (nrow(entity_map)) {
-    artifact_map <- unique(entity_map[, data.table::data.table(ref_id = as.character(ref_id), entity_id = as.character(entity_id))])
+    artifact_map <- data.table::data.table(
+      ref_id = as.character(entity_map$ref_id),
+      entity_id = as.character(entity_map$entity_id)
+    )
+    artifact_map <- artifact_map[!duplicated(paste(artifact_map$ref_id, artifact_map$entity_id, sep = "\r")), ]
     md_presence <- artifact_presence_for_ref_ids(artifact_map$ref_id, .litxr_project_md_dir(cfg), "\\.md$")
     llm_presence <- artifact_presence_for_ref_ids(artifact_map$ref_id, .litxr_project_llm_dir(cfg), "\\.json$")
-    artifact_map[, `:=`(
-      has_md = ref_id %in% md_presence$ref_id[md_presence$present %in% TRUE],
-      has_llm_digest = ref_id %in% llm_presence$ref_id[llm_presence$present %in% TRUE]
-    )]
-    artifact_by_entity <- artifact_map[, data.table::data.table(
-      has_md = any(has_md),
-      has_llm_digest = any(has_llm_digest)
-    ), by = entity_id]
-    out[artifact_by_entity, on = "entity_id", `:=`(
-      has_md = i.has_md,
-      has_llm_digest = i.has_llm_digest
-    )]
+    artifact_map$has_md <- artifact_map$ref_id %in% md_presence$ref_id[md_presence$present %in% TRUE]
+    artifact_map$has_llm_digest <- artifact_map$ref_id %in% llm_presence$ref_id[llm_presence$present %in% TRUE]
+    artifact_by_entity <- stats::aggregate(
+      cbind(has_md, has_llm_digest) ~ entity_id,
+      data = as.data.frame(artifact_map),
+      FUN = function(x) any(as.logical(x))
+    )
+    artifact_by_entity <- data.table::as.data.table(artifact_by_entity)
+    hit <- match(out$entity_id, artifact_by_entity$entity_id)
+    if (any(!is.na(hit))) {
+      idx <- !is.na(hit)
+      out$has_md[idx] <- artifact_by_entity$has_md[hit[idx]]
+      out$has_llm_digest[idx] <- artifact_by_entity$has_llm_digest[hit[idx]]
+    }
   }
 
   if (nrow(refs)) {
     refs_dt <- data.table::as.data.table(refs)
-    data.table::setkey(refs_dt, ref_id)
-    primary_join <- refs_dt[out, on = .(ref_id = primary_ref_id), nomatch = 0L]
-    if (nrow(primary_join)) {
-      primary_join[, `:=`(
-        year = suppressWarnings(as.integer(year)),
-        first_author = ifelse(!is.na(authors) & nzchar(as.character(authors)), trimws(sub(";.*$", "", as.character(authors))), NA_character_),
+    primary_idx <- match(out$primary_ref_id, refs_dt$ref_id)
+    if (any(!is.na(primary_idx))) {
+      primary_ok <- !is.na(primary_idx)
+      primary_author <- as.character(refs_dt$authors[primary_idx[primary_ok]])
+      primary_first <- ifelse(
+        !is.na(primary_author) & nzchar(primary_author),
+        trimws(sub(";.*$", "", primary_author)),
+        NA_character_
+      )
+      primary_join <- data.table::data.table(
+        entity_id = as.character(out$entity_id[primary_ok]),
+        year = suppressWarnings(as.integer(refs_dt$year[primary_idx[primary_ok]])),
+        first_author = primary_first,
         author_short = ifelse(
-          is.na(first_author) | !nzchar(first_author),
+          is.na(primary_first) | !nzchar(primary_first),
           NA_character_,
-          ifelse(grepl(";", as.character(authors), fixed = TRUE), paste0(first_author, " et al."), first_author)
+          ifelse(grepl(";", primary_author, fixed = TRUE), paste0(primary_first, " et al."), primary_first)
         ),
-        entry_type = as.character(entry_type),
-        primary_source = as.character(source)
-      )]
-      primary_lookup <- primary_join[, data.table::data.table(
-        entity_id = as.character(entity_id),
-        year = year[1L],
-        first_author = first_author[1L],
-        author_short = author_short[1L],
-        entry_type = entry_type[1L],
-        primary_source = primary_source[1L]
-      ), by = entity_id]
-      out[primary_lookup, on = "entity_id", `:=`(
-        year = i.year,
-        first_author = i.first_author,
-        author_short = i.author_short,
-        entry_type = i.entry_type,
-        primary_source = i.primary_source
-      )]
+        entry_type = as.character(refs_dt$entry_type[primary_idx[primary_ok]]),
+        primary_source = as.character(refs_dt$source[primary_idx[primary_ok]])
+      )
+      primary_lookup <- primary_join[!duplicated(primary_join$entity_id), ]
+      hit <- match(out$entity_id, primary_lookup$entity_id)
+      if (any(!is.na(hit))) {
+        idx <- !is.na(hit)
+        out$year[idx] <- primary_lookup$year[hit[idx]]
+        out$first_author[idx] <- primary_lookup$first_author[hit[idx]]
+        out$author_short[idx] <- primary_lookup$author_short[hit[idx]]
+        out$entry_type[idx] <- primary_lookup$entry_type[hit[idx]]
+        out$primary_source[idx] <- primary_lookup$primary_source[hit[idx]]
+      }
     }
 
-    preferred_join <- refs_dt[out, on = .(ref_id = preferred_citation_ref_id), nomatch = 0L]
-    if (nrow(preferred_join)) {
-      preferred_join[, `:=`(
-        preferred_year = suppressWarnings(as.integer(year)),
-        preferred_first_author = ifelse(!is.na(authors) & nzchar(as.character(authors)), trimws(sub(";.*$", "", as.character(authors))), NA_character_),
+    preferred_idx <- match(out$preferred_citation_ref_id, refs_dt$ref_id)
+    if (any(!is.na(preferred_idx))) {
+      preferred_ok <- !is.na(preferred_idx)
+      preferred_author <- as.character(refs_dt$authors[preferred_idx[preferred_ok]])
+      preferred_first <- ifelse(
+        !is.na(preferred_author) & nzchar(preferred_author),
+        trimws(sub(";.*$", "", preferred_author)),
+        NA_character_
+      )
+      preferred_join <- data.table::data.table(
+        entity_id = as.character(out$entity_id[preferred_ok]),
+        preferred_year = suppressWarnings(as.integer(refs_dt$year[preferred_idx[preferred_ok]])),
+        preferred_first_author = preferred_first,
         preferred_author_short = ifelse(
-          is.na(preferred_first_author) | !nzchar(preferred_first_author),
+          is.na(preferred_first) | !nzchar(preferred_first),
           NA_character_,
-          ifelse(grepl(";", as.character(authors), fixed = TRUE), paste0(preferred_first_author, " et al."), preferred_first_author)
+          ifelse(grepl(";", preferred_author, fixed = TRUE), paste0(preferred_first, " et al."), preferred_first)
         ),
-        preferred_entry_type = as.character(entry_type),
-        published_source = as.character(source)
-      )]
-      preferred_lookup <- preferred_join[, data.table::data.table(
-        entity_id = as.character(entity_id),
-        preferred_year = preferred_year[1L],
-        preferred_first_author = preferred_first_author[1L],
-        preferred_author_short = preferred_author_short[1L],
-        preferred_entry_type = preferred_entry_type[1L],
-        published_source = published_source[1L]
-      ), by = entity_id]
-      out[preferred_lookup, on = "entity_id", `:=`(
-        year = ifelse(is.na(i.preferred_year), year, i.preferred_year),
-        first_author = ifelse(is.na(i.preferred_first_author) | !nzchar(i.preferred_first_author), first_author, i.preferred_first_author),
-        author_short = ifelse(is.na(i.preferred_author_short) | !nzchar(i.preferred_author_short), author_short, i.preferred_author_short),
-        entry_type = ifelse(is.na(i.preferred_entry_type) | !nzchar(i.preferred_entry_type), entry_type, i.preferred_entry_type),
-        published_source = i.published_source
-      )]
+        preferred_entry_type = as.character(refs_dt$entry_type[preferred_idx[preferred_ok]]),
+        published_source = as.character(refs_dt$source[preferred_idx[preferred_ok]])
+      )
+      preferred_lookup <- preferred_join[!duplicated(preferred_join$entity_id), ]
+      hit <- match(out$entity_id, preferred_lookup$entity_id)
+      if (any(!is.na(hit))) {
+        idx <- !is.na(hit)
+        pref_year <- preferred_lookup$preferred_year[hit[idx]]
+        pref_first <- preferred_lookup$preferred_first_author[hit[idx]]
+        pref_short <- preferred_lookup$preferred_author_short[hit[idx]]
+        pref_entry <- preferred_lookup$preferred_entry_type[hit[idx]]
+        pref_source <- preferred_lookup$published_source[hit[idx]]
+        out$year[idx] <- ifelse(is.na(pref_year), out$year[idx], pref_year)
+        out$first_author[idx] <- ifelse(is.na(pref_first) | !nzchar(pref_first), out$first_author[idx], pref_first)
+        out$author_short[idx] <- ifelse(is.na(pref_short) | !nzchar(pref_short), out$author_short[idx], pref_short)
+        out$entry_type[idx] <- ifelse(is.na(pref_entry) | !nzchar(pref_entry), out$entry_type[idx], pref_entry)
+        out$published_source[idx] <- pref_source
+      }
     }
   }
 
@@ -6787,7 +6877,9 @@ litxr_add_refs <- function(
 
   alias_map <- data.table::as.data.table(aliases)[, c("ref_id", "entity_id"), with = FALSE]
   link_map <- data.table::as.data.table(links)[, c("ref_id", "collection_id", "recorded_at"), with = FALSE]
-  merged <- alias_map[link_map, on = "ref_id", nomatch = 0L]
+  hit <- match(link_map$ref_id, alias_map$ref_id)
+  merged <- link_map[!is.na(hit), , drop = FALSE]
+  merged$entity_id <- as.character(alias_map$entity_id[hit[!is.na(hit)]])
   if (!nrow(merged)) {
     out <- data.table::data.table(
       entity_id = character(),
@@ -6797,9 +6889,12 @@ litxr_add_refs <- function(
     .litxr_write_project_entity_collections_index(cfg, out)
     return(out)
   }
-  out <- merged[, data.table::data.table(
-    recorded_at = as.character(max(recorded_at))
-  ), by = c("entity_id", "collection_id")]
+  out <- stats::aggregate(
+    recorded_at ~ entity_id + collection_id,
+    data = as.data.frame(merged[, c("entity_id", "collection_id", "recorded_at")]),
+    FUN = function(x) as.character(max(as.character(x), na.rm = TRUE))
+  )
+  out <- data.table::as.data.table(out)
   .litxr_write_project_entity_collections_index(cfg, out)
   out
 }
@@ -6876,22 +6971,29 @@ litxr_add_refs <- function(
     data.table::data.table(ref_id = ref_ids, present = slugs %in% files)
   }
 
-  artifact_map <- unique(entity_map[, data.table::data.table(ref_id = as.character(ref_id), entity_id = as.character(entity_id))])
+  artifact_map <- data.table::data.table(
+    ref_id = as.character(entity_map$ref_id),
+    entity_id = as.character(entity_map$entity_id)
+  )
+  artifact_map <- artifact_map[!is.na(artifact_map$ref_id) & nzchar(artifact_map$ref_id), ]
+  artifact_map <- artifact_map[!duplicated(paste(artifact_map$entity_id, artifact_map$ref_id, sep = "\r")), ]
   md_presence <- artifact_presence_for_ref_ids(artifact_map$ref_id, .litxr_project_md_dir(cfg), "\\.md$")
   llm_presence <- artifact_presence_for_ref_ids(artifact_map$ref_id, .litxr_project_llm_dir(cfg), "\\.json$")
-  artifact_map[, `:=`(
-    has_fulltxt_md = ref_id %in% md_presence$ref_id[md_presence$present %in% TRUE],
-    has_llm_digest = ref_id %in% llm_presence$ref_id[llm_presence$present %in% TRUE]
-  )]
-  artifact_by_entity <- artifact_map[, data.table::data.table(
-    has_fulltxt_md = any(has_fulltxt_md),
-    has_llm_digest = any(has_llm_digest)
-  ), by = entity_id]
+  artifact_map$has_fulltxt_md <- artifact_map$ref_id %in% md_presence$ref_id[md_presence$present %in% TRUE]
+  artifact_map$has_llm_digest <- artifact_map$ref_id %in% llm_presence$ref_id[llm_presence$present %in% TRUE]
+  artifact_by_entity <- stats::aggregate(
+    cbind(has_fulltxt_md, has_llm_digest) ~ entity_id,
+    data = as.data.frame(artifact_map),
+    FUN = function(x) any(as.logical(x))
+  )
+  artifact_by_entity <- data.table::as.data.table(artifact_by_entity)
   if (nrow(artifact_by_entity)) {
-    status[artifact_by_entity, on = "entity_id", `:=`(
-      has_fulltxt_md = i.has_fulltxt_md,
-      has_llm_digest = i.has_llm_digest
-    )]
+    hit <- match(status$entity_id, artifact_by_entity$entity_id)
+    if (any(!is.na(hit))) {
+      idx <- !is.na(hit)
+      status$has_fulltxt_md[idx] <- artifact_by_entity$has_fulltxt_md[hit[idx]]
+      status$has_llm_digest[idx] <- artifact_by_entity$has_llm_digest[hit[idx]]
+    }
   }
 
   digests <- tryCatch(
@@ -6901,10 +7003,8 @@ litxr_add_refs <- function(
   if (nrow(digests)) {
     digest_join <- entity_map[data.table::as.data.table(digests), on = "ref_id", nomatch = 0L]
     if (nrow(digest_join)) {
-      digest_join[, `:=`(
-        digest_revision = suppressWarnings(as.integer(digest_revision)),
-        updated_at = as.character(updated_at)
-      )]
+      digest_join$digest_revision <- suppressWarnings(as.integer(digest_join$digest_revision))
+      digest_join$updated_at <- as.character(digest_join$updated_at)
       data.table::setorder(digest_join, entity_id, -digest_revision, -updated_at, ref_id)
       digest_latest <- digest_join[, .SD[1L], by = entity_id]
       digest_status <- digest_latest[, data.table::data.table(
@@ -6913,11 +7013,13 @@ litxr_add_refs <- function(
         digest_revision_latest = suppressWarnings(as.integer(digest_revision)),
         llm_paper_type = as.character(paper_type)
       )]
-      status[digest_status, on = "entity_id", `:=`(
-        digest_schema_version = i.digest_schema_version,
-        digest_revision_latest = i.digest_revision_latest,
-        llm_paper_type = i.llm_paper_type
-      )]
+      hit <- match(status$entity_id, digest_status$entity_id)
+      if (any(!is.na(hit))) {
+        idx <- !is.na(hit)
+        status$digest_schema_version[idx] <- digest_status$digest_schema_version[hit[idx]]
+        status$digest_revision_latest[idx] <- digest_status$digest_revision_latest[hit[idx]]
+        status$llm_paper_type[idx] <- digest_status$llm_paper_type[hit[idx]]
+      }
     }
   }
 
@@ -6984,7 +7086,11 @@ litxr_add_refs <- function(
   for (count_dt in counts) {
     if (nrow(count_dt)) {
       count_name <- setdiff(names(count_dt), "entity_id")[1L]
-      status[count_dt, on = "entity_id", (count_name) := i[[count_name]]]
+      hit <- match(status$entity_id, count_dt$entity_id)
+      if (any(!is.na(hit))) {
+        idx <- !is.na(hit)
+        status[[count_name]][idx] <- count_dt[[count_name]][hit[idx]]
+      }
     }
   }
 
