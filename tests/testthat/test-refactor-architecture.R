@@ -98,19 +98,16 @@ test_that("authoritative projections own rich payload boundaries and rebuild com
   expect_true(nrow(authoritative_links) >= 2L)
   expect_true(all(c("ref_id", "collection_id", "collection_title", "recorded_at") %in% names(authoritative_links)))
 
-  writeBin(charToRaw("damaged"), litxr:::.litxr_project_references_index_path(cfg))
-  writeBin(charToRaw("damaged"), litxr:::.litxr_project_reference_collections_index_path(cfg))
+  stopifnot(!file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "references.fst")))
+  stopifnot(!file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "reference_collections.fst")))
 
   build_result <- litxr::litxr_build_entity_indexes(cfg)
   expect_true(is.list(build_result))
-  expect_true(file.exists(build_result$ref_aliases_path))
+  expect_false("ref_identity_map_path" %in% names(build_result))
   expect_true(file.exists(build_result$entities_path))
   expect_true(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "ref_entities.fst")))
 
-  expect_warning(
-    refs <- litxr::litxr_read_references(cfg),
-    "compatibility cache is unreadable and will be rebuilt"
-  )
+  expect_silent(refs <- litxr::litxr_read_references(cfg))
   links <- litxr::litxr_read_reference_collections(cfg)
 
   expect_true(nrow(refs) >= 2L)

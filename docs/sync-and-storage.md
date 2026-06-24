@@ -19,7 +19,7 @@ durable collection-local storage.
 
 Under `project.data_root/`:
 
-- `index/ref_aliases.fst`: thin alias-to-entity index
+- `index/ref_identity_map.fst`: thin identity-to-entity index
 - `index/entities.fst`: thin entity-level search projection
 - `index/entity_collections.fst`: thin entity-to-collection memberships
 - `index/entity_status.fst`: thin entity-level artifact status
@@ -31,7 +31,7 @@ Under `project.data_root/`:
 - `llm/`: project-level structured digests keyed by `ref_id`
 - `md/`: project-level markdown keyed by `ref_id`
 
-The thin `entity_*` and `ref_aliases` indexes are the operational identity
+The thin `entity_*` and `ref_identity_map` indexes are the operational identity
 layer. The heavy project `references.fst` and `reference_collections.fst`
 files remain for backward compatibility and are rebuilt as compatibility
 projections when needed.
@@ -181,12 +181,12 @@ accepts collection ids.
 
 Missing keys now produce a warning instead of being ignored silently.
 
-## Stable Alias Policies
+## Stable Identity Policies
 
 During the staged `v0.1.0` refactor, operator-facing behavior is:
 
-- citation export prefers the published DOI-backed alias when one is linked
-- digest/full-text prompting may prefer a linked arXiv alias for source hints
+- citation export prefers the published DOI-backed identity when one is linked
+- digest/full-text prompting may prefer a linked arXiv identity for source hints
 - DOI/arXiv linking preserves existing surface `ref_id` values and records the
   equivalence through link fields and thin entity indexes
 - collection membership can now be viewed either as `ref_id` links or as thin

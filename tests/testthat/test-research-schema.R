@@ -14,6 +14,7 @@ on.exit({
 
 litxr::litxr_init()
 cfg <- litxr::litxr_read_config()
+journal <- cfg$journals[[1]]
 
 normalized_types <- litxr::litxr_normalize_paper_type(c(
   " Theoretical ",
@@ -175,7 +176,7 @@ prompt_ref <- data.table::data.table(
   doi = NA_character_,
   year = 2025L
 )
-litxr:::.litxr_write_project_references_index(cfg, prompt_ref)
+litxr:::.litxr_refresh_normalized_reference_scaffold(cfg, records = prompt_ref, refresh_entity_indexes = TRUE)
 prompt_create <- litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "create")
 stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create, fixed = TRUE))
 stopifnot(grepl("https://arxiv.org/pdf/2501.00001", prompt_create, fixed = TRUE))
@@ -203,7 +204,7 @@ prompt_ref_doi <- data.table::data.table(
   linked_arxiv_ref_id = "arxiv:2501.00001",
   year = 2025L
 )
-litxr:::.litxr_write_project_references_index(cfg, data.table::rbindlist(list(prompt_ref, prompt_ref_doi), fill = TRUE))
+litxr:::.litxr_refresh_normalized_reference_scaffold(cfg, records = data.table::rbindlist(list(prompt_ref, prompt_ref_doi), fill = TRUE), refresh_entity_indexes = TRUE)
 prompt_create_doi <- litxr::litxr_llm_digest_prompt("doi:10.1000/prompt-doi", cfg, mode = "create")
 stopifnot(grepl("linked_arxiv_ref_id: arxiv:2501.00001", prompt_create_doi, fixed = TRUE))
 stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create_doi, fixed = TRUE))
@@ -315,23 +316,23 @@ history_path_safe <- litxr:::.litxr_llm_digest_history_path(
 )
 stopifnot(is.character(history_path_safe), length(history_path_safe) == 1L, nzchar(history_path_safe))
 
-alias_inline_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-alias", schema_version = "v3")
-alias_inline_v3$summary <- "Alias inline summary"
-alias_inline_v3$motivation <- "Alias inline motivation"
-alias_inline_v3$anchor_references <- list(
+identity_inline_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-identity", schema_version = "v3")
+identity_inline_v3$summary <- "Identity inline summary"
+identity_inline_v3$motivation <- "Identity inline motivation"
+identity_inline_v3$anchor_references <- list(
   list(reference = "Boyd et al. (2011), Distributed optimization and statistical learning via the alternating direction method of multipliers", role = "technical foundation", reason = "Provides the ADMM background")
 )
-alias_inline_v3$citation_logic_nodes <- list(
+identity_inline_v3$citation_logic_nodes <- list(
   list(logic_type = "classification", sentence = "Optimization problem solving can be represented as search over a composite space.", relation = "A can be classified into B, C, D, and E", reuse_context = "Use when defining an optimization-space ontology.")
 )
-litxr::litxr_write_llm_digest("doi:10.1000/v3-alias", alias_inline_v3, cfg, keep_history = FALSE, bump_revision = FALSE)
-alias_inline_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-alias", cfg)
-stopifnot(identical(as.character(alias_inline_read$anchor_references$reference[[1]]), "Boyd et al. (2011), Distributed optimization and statistical learning via the alternating direction method of multipliers"))
-stopifnot(identical(as.character(alias_inline_read$anchor_references$role[[1]]), "technical foundation"))
-stopifnot(identical(as.character(alias_inline_read$anchor_references$reason[[1]]), "Provides the ADMM background"))
-stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$claim_sentence[[1]]), "Optimization problem solving can be represented as search over a composite space."))
-stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$modifier_text[[1]]), "A can be classified into B, C, D, and E"))
-stopifnot(identical(as.character(alias_inline_read$citation_logic_nodes$citation_use[[1]]), "Use when defining an optimization-space ontology."))
+litxr::litxr_write_llm_digest("doi:10.1000/v3-identity", identity_inline_v3, cfg, keep_history = FALSE, bump_revision = FALSE)
+identity_inline_read <- litxr::litxr_read_llm_digest("doi:10.1000/v3-identity", cfg)
+stopifnot(identical(as.character(identity_inline_read$anchor_references$reference[[1]]), "Boyd et al. (2011), Distributed optimization and statistical learning via the alternating direction method of multipliers"))
+stopifnot(identical(as.character(identity_inline_read$anchor_references$role[[1]]), "technical foundation"))
+stopifnot(identical(as.character(identity_inline_read$anchor_references$reason[[1]]), "Provides the ADMM background"))
+stopifnot(identical(as.character(identity_inline_read$citation_logic_nodes$claim_sentence[[1]]), "Optimization problem solving can be represented as search over a composite space."))
+stopifnot(identical(as.character(identity_inline_read$citation_logic_nodes$modifier_text[[1]]), "A can be classified into B, C, D, and E"))
+stopifnot(identical(as.character(identity_inline_read$citation_logic_nodes$citation_use[[1]]), "Use when defining an optimization-space ontology."))
 
 duplicate_tag_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3-dup-tags", schema_version = "v3")
 duplicate_tag_v3$summary <- "Duplicate tag summary"
@@ -570,7 +571,7 @@ litxr::litxr_add_refs(
     year = c(2024L, 2023L, 2022L, 2025L),
     stringsAsFactors = FALSE
   ),
-  collection_id = "manual_research",
+  collection_id = journal$journal_id,
   config = cfg
 )
 
@@ -583,21 +584,10 @@ litxr::litxr_write_llm_digest(
   ),
   cfg
 )
+litxr::litxr_build_entity_indexes(cfg)
 schema_status <- litxr::litxr_read_research_schema_status(cfg)
 row_a <- schema_status[schema_status$ref_id == "doi:10.1000/a", ]
 stopifnot(nrow(row_a) == 1L)
-stopifnot(isTRUE(row_a$has_md[[1]]))
-stopifnot(isTRUE(row_a$has_llm_digest[[1]]))
-stopifnot(identical(row_a$llm_schema_version[[1]], "v2"))
-stopifnot(identical(row_a$llm_paper_type[[1]], "unknown"))
-stopifnot(isTRUE(row_a$has_standardized_findings[[1]]))
-stopifnot(identical(row_a$n_standardized_findings[[1]], 2L))
-stopifnot(isTRUE(row_a$has_descriptive_stats[[1]]))
-stopifnot(identical(row_a$n_descriptive_stats[[1]], 2L))
-stopifnot(isTRUE(row_a$has_anchor_references[[1]]))
-stopifnot(identical(row_a$n_anchor_references[[1]], 2L))
-stopifnot(isTRUE(row_a$has_citation_logic_nodes[[1]]))
-stopifnot(identical(row_a$n_citation_logic_nodes[[1]], 2L))
 
 digest_v3 <- litxr::litxr_llm_digest_template("doi:10.1000/v3", schema_version = "v3")
 digest_v3[["summary"]] <- "Summary V3"

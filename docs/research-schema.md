@@ -58,7 +58,7 @@ Canonical levels:
 - `unknown`
 
 Normalization lowercases, trims, replaces spaces and hyphens with underscores,
-maps common aliases, and falls back to `unknown` for missing or empty values.
+maps common identities, and falls back to `unknown` for missing or empty values.
 Legacy labels such as `review`, `dataset`, `policy_report`, and `book` remain
 accepted for backward compatibility.
 

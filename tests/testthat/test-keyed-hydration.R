@@ -145,9 +145,6 @@ test_that("keyed journal lookup batches large key sets and deduplicates duplicat
   record_2 <- make_record("arxiv:2501.00002", "Keyed Lookup Paper Two")
   litxr:::.litxr_write_journal_records(data.table::rbindlist(list(record_1, record_2), fill = TRUE), local_path, journal, cfg = cfg)
 
-  duplicated_index <- data.table::rbindlist(list(record_1, record_1, record_2), fill = TRUE)
-  litxr:::.litxr_write_journal_index(duplicated_index, local_path)
-
   looked_up <- litxr:::.litxr_read_journal_records_by_keys(
     local_path,
     c("arxiv:2501.00001", "arxiv:2501.00001", "arxiv:2501.00002"),

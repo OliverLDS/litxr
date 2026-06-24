@@ -109,7 +109,11 @@
     return(out)
   }
 
-  keep <- .litxr_reference_projection(records)
+  keep_cols <- intersect(
+    .litxr_reference_projection_columns(),
+    names(records)
+  )
+  keep <- data.table::copy(records)[, keep_cols, with = FALSE]
   route <- .litxr_route_ref_ids(keep$ref_id)
   keep[["key_type"]] <- route$key_type
   keep[["key_value"]] <- route$key_value
@@ -174,7 +178,7 @@
   rows
 }
 
-.litxr_ref_entities_projection <- function(cfg, refs = NULL, aliases = NULL) {
+.litxr_ref_entities_projection <- function(cfg, refs = NULL, identity_map = NULL) {
   if (is.null(refs)) {
     refs <- .litxr_authoritative_project_records(cfg)
   }
@@ -190,10 +194,10 @@
     ))
   }
 
-  if (is.null(aliases)) {
-    aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
+  if (is.null(identity_map)) {
+    identity_map <- data.table::data.table()
   }
-  if (!nrow(aliases)) {
+  if (!nrow(identity_map)) {
     return(data.table::data.table(
       entity_id = character(),
       arxiv_id = character(),
@@ -206,19 +210,19 @@
   }
 
   refs <- data.table::as.data.table(refs)
-  aliases <- data.table::as.data.table(aliases)
-  alias_view <- data.table::data.table(
-    ref_id = as.character(aliases$ref_id),
-    entity_id = as.character(aliases$entity_id),
-    is_primary_ref_id = as.logical(aliases$is_primary_ref_id),
-    is_published_form = as.logical(aliases$is_published_form)
+  identity_map <- data.table::as.data.table(identity_map)
+  identity_view <- data.table::data.table(
+    ref_id = as.character(identity_map$ref_id),
+    entity_id = as.character(identity_map$entity_id),
+    is_primary_ref_id = as.logical(identity_map$is_primary_ref_id),
+    is_published_form = as.logical(identity_map$is_published_form)
   )
-  data.table::setkey(alias_view, ref_id)
-  ref_hit <- match(as.character(refs$ref_id), alias_view$ref_id)
+  data.table::setkey(identity_view, ref_id)
+  ref_hit <- match(as.character(refs$ref_id), identity_view$ref_id)
   rows <- data.table::copy(refs)
-  rows$entity_id <- alias_view$entity_id[ref_hit]
-  rows$is_primary_ref_id <- alias_view$is_primary_ref_id[ref_hit]
-  rows$is_published_form <- alias_view$is_published_form[ref_hit]
+  rows$entity_id <- identity_view$entity_id[ref_hit]
+  rows$is_primary_ref_id <- identity_view$is_primary_ref_id[ref_hit]
+  rows$is_published_form <- identity_view$is_published_form[ref_hit]
   rows <- rows[!is.na(rows$entity_id) & nzchar(rows$entity_id), ]
   if (!nrow(rows)) {
     return(data.table::data.table(
@@ -362,10 +366,10 @@
   invisible(path)
 }
 
-.litxr_refresh_normalized_reference_scaffold <- function(cfg, records = NULL, refresh_entity_indexes = TRUE, refs = NULL, aliases = NULL) {
+.litxr_refresh_normalized_reference_scaffold <- function(cfg, records = NULL, refresh_entity_indexes = TRUE, refs = NULL, identity_map = NULL) {
   .litxr_ensure_project_index_dir(cfg)
   if (is.null(records)) {
-    records <- if (!is.null(refs)) refs else .litxr_read_project_references_index(cfg)
+    records <- if (!is.null(refs)) refs else .litxr_authoritative_project_records(cfg)
   }
   records <- data.table::as.data.table(records)
 
@@ -375,22 +379,16 @@
 
   if (nrow(arxiv_rows)) {
     .litxr_write_scaffold_table(.litxr_ref_arxiv_path(cfg), arxiv_rows, key_cols = "ref_id")
-  } else if (!file.exists(.litxr_ref_arxiv_path(cfg))) {
-    fst::write_fst(as.data.frame(arxiv_rows), .litxr_ref_arxiv_path(cfg))
   }
   if (nrow(doi_rows)) {
     .litxr_write_scaffold_table(.litxr_ref_doi_path(cfg), doi_rows, key_cols = "ref_id")
-  } else if (!file.exists(.litxr_ref_doi_path(cfg))) {
-    fst::write_fst(as.data.frame(doi_rows), .litxr_ref_doi_path(cfg))
   }
   if (nrow(pending_rows)) {
     .litxr_write_scaffold_table(.litxr_ref_local_pending_path(cfg), pending_rows, key_cols = "ref_id")
-  } else if (!file.exists(.litxr_ref_local_pending_path(cfg))) {
-    fst::write_fst(as.data.frame(pending_rows), .litxr_ref_local_pending_path(cfg))
   }
 
   if (isTRUE(refresh_entity_indexes)) {
-    entities <- .litxr_ref_entities_projection(cfg, refs = if (!is.null(refs)) refs else NULL, aliases = aliases)
+    entities <- .litxr_ref_entities_projection(cfg, refs = if (!is.null(refs)) refs else NULL, identity_map = identity_map)
     .litxr_write_scaffold_table(.litxr_ref_entities_path(cfg), entities, key_cols = "entity_id")
   }
 
@@ -410,6 +408,50 @@
     data.table::as.data.table(fst::read_fst(path, as.data.table = TRUE)),
     error = function(e) data.table::data.table()
   )
+}
+
+.litxr_read_normalized_reference_rows_by_keys <- function(cfg, keys, columns = NULL) {
+  keys <- unique(as.character(unlist(keys, use.names = FALSE)))
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+  if (!length(keys)) {
+    return(data.table::data.table())
+  }
+
+  payloads <- list(
+    .litxr_read_scaffold_table_safe(.litxr_ref_arxiv_path(cfg)),
+    .litxr_read_scaffold_table_safe(.litxr_ref_doi_path(cfg)),
+    .litxr_read_scaffold_table_safe(.litxr_ref_local_pending_path(cfg))
+  )
+  payloads <- payloads[vapply(payloads, nrow, integer(1L)) > 0L]
+  if (!length(payloads)) {
+    return(data.table::data.table())
+  }
+
+  matched <- lapply(payloads, function(payload) {
+    if (!("ref_id" %in% names(payload))) {
+      return(payload[0, ])
+    }
+    hit <- as.character(payload$ref_id) %in% keys
+    if (!any(hit)) {
+      return(payload[0, ])
+    }
+    payload[hit, ]
+  })
+  matched <- matched[vapply(matched, nrow, integer(1L)) > 0L]
+  if (!length(matched)) {
+    return(data.table::data.table())
+  }
+
+  out <- data.table::rbindlist(matched, fill = TRUE)
+  if (!nrow(out)) {
+    return(out)
+  }
+  out <- out[!duplicated(as.character(out$ref_id)), ]
+  if (!is.null(columns) && length(columns)) {
+    keep <- intersect(unique(as.character(columns)), names(out))
+    out <- out[, keep, with = FALSE]
+  }
+  out
 }
 
 .litxr_normalized_duplicate_identity_conflicts <- function(entities) {

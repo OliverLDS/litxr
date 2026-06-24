@@ -1,10 +1,13 @@
-# litxr 0.1.7
+# litxr 0.1.7.1
 
 - Made normalized authoritative stores the runtime source for compatibility
   projections instead of persisting the wide project-reference view as normal
   truth.
 - Kept DOI/arXiv linkage link-first while hardening the normalized identity
   audit surface.
+- Removed a remaining dead collection/DOI projection field from the narrow
+  normalized payload projection path and added regression coverage for the
+  audit/report nodes and normalized payload shape.
 
 # litxr 0.1.6
 
@@ -27,7 +30,7 @@
 
 # litxr 0.1.4
 
-- Removed the live alias-table dependency from the entity/status read path and
+- Removed the live identity-table dependency from the entity/status read path and
   kept canonical resolution on the thin `entity_id` layer.
 - Reworked the entity-index builders to use keyed joins and grouped
   aggregation in the main path, while keeping compatibility-only helpers out
@@ -81,12 +84,12 @@
 
 - Declared the v0.1.0 identity-first refactor complete.
 - Finalized the internal architecture around thin `entity_id`-based indexes:
-  `ref_aliases.fst`, `entities.fst`, `entity_collections.fst`, and
+  `ref_identity_map.fst`, `entities.fst`, `entity_collections.fst`, and
   `entity_status.fst`.
-- Kept `ref_id` as the stable user-facing alias while making task-policy
+- Kept `ref_id` as the stable user-facing identity while making task-policy
   resolution explicit:
-  - citation export prefers linked published aliases
-  - digest/full-text prompting can prefer linked arXiv aliases
+  - citation export prefers linked published identities
+  - digest/full-text prompting can prefer linked arXiv identities
 - Demoted project `references.fst` and `reference_collections.fst` to
   compatibility projections rebuilt from authoritative collection state rather
   than primary mutable stores.
@@ -109,19 +112,19 @@
 
 - Demoted project `index/references.fst` and
   `index/reference_collections.fst` to compatibility projections.
-- Made thin alias/entity rebuilds independent of healthy project compatibility
+- Made thin identity/entity rebuilds independent of healthy project compatibility
   caches by rebuilding from authoritative collection-backed state directly.
 - Expanded index audits to distinguish thin-index health from compatibility
   projection health explicitly.
 
 # litxr 0.0.8.21
 
-- Moved `litxr_find_refs()` candidate resolution onto `ref_aliases.fst` and
+- Moved `litxr_find_refs()` candidate resolution onto `ref_identity_map.fst` and
   `entity_collections.fst`.
-- Added entity-first exact-key and alias expansion semantics while preserving
+- Added entity-first exact-key and identity expansion semantics while preserving
   the existing row-facing return shape.
 - Added focused lookup regressions for canonical arXiv ids, bare arXiv ids,
-  DOI-linked lookups, and collection-scoped alias selection.
+  DOI-linked lookups, and collection-scoped identity selection.
 
 # litxr 0.0.8.20
 
@@ -130,7 +133,7 @@
 - Added machine-facing maintenance nodes
   `scripts/migrate_refactor_indexes.R` and
   `scripts/diagnose_refactor_store.R`.
-- Documented stable alias policies for citation export, prompting, and
+- Documented stable identity policies for citation export, prompting, and
   DOI/arXiv linking in the operator guide.
 
 # litxr 0.0.8.19
@@ -164,10 +167,10 @@
 
 - Finished the `0.0.8.16` read-policy migration slice from the
   `v0.1.0` refactor plan by moving the remaining human lookup/report script
-  paths onto the shared alias/entity resolver.
+  paths onto the shared identity/entity resolver.
 - Extracted shared lookup normalization helpers so BibTeX-adjacent human
-  scripts no longer duplicate DOI/arXiv alias-candidate logic.
-- Added explicit task-policy alias helpers for citation, digest, and full-text
+  scripts no longer duplicate DOI/arXiv identity-candidate logic.
+- Added explicit task-policy identity helpers for citation, digest, and full-text
   resolution, and wired prompt building, summary rendering, and BibTeX-adjacent
   readers onto that shared policy layer.
 - Updated the refactor design note with a versioned roadmap and marked the
@@ -176,10 +179,10 @@
 # litxr 0.0.8.15
 
 - Added the first thin entity-index layer for the v0.1.0 refactor, including
-  machine-readable alias, entity, entity-collection, and entity-status stores
+  machine-readable identity, entity, entity-collection, and entity-status stores
   plus audit helpers for cache health and entity-status freshness.
 - Moved canonical reference resolution and BibTeX export policy onto the new
-  entity alias layer so linked arXiv and DOI aliases now resolve to one
+  entity identity layer so linked arXiv and DOI identities now resolve to one
   preferred citation row.
 - Updated DOI/arXiv linking and prompt-building logic to use entity-aware
   resolution, including better linked-arXiv source hints for digest prompts.
@@ -284,7 +287,7 @@
 - Fixed revision-history edge cases in LLM digest writes, including safer
   revision archiving when older digests have incomplete revision metadata.
 - Hardened schema-v3 inline `anchor_references` and `citation_logic_nodes`
-  ingestion so partial or alias-shaped ChatGPT payloads are preserved instead
+  ingestion so partial or identity-shaped ChatGPT payloads are preserved instead
   of collapsing into placeholder `unknown` rows.
 - Improved `scripts/build_llm_digest_interactive.R` with explicit field-level
   examples for anchor references and citation logic nodes, and updated

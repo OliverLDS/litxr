@@ -110,7 +110,57 @@ if (!grepl("^[A-Za-z0-9_]+:", ref_key) && grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)
 }
 
 cfg <- litxr::litxr_read_config()
-hits <- litxr:::.litxr_task_ref_row_for_keys(cfg, ref_key, task = "citation")
+resolve_exact_reference_row <- function(cfg, ref_key) {
+  collections <- litxr:::.litxr_config_collections(cfg)
+  if (!length(collections)) {
+    return(data.table::data.table())
+  }
+
+  is_doi <- grepl("^doi:", ref_key, ignore.case = TRUE) ||
+    grepl("^https?://(dx\\.)?doi\\.org/", ref_key, ignore.case = TRUE) ||
+    grepl("^10\\.", ref_key)
+  is_arxiv <- grepl("^arxiv:", ref_key, ignore.case = TRUE) ||
+    grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", ref_key)
+  route <- if (is_doi) {
+    "crossref"
+  } else if (is_arxiv) {
+    "arxiv"
+  } else {
+    NULL
+  }
+  if (is.null(route)) {
+    return(data.table::data.table())
+  }
+
+  candidate_collections <- Filter(function(collection) identical(collection$remote_channel, route), collections)
+  if (!length(candidate_collections)) {
+    return(data.table::data.table())
+  }
+
+  row_key <- litxr:::.litxr_record_slug(data.table::data.table(ref_id = ref_key, doi = NA_character_))
+  for (collection in candidate_collections) {
+    local_path <- litxr:::.litxr_resolve_local_path(cfg, collection$local_path)
+    if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) {
+      next
+    }
+    paths <- litxr:::.litxr_journal_paths(local_path[[1]])
+    json_path <- file.path(paths$json, paste0(row_key, ".json"))
+    if (!file.exists(json_path)) {
+      next
+    }
+    row <- tryCatch(
+      litxr:::.litxr_storage_payload_to_row(json_path),
+      error = function(e) data.table::data.table()
+    )
+    if (nrow(row)) {
+      return(row)
+    }
+  }
+
+  data.table::data.table()
+}
+
+hits <- resolve_exact_reference_row(cfg, ref_key)
 if (!nrow(hits)) {
   stop("No record found for ", ref_key, ".", call. = FALSE)
 }
@@ -131,11 +181,40 @@ if (is.na(abstract) || !nzchar(trimws(abstract))) {
   cat(abstract, "\n", sep = "")
 }
 
-digest_ref_id <- litxr:::.litxr_task_ref_id(cfg, ref_id, task = "digest")
-if (is.na(digest_ref_id) || !nzchar(digest_ref_id)) {
-  stop("No LLM digest found for ", ref_id, ".", call. = FALSE)
+digest_ref_id <- ref_id
+digest <- tryCatch(litxr::litxr_read_llm_digest(digest_ref_id, cfg), error = function(e) NULL)
+if (is.null(digest)) {
+  digest <- litxr::litxr_llm_digest_template(ref_id, schema_version = "v4")
+  digest$summary <- NA_character_
+  digest$motivation <- NA_character_
+  digest$research_questions <- character()
+  digest$paper_structure <- character()
+  digest$methods <- character()
+  digest$research_data <- list()
+  digest$identification_strategy <- NA_character_
+  digest$main_variables <- list()
+  digest$key_findings <- character()
+  digest$limitations <- character()
+  digest$theoretical_mechanism <- NA_character_
+  digest$empirical_setting <- NA_character_
+  digest$descriptive_statistics_summary <- NA_character_
+  digest$standardized_findings_summary <- NA_character_
+  digest$contribution_type <- character()
+  digest$ranked_contributions <- list()
+  digest$likely_reader_misconceptions <- character()
+  digest$business_relevance_pathway <- character()
+  digest$tables <- list()
+  digest$research_target_github_links <- list()
+  digest$keywords <- character()
+  digest$notes <- NA_character_
+  digest$generated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  digest$updated_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+  digest$anchor_references <- list()
+  digest$citation_logic_nodes <- list()
+  digest_missing <- TRUE
+} else {
+  digest_missing <- FALSE
 }
-digest <- litxr::litxr_read_llm_digest(digest_ref_id, cfg)
 
   to_md_lines <- function(digest, report_mode = "key") {
     scalar_text <- function(x) {

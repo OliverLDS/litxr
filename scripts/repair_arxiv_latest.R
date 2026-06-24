@@ -72,7 +72,7 @@ usage <- function() {
       "    from the latest successful day-level sync ledger row instead.",
       "  - This script computes the next repair window and calls",
       "    `scripts/repair_arxiv_range.R` through an absolute path.",
-      "  - `--journal-id` still works as a compatibility alias.",
+      "  - `--journal-id` still works as a compatibility name.",
       "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )

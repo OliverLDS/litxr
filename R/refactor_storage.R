@@ -93,13 +93,6 @@
   links[!duplicated(link_key), ]
 }
 
-.litxr_runtime_project_compatibility_projection <- function(cfg) {
-  list(
-    refs = .litxr_authoritative_project_records(cfg),
-    links = .litxr_authoritative_project_reference_links(cfg)
-  )
-}
-
 .litxr_authoritative_entity_inputs <- function(cfg) {
   collections <- .litxr_config_collections(cfg)
   empty_links <- data.table::data.table(
@@ -145,59 +138,23 @@
 .litxr_rebuild_project_reference_indexes <- function(cfg, repair_collection_indexes = TRUE) {
   collections <- .litxr_config_collections(cfg)
   if (!length(collections)) {
-    .litxr_write_project_references_index(cfg, data.table::data.table())
-    .litxr_write_project_reference_collections_index(
-      cfg,
-      data.table::data.table(
-        ref_id = character(),
-        collection_id = character(),
-        collection_title = character(),
-        recorded_at = character()
-      )
-    )
+    .litxr_refresh_normalized_reference_scaffold(cfg, records = data.table::data.table(), refresh_entity_indexes = TRUE)
     return(invisible(NULL))
   }
 
   refs_list <- list()
-  links_list <- list()
 
   for (collection in collections) {
-    projection <- .litxr_project_projection_from_collection(
-      cfg,
-      collection,
-      repair_collection_index = repair_collection_indexes
-    )
-    if (nrow(projection$refs)) {
-      refs_list[[length(refs_list) + 1L]] <- projection$refs
-      links_list[[length(links_list) + 1L]] <- projection$links
+    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+    records <- .litxr_read_journal_records_authoritative(local_path)
+    projection <- .litxr_project_references_from_collection_records(records)
+    if (nrow(projection)) {
+      refs_list[[length(refs_list) + 1L]] <- projection
     }
   }
 
   refs <- if (length(refs_list)) data.table::rbindlist(refs_list, fill = TRUE) else data.table::data.table()
-  links <- if (length(links_list)) data.table::rbindlist(links_list, fill = TRUE) else data.table::data.table(
-    ref_id = character(),
-    collection_id = character(),
-    collection_title = character(),
-    recorded_at = character()
-  )
-
-  if (nrow(refs)) {
-    refs <- .litxr_upsert_records(
-      refs[0, ],
-      refs,
-      conflict_path = .litxr_project_reference_conflict_path(cfg)
-    )
-  }
-  if (nrow(links)) {
-    link_key <- paste(links$ref_id, links$collection_id, sep = "\r")
-    links <- links[!duplicated(link_key), ]
-  }
-
-  .litxr_write_project_references_index(cfg, refs)
-  .litxr_write_project_reference_collections_index(cfg, links)
-  .litxr_clear_project_reference_deltas(cfg)
-  .litxr_refresh_entity_indexes_from_project_indexes(cfg)
-  .litxr_refresh_normalized_reference_scaffold(cfg, refresh_entity_indexes = TRUE)
+  .litxr_refresh_normalized_reference_scaffold(cfg, refs = refs, refresh_entity_indexes = TRUE)
   invisible(NULL)
 }
 
@@ -221,80 +178,9 @@
   links[!duplicated(links$ref_id), ]
 }
 
-.litxr_read_project_references_main_index <- function(cfg, columns = NULL) {
-  path <- .litxr_project_references_index_path(cfg)
-  .litxr_index_decode(.litxr_read_fst_subset(path, columns = columns))
-}
-
-.litxr_read_project_references_delta_index <- function(cfg, columns = NULL) {
-  path <- .litxr_project_references_delta_index_path(cfg)
-  .litxr_index_decode(.litxr_read_fst_subset(path, columns = columns))
-}
-
-.litxr_read_collection_projection_main_index_safe <- function(local_path) {
-  path <- .litxr_index_path(local_path)
-  if (!file.exists(path)) {
-    return(NULL)
-  }
-  index_columns <- .litxr_read_index_columns_safe(path)
-  if (is.null(index_columns)) {
-    return(NULL)
-  }
-  .litxr_index_decode(fst::read_fst(path, as.data.table = TRUE))
-}
-
-.litxr_read_collection_projection_index_safe <- function(local_path) {
-  main <- .litxr_read_collection_projection_main_index_safe(local_path)
-  if (is.null(main)) {
-    return(NULL)
-  }
-  delta <- .litxr_read_collection_delta(local_path)
-  if (!nrow(delta)) {
-    return(main)
-  }
-  .litxr_upsert_records(
-    main,
-    delta,
-    conflict_path = file.path(.litxr_journal_paths(local_path)$json, "_upsert_conflicts.jsonl")
-  )
-}
-
-.litxr_project_projection_from_collection <- function(cfg, journal, repair_collection_index = TRUE) {
-  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  projection <- .litxr_read_collection_projection_index_safe(local_path)
-
-  if (is.null(projection)) {
-    records <- .litxr_read_journal_records_authoritative(local_path)
-    projection <- .litxr_project_references_from_collection_records(records)
-    if (isTRUE(repair_collection_index)) {
-      .litxr_write_journal_index(records, local_path)
-    }
-  } else {
-    projection <- .litxr_project_references_from_collection_records(projection)
-  }
-
-  links <- .litxr_project_reference_links_from_collection_records(projection, journal)
-  list(refs = projection, links = links)
-}
-
-.litxr_read_project_references_index <- function(cfg, columns = NULL) {
-  refs <- .litxr_runtime_project_compatibility_projection(cfg)$refs
-  if (!nrow(refs)) {
-    return(refs)
-  }
-  if (is.null(columns) || !length(columns)) {
-    return(refs)
-  }
-  keep <- intersect(columns, names(refs))
-  if (!length(keep)) {
-    return(refs[, 0, with = FALSE])
-  }
-  refs[, keep, with = FALSE]
-}
-
 .litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL, hydrate = FALSE, wide_projection_limit = 300L, keyed_fst_read_threshold = getOption("litxr.keyed_fst_read_threshold", 32L)) {
   read_columns <- .litxr_project_reference_lookup_columns(columns)
-  refs <- .litxr_read_project_references_index(cfg, columns = read_columns)
+  refs <- .litxr_read_normalized_reference_rows_by_keys(cfg, keys, columns = read_columns)
   if (!nrow(refs)) {
     return(refs)
   }
@@ -336,91 +222,14 @@
   invisible(NULL)
 }
 
-.litxr_write_project_references_index <- function(cfg, records) {
-  .litxr_ensure_project_index_dir(cfg)
-  fst::write_fst(
-    as.data.frame(.litxr_index_encode(.litxr_reference_projection(records))),
-    .litxr_project_references_index_path(cfg)
-  )
-  invisible(.litxr_project_references_index_path(cfg))
-}
-
-.litxr_append_project_references_delta <- function(cfg, records) {
-  .litxr_ensure_project_index_dir(cfg)
-  existing <- .litxr_read_project_references_delta_index(cfg)
-  delta <- .litxr_upsert_records(
-    existing,
-    .litxr_reference_projection(records),
-    conflict_path = .litxr_project_reference_conflict_path(cfg)
-  )
-  delta <- .litxr_reference_projection(delta)
-  fst::write_fst(as.data.frame(.litxr_index_encode(delta)), .litxr_project_references_delta_index_path(cfg))
-  invisible(.litxr_project_references_delta_index_path(cfg))
-}
-
-.litxr_read_project_reference_collections_main_index <- function(cfg, columns = NULL) {
-  path <- .litxr_project_reference_collections_index_path(cfg)
-  .litxr_read_fst_subset(path, columns = columns)
-}
-
-.litxr_read_project_reference_collections_delta_index <- function(cfg, columns = NULL) {
-  path <- .litxr_project_reference_collections_delta_index_path(cfg)
-  .litxr_read_fst_subset(path, columns = columns)
-}
-
-.litxr_read_project_reference_collections_index <- function(cfg, columns = NULL) {
-  links <- .litxr_runtime_project_compatibility_projection(cfg)$links
-  if (!nrow(links)) {
-    return(links)
-  }
-  if (is.null(columns) || !length(columns)) {
-    return(links)
-  }
-  keep <- intersect(columns, names(links))
-  if (!length(keep)) {
-    return(links[, 0, with = FALSE])
-  }
-  links[, keep, with = FALSE]
-}
-
-.litxr_write_project_reference_collections_index <- function(cfg, links) {
-  .litxr_ensure_project_index_dir(cfg)
-  fst::write_fst(as.data.frame(links), .litxr_project_reference_collections_index_path(cfg))
-  invisible(.litxr_project_reference_collections_index_path(cfg))
-}
-
-.litxr_append_project_reference_collections_delta <- function(cfg, links) {
-  .litxr_ensure_project_index_dir(cfg)
-  existing <- .litxr_read_project_reference_collections_delta_index(cfg)
-  if (!nrow(existing)) {
-    merged <- links
-  } else {
-    merged <- data.table::rbindlist(list(existing, links), fill = TRUE)
-    link_key <- paste(merged$ref_id, merged$collection_id, sep = "\r")
-    merged <- merged[!duplicated(link_key, fromLast = TRUE), ]
-  }
-  fst::write_fst(as.data.frame(merged), .litxr_project_reference_collections_delta_index_path(cfg))
-  invisible(.litxr_project_reference_collections_delta_index_path(cfg))
-}
-
-.litxr_clear_project_reference_deltas <- function(cfg) {
-  for (path in c(
-    .litxr_project_references_delta_index_path(cfg),
-    .litxr_project_reference_collections_delta_index_path(cfg)
-  )) {
-    if (file.exists(path)) unlink(path)
-  }
-  invisible(TRUE)
-}
-
 .litxr_refresh_entity_indexes_from_project_indexes <- function(cfg) {
   inputs <- .litxr_authoritative_entity_inputs(cfg)
   refs <- inputs$refs
   links <- inputs$links
-  aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
-  .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
-  .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
-  .litxr_build_entity_status_index(cfg, aliases = aliases, refs = refs)
+  identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
+  .litxr_build_entities_index(cfg, refs = refs, identities = identities)
+  .litxr_build_entity_collections_index(cfg, identities = identities, links = links)
+  .litxr_build_entity_status_index(cfg, identities = identities, refs = refs)
   invisible(NULL)
 }
 
@@ -447,36 +256,33 @@
     if (isTRUE(rebuild_collection_indexes)) {
       rebuilt_path <- litxr_rebuild_collection_index(collection_id, cfg)
     }
-    refresh <- .litxr_refresh_project_index_for_collection(
-      cfg,
-      collection_id = collection_id,
-      repair_collection_index = FALSE
-    )
     c(
       list(
         collection_id = collection_id,
         rebuilt_collection_index = isTRUE(rebuild_collection_indexes),
-        collection_index_path = if (isTRUE(rebuild_collection_indexes)) rebuilt_path else NA_character_
+        collection_local_path = if (isTRUE(rebuild_collection_indexes)) rebuilt_path else NA_character_
       ),
-      refresh
+      list(
+        refs_written = NA_integer_,
+        links_written = NA_integer_,
+        refs_removed = NA_integer_
+      )
     )
   })
 
   inputs <- .litxr_authoritative_entity_inputs(cfg)
   refs <- inputs$refs
   links <- inputs$links
-  aliases <- .litxr_build_ref_aliases_index(cfg, refs = refs)
-  entities <- .litxr_build_entities_index(cfg, refs = refs, aliases = aliases)
-  entity_collections <- .litxr_build_entity_collections_index(cfg, aliases = aliases, links = links)
-  entity_status <- .litxr_build_entity_status_index(cfg, aliases = aliases, refs = refs)
+  identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
+  entities <- .litxr_build_entities_index(cfg, refs = refs, identities = identities)
+  entity_collections <- .litxr_build_entity_collections_index(cfg, identities = identities, links = links)
+  entity_status <- .litxr_build_entity_status_index(cfg, identities = identities, refs = refs)
 
   list(
     selected_collection_ids = selected_ids,
     collection_results = collection_results,
     project_paths = list(
-      references = .litxr_project_references_index_path(cfg),
-      reference_collections = .litxr_project_reference_collections_index_path(cfg),
-      ref_aliases = .litxr_project_ref_aliases_index_path(cfg),
+      ref_identity_map = .litxr_project_ref_identity_index_path(cfg),
       entities = .litxr_project_entities_index_path(cfg),
       entity_collections = .litxr_project_entity_collections_index_path(cfg),
       entity_status = .litxr_project_entity_status_index_path(cfg)
@@ -484,7 +290,6 @@
     row_counts = list(
       project_references = nrow(refs),
       project_reference_collections = nrow(links),
-      ref_aliases = nrow(aliases),
       entities = nrow(entities),
       entity_collections = nrow(entity_collections),
       entity_status = nrow(entity_status)
@@ -516,8 +321,8 @@
     project_cache_scopes_with_merged_mismatch = if (nrow(project_cache)) {
       as.integer(sum(project_cache$merged_missing_n > 0L | project_cache$merged_extra_n > 0L))
     } else 0L,
-    alias_split_entities = as.integer(nrow(entity_indexes$alias_splits)),
-    ambiguous_alias_joins = as.integer(nrow(entity_indexes$ambiguous_alias_joins)),
+    identity_split_entities = as.integer(nrow(entity_indexes$identity_splits)),
+    ambiguous_identity_joins = as.integer(nrow(entity_indexes$ambiguous_identity_joins)),
     orphan_artifacts = as.integer(nrow(entity_indexes$orphan_artifacts)),
     damaged_or_missing_indexes = if (nrow(index_health)) {
       as.integer(sum(index_health$status %in% c("damaged", "missing")))

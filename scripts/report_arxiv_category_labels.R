@@ -90,7 +90,7 @@ if (show_help) {
       "  --local-inq ID     Cached local inquiry/query-set id to use when --inquiry is not supplied.",
       "  --delta-only       Score only the pending embedding delta shards instead of the full compacted corpus.",
       "  --top_n N          Keep only the top N refs per category by score. Default: 3.",
-      "  --top-n N          Alias of --top_n.",
+      "  --top-n N          Equivalent to --top_n.",
       "  --threshold X      Keep only refs with score >= X. Default: 0.45.",
       "  --output-format F  Output format: json or md. Default: json.",
       "  -h, --help         Show this help message.",

@@ -84,7 +84,7 @@ usage <- function() {
       "  - By default, only the collection index is refreshed. Use",
       "    `--refresh-project-index` when project-level reference indexes must",
       "    be refreshed during the repair run.",
-      "  - `--journal-id` still works as a compatibility alias.",
+      "  - `--journal-id` still works as a compatibility name.",
       "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
@@ -241,7 +241,7 @@ for (i in seq_along(day_seq)) {
       break
     }
 
-    litxr:::.litxr_append_collection_delta(incoming, local_path)
+    litxr:::.litxr_write_journal_records(incoming, local_path, day_journal, cfg = cfg)
     records_dirty <- TRUE
 
     incoming_keys <- litxr:::.litxr_upsert_key(incoming)

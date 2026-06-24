@@ -1,4 +1,4 @@
-test_that("refactor hardening paths work through alias/entity layer", {
+test_that("refactor hardening paths work through identity/entity layer", {
   td <- tempfile("litxr-refactor-hardening-")
   dir.create(td)
   config_path <- file.path(td, ".litxr", "config.yaml")
@@ -103,8 +103,8 @@ test_that("refactor hardening paths work through alias/entity layer", {
     add_doi = FALSE
   )
   expect_identical(link_result$preferred_citation_ref_id, "doi:10.1000/published-example")
-  expect_false(file.exists(litxr:::.litxr_project_references_index_path(cfg)))
-  expect_false(file.exists(litxr:::.litxr_project_reference_collections_index_path(cfg)))
+  expect_false(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "references.fst")))
+  expect_false(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "reference_collections.fst")))
   runtime_refs <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg)
   expect_equal(nrow(runtime_refs), 1L)
 
@@ -117,7 +117,7 @@ test_that("refactor hardening paths work through alias/entity layer", {
   expect_true(is.list(migration))
   expect_true(any(migration$selected_collection_ids == "arxiv_cs_ai"))
   expect_true(any(migration$selected_collection_ids == journal$journal_id))
-  expect_true(file.exists(migration$project_paths$ref_aliases))
+  expect_false(file.exists(migration$project_paths$ref_identity_map))
   expect_true(file.exists(migration$project_paths$entity_status))
 
   diag_script <- find_script("scripts", "diagnose_refactor_store.R")

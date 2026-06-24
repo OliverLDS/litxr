@@ -210,8 +210,8 @@ measure_project <- function(cfg) {
     scope = "project_references",
     scope_id = "project",
     authoritative_records = records,
-    main_path = litxr:::.litxr_project_references_index_path(cfg),
-    delta_path = litxr:::.litxr_project_references_delta_index_path(cfg)
+    main_path = NA_character_,
+    delta_path = NA_character_
   )
 }
 
@@ -224,8 +224,8 @@ measure_collection <- function(cfg, collection_id) {
     scope = "collection_references",
     scope_id = collection_id,
     authoritative_records = records,
-    main_path = litxr:::.litxr_index_path(local_path),
-    delta_path = litxr:::.litxr_delta_index_path(local_path),
+    main_path = NA_character_,
+    delta_path = NA_character_,
     extra = list(
       collection_title = journal$title,
       local_path = local_path

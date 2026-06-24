@@ -35,9 +35,9 @@ litxr_paper_type_levels <- function() {
   )
 }
 
-.litxr_paper_type_alias_map <- function() {
+.litxr_paper_type_identity_map <- function() {
   canonical <- litxr_paper_type_levels()
-  aliases <- c(
+  identities <- c(
     theory = "theoretical",
     theoretical_paper = "theoretical",
     conceptual_framework = "conceptual",
@@ -156,7 +156,7 @@ litxr_paper_type_levels <- function() {
     missing = "unknown",
     unclear = "unknown"
   )
-  stats::setNames(c(canonical, unname(aliases)), c(canonical, names(aliases)))
+  stats::setNames(c(canonical, unname(identities)), c(canonical, names(identities)))
 }
 
 .litxr_paper_type_key <- function(x) {
@@ -171,14 +171,14 @@ litxr_paper_type_levels <- function() {
 #' Normalize paper-type values
 #'
 #' Lowercases, trims, replaces spaces and hyphens with underscores, maps common
-#' aliases, and returns `"unknown"` for missing or empty values.
+#' identities, and returns `"unknown"` for missing or empty values.
 #'
 #' @param x Character vector of paper-type values.
 #'
 #' @return Character vector of normalized paper types.
 #' @export
 litxr_normalize_paper_type <- function(x) {
-  map <- .litxr_paper_type_alias_map()
+  map <- .litxr_paper_type_identity_map()
   key <- .litxr_paper_type_key(x)
   out <- unname(map[key])
   out[is.na(out) | !nzchar(out)] <- "unknown"
@@ -187,7 +187,7 @@ litxr_normalize_paper_type <- function(x) {
 
 #' Validate paper-type values
 #'
-#' Accepts canonical values, common aliases, and missing/empty inputs. Invalid
+#' Accepts canonical values, common identities, and missing/empty inputs. Invalid
 #' non-empty inputs throw an error.
 #'
 #' @param x Character vector of paper-type values.
@@ -196,7 +196,7 @@ litxr_normalize_paper_type <- function(x) {
 #' @export
 litxr_validate_paper_type <- function(x) {
   key <- .litxr_paper_type_key(x)
-  allowed <- names(.litxr_paper_type_alias_map())
+  allowed <- names(.litxr_paper_type_identity_map())
   bad <- nzchar(key) & !(key %in% allowed)
   if (any(bad)) {
     stop(
@@ -2593,7 +2593,13 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   refs <- if (!is.null(ref_ids) && length(ref_ids) && is.null(collection_id)) {
     .litxr_read_project_references_by_keys(cfg, ref_ids)
   } else {
-    .litxr_read_project_references_index(cfg, columns = c("ref_id", "title", "entry_type"))
+    refs_all <- .litxr_authoritative_project_records(cfg)
+    if (nrow(refs_all)) {
+      keep <- intersect(c("ref_id", "title", "entry_type"), names(refs_all))
+      refs_all[, keep, with = FALSE]
+    } else {
+      refs_all
+    }
   }
   if (!nrow(refs)) {
     return(data.table::data.table(
@@ -2616,7 +2622,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     ))
   }
 
-  aliases <- data.table::as.data.table(.litxr_ref_entity_resolution_map(cfg, ref_ids = if (nrow(refs)) refs$ref_id else character()))
+  identities <- data.table::as.data.table(.litxr_ref_entity_resolution_map(cfg, ref_ids = if (nrow(refs)) refs$ref_id else character()))
   entity_status <- .litxr_read_project_entity_status_index(
     cfg,
     columns = c(
@@ -2642,7 +2648,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     title = if ("title" %in% names(refs)) as.character(refs$title) else NA_character_,
     entry_type = if ("entry_type" %in% names(refs)) as.character(refs$entry_type) else NA_character_
   )
-  out$entity_id <- aliases$entity_id[match(out$ref_id, aliases$ref_id)]
+  out$entity_id <- identities$entity_id[match(out$ref_id, identities$ref_id)]
   if (nrow(entity_status)) {
     status_view <- data.table::data.table(
       entity_id = as.character(entity_status$entity_id),

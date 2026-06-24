@@ -13,23 +13,18 @@ emit_json <- function(x) {
 
 usage <- function() {
   cat(
-    paste(
+  paste(
       "Usage:",
       "  Rscript scripts/refresh_project_index.R --collection-id COLLECTION_ID",
       "",
       "Options:",
       "  --collection-id ID  Collection whose project projection should be refreshed.",
-      "  --journal-id ID     Compatibility alias for --collection-id.",
+      "  --journal-id ID     Compatibility name for --collection-id.",
       "  -h, --help          Show this help message.",
       "",
       "Behavior:",
-      "  - Rebuilds the project-level compatibility projection for one",
-      "    collection from",
-      "    authoritative collection state.",
-      "  - Prefers thin collection projection caches when healthy.",
-      "  - Falls back to collection JSON plus delta when a collection cache is",
-      "    missing or damaged.",
-      "  - Clears project reference deltas after writing refreshed main caches.",
+      "  - Refreshes the normalized scaffold and entity indexes for one collection.",
+      "  - Does not rebuild project-reference compatibility projections.",
       "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
     )
@@ -109,15 +104,15 @@ if (requireNamespace("pkgload", quietly = TRUE)) {
 }
 
 cfg <- litxr::litxr_read_config()
-log_line(sprintf("refreshing project projection for collection_id=%s", collection_id))
+log_line(sprintf("refreshing normalized scaffold for collection_id=%s", collection_id))
 
 result <- litxr:::.litxr_refresh_project_index_for_collection(cfg, collection_id, repair_collection_index = TRUE)
 
 emit_json(c(
   list(
     status = "ok",
-    project_index_path = litxr:::.litxr_project_references_index_path(cfg),
-    project_links_path = litxr:::.litxr_project_reference_collections_index_path(cfg)
+    project_index_path = NA_character_,
+    project_links_path = NA_character_
   ),
   result
 ))

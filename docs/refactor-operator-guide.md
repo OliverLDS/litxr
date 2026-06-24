@@ -3,10 +3,10 @@
 This note documents the stable operator-facing behavior after the completed
 `v0.1.0` identity-first refactor.
 
-## Alias Policies
+## Identity Policies
 
-`litxr` now resolves `ref_id` inputs through the alias/entity layer before
-choosing a task-specific working alias.
+`litxr` now resolves `ref_id` inputs through the identity/entity layer before
+choosing a task-specific working identity.
 
 ### Citation export
 
@@ -14,8 +14,8 @@ For citation-oriented tasks such as `litxr_export_bib()` and
 `scripts/write_bib_by_ref_ids.R`:
 
 - prefer `preferred_citation_ref_id`
-- if a linked DOI-backed published alias exists, prefer that row
-- otherwise fall back to the primary alias
+- if a linked DOI-backed published identity exists, prefer that row
+- otherwise fall back to the primary identity
 
 Practical effect:
 
@@ -29,14 +29,14 @@ For digest/full-text tasks such as `litxr_llm_digest_prompt()` and
 `scripts/build_llm_digest_prompt.R`:
 
 - start from the requested `ref_id`
-- if a linked arXiv alias exists, prefer that alias for full-text discovery
+- if a linked arXiv identity exists, prefer that identity for full-text discovery
   hints
 - preserve the requested `ref_id` as the canonical digest key
 
 Practical effect:
 
 - DOI requests can still benefit from arXiv HTML/PDF hints when a linked arXiv
-  alias exists
+  identity exists
 - digest files remain keyed by canonical `ref_id`
 
 ### arXiv and DOI linking
@@ -52,11 +52,11 @@ For linking flows such as `litxr_enrich_arxiv_with_doi()` and
 Practical effect:
 
 - old scripts can keep using the same `ref_id`
-- citation tasks can still prefer the published alias
+- citation tasks can still prefer the published identity
 
 ### Collection membership
 
-Collection membership remains an alias-facing concept at the surface, but
+Collection membership remains an identity-facing concept at the surface, but
 internally is summarized at the entity layer:
 
 - one entity may belong to multiple collections
@@ -75,7 +75,7 @@ This helper:
 
 - optionally rebuilds selected collection projection indexes from `ref_json/`
 - refreshes project projection caches from collection state
-- rebuilds `ref_aliases.fst`, `entities.fst`, `entity_collections.fst`, and
+- rebuilds `ref_identity_map.fst`, `entities.fst`, `entity_collections.fst`, and
   `entity_status.fst`
 
 Machine-facing CLI wrapper:
