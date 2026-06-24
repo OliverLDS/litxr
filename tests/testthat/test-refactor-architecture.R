@@ -103,9 +103,10 @@ test_that("authoritative projections own rich payload boundaries and rebuild com
 
   build_result <- litxr::litxr_build_entity_indexes(cfg)
   expect_true(is.list(build_result))
-  expect_false("ref_identity_map_path" %in% names(build_result))
-  expect_true(file.exists(build_result$entities_path))
-  expect_true(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "ref_entities.fst")))
+  expect_true("ref_identity_map_path" %in% names(build_result))
+  expect_true(file.exists(build_result$ref_identity_map_path))
+  expect_false("entities_path" %in% names(build_result))
+  expect_false(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "ref_entities.fst")))
 
   expect_silent(refs <- litxr::litxr_read_references(cfg))
   links <- litxr::litxr_read_reference_collections(cfg)

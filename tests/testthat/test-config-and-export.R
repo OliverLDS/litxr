@@ -1064,10 +1064,11 @@ stopifnot(isTRUE(status_one$has_md[[1]]))
 stopifnot(isTRUE(status_one$has_llm_digest[[1]]))
 
 entity_build <- litxr::litxr_build_entity_indexes(cfg_manual)
-stopifnot(!("ref_identity_map_path" %in% names(entity_build)))
-stopifnot(file.exists(entity_build$entities_path))
-stopifnot(file.exists(entity_build$entity_collections_path))
-stopifnot(file.exists(entity_build$entity_status_path))
+stopifnot("ref_identity_map_path" %in% names(entity_build))
+stopifnot(file.exists(entity_build$ref_identity_map_path))
+stopifnot(!("entities_path" %in% names(entity_build)))
+stopifnot(!("entity_collections_path" %in% names(entity_build)))
+stopifnot(!("entity_status_path" %in% names(entity_build)))
 
 builder_fun <- function(ref, markdown, template) {
   list(

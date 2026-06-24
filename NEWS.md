@@ -1,3 +1,12 @@
+# litxr 0.1.7.2
+
+- Removed the remaining file-backed entity-status and collection-projection
+  writers from the normalized runtime path.
+- Kept status derivation runtime-only from `ref_identity_map`, `ref_arxiv`,
+  `ref_doi`, and schema caches.
+- Continued the strict no-projection policy for collection-local `index/*.fst`
+  writes.
+
 # litxr 0.1.7.1
 
 - Made normalized authoritative stores the runtime source for compatibility

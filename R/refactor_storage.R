@@ -138,7 +138,7 @@
 .litxr_rebuild_project_reference_indexes <- function(cfg, repair_collection_indexes = TRUE) {
   collections <- .litxr_config_collections(cfg)
   if (!length(collections)) {
-    .litxr_refresh_normalized_reference_scaffold(cfg, records = data.table::data.table(), refresh_entity_indexes = TRUE)
+    .litxr_refresh_normalized_reference_scaffold(cfg, records = data.table::data.table(), refresh_entity_indexes = FALSE)
     return(invisible(NULL))
   }
 
@@ -154,7 +154,8 @@
   }
 
   refs <- if (length(refs_list)) data.table::rbindlist(refs_list, fill = TRUE) else data.table::data.table()
-  .litxr_refresh_normalized_reference_scaffold(cfg, refs = refs, refresh_entity_indexes = TRUE)
+  .litxr_refresh_ref_identity_map(cfg, refs = refs)
+  .litxr_refresh_normalized_reference_scaffold(cfg, refs = refs, refresh_entity_indexes = FALSE)
   invisible(NULL)
 }
 
@@ -235,25 +236,20 @@
   refs <- inputs$refs
   links <- inputs$links
   identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
-  entities <- .litxr_build_entities_index(cfg, refs = refs, identities = identities)
-  entity_collections <- .litxr_build_entity_collections_index(cfg, identities = identities, links = links)
-  entity_status <- .litxr_build_entity_status_index(cfg, identities = identities, refs = refs)
 
   list(
     selected_collection_ids = selected_ids,
     collection_results = collection_results,
     project_paths = list(
       ref_identity_map = .litxr_project_ref_identity_index_path(cfg),
-      entities = .litxr_project_entities_index_path(cfg),
-      entity_collections = .litxr_project_entity_collections_index_path(cfg),
-      entity_status = .litxr_project_entity_status_index_path(cfg)
+      ref_arxiv = .litxr_ref_arxiv_path(cfg),
+      ref_doi = .litxr_ref_doi_path(cfg),
+      ref_local_pending = .litxr_ref_local_pending_path(cfg)
     ),
     row_counts = list(
       project_references = nrow(refs),
       project_reference_collections = nrow(links),
-      entities = nrow(entities),
-      entity_collections = nrow(entity_collections),
-      entity_status = nrow(entity_status)
+      identities = nrow(identities)
     )
   )
 }

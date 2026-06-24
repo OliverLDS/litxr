@@ -1939,7 +1939,6 @@ litxr_write_standardized_findings <- function(findings, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_standardized_findings)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "finding_id"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
-  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2033,7 +2032,6 @@ litxr_compact_standardized_findings <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
-  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2108,7 +2106,6 @@ litxr_write_descriptive_stats <- function(stats, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_descriptive_stats)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "table_id", "variable"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
-  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2194,7 +2191,6 @@ litxr_compact_descriptive_stats <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
-  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2296,7 +2292,6 @@ litxr_write_anchor_references <- function(anchors, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_anchor_references)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "anchor_rank"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
-  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2381,7 +2376,6 @@ litxr_compact_anchor_references <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
-  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2470,7 +2464,6 @@ litxr_write_citation_logic_nodes <- function(nodes, config = NULL) {
   existing <- .litxr_read_fst_or_empty(paths$delta, .litxr_empty_citation_logic_nodes)
   merged <- .litxr_upsert_table_by_key(existing, rows, c("ref_id", "node_id"))
   .litxr_write_fst_atomic(as.data.frame(merged), paths$delta)
-  .litxr_update_entity_status_refs(cfg, unique(as.character(rows$ref_id)))
   invisible(paths$delta)
 }
 
@@ -2558,7 +2551,6 @@ litxr_compact_citation_logic_nodes <- function(config = NULL) {
   if (file.exists(paths$delta)) {
     unlink(paths$delta)
   }
-  .litxr_update_entity_status_refs(cfg, unique(as.character(merged$ref_id)))
   invisible(paths$main)
 }
 
@@ -2626,24 +2618,6 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
   if (nrow(identities) && nrow(refs)) {
     identities <- identities[identities$ref_id %in% refs$ref_id, ]
   }
-  entity_status <- .litxr_read_project_entity_status_index(
-    cfg,
-    columns = c(
-      "entity_id",
-      "has_fulltxt_md",
-      "has_llm_digest",
-      "llm_paper_type",
-      "has_standardized_findings",
-      "n_standardized_findings",
-      "has_descriptive_stats",
-      "n_descriptive_stats",
-      "has_anchor_references",
-      "n_anchor_references",
-      "has_citation_logic_nodes",
-      "n_citation_logic_nodes",
-      "digest_schema_version"
-    )
-  )
   collection_links <- data.table::as.data.table(litxr_read_reference_collections(cfg))
 
   out <- data.table::data.table(
@@ -2652,21 +2626,25 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     entry_type = if ("entry_type" %in% names(refs)) as.character(refs$entry_type) else NA_character_
   )
   out$entity_id <- identities$entity_id[match(out$ref_id, identities$ref_id)]
-  if (nrow(entity_status)) {
+  status_rows <- .litxr_entity_status_rows_for_entities_fast(
+    cfg,
+    entity_ids = if (nrow(refs)) unique(as.character(out$entity_id)) else character()
+  )
+  if (nrow(status_rows)) {
     status_view <- data.table::data.table(
-      entity_id = as.character(entity_status$entity_id),
-      has_md = as.logical(entity_status$has_fulltxt_md),
-      has_llm_digest = as.logical(entity_status$has_llm_digest),
-      llm_schema_version = as.character(entity_status$digest_schema_version),
-      llm_paper_type = as.character(entity_status$llm_paper_type),
-      has_standardized_findings = as.logical(entity_status$has_standardized_findings),
-      n_standardized_findings = suppressWarnings(as.integer(entity_status$n_standardized_findings)),
-      has_descriptive_stats = as.logical(entity_status$has_descriptive_stats),
-      n_descriptive_stats = suppressWarnings(as.integer(entity_status$n_descriptive_stats)),
-      has_anchor_references = as.logical(entity_status$has_anchor_references),
-      n_anchor_references = suppressWarnings(as.integer(entity_status$n_anchor_references)),
-      has_citation_logic_nodes = as.logical(entity_status$has_citation_logic_nodes),
-      n_citation_logic_nodes = suppressWarnings(as.integer(entity_status$n_citation_logic_nodes))
+      entity_id = as.character(status_rows$entity_id),
+      has_md = as.logical(status_rows$has_fulltxt_md),
+      has_llm_digest = as.logical(status_rows$has_llm_digest),
+      llm_schema_version = as.character(status_rows$digest_schema_version),
+      llm_paper_type = as.character(status_rows$llm_paper_type),
+      has_standardized_findings = as.logical(status_rows$has_standardized_findings),
+      n_standardized_findings = suppressWarnings(as.integer(status_rows$n_standardized_findings)),
+      has_descriptive_stats = as.logical(status_rows$has_descriptive_stats),
+      n_descriptive_stats = suppressWarnings(as.integer(status_rows$n_descriptive_stats)),
+      has_anchor_references = as.logical(status_rows$has_anchor_references),
+      n_anchor_references = suppressWarnings(as.integer(status_rows$n_anchor_references)),
+      has_citation_logic_nodes = as.logical(status_rows$has_citation_logic_nodes),
+      n_citation_logic_nodes = suppressWarnings(as.integer(status_rows$n_citation_logic_nodes))
     )
     idx <- match(out$entity_id, status_view$entity_id)
     out$has_md <- status_view$has_md[idx]

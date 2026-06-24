@@ -327,7 +327,9 @@ litxr_read_entity_collections <- function(config = NULL) {
 litxr_read_entity_status <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_read_project_entity_status_index(cfg)
+  identities <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  entity_ids <- if (nrow(identities)) unique(as.character(identities$entity_id)) else character()
+  .litxr_entity_status_rows_for_entities_fast(cfg, entity_ids = entity_ids)
 }
 
 #' Build the thin entity indexes from current project stores
@@ -368,8 +370,9 @@ litxr_audit_reference_cache_state <- function(config = NULL) {
 
 #' Audit entity-status freshness against current project artifacts
 #'
-#' Compares `index/entity_status.fst` against the current md/digest/findings
-#' artifact state derived from the authoritative identity/entity layer.
+#' Derives entity status from the authoritative identity map, current markdown
+#' and digest artifacts, and schema-derived tables, then reports the current
+#' runtime state.
 #'
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
