@@ -122,58 +122,45 @@
 }
 
 .litxr_ref_entity_resolution_map <- function(cfg, entities = NULL, ref_ids = NULL, entity_ids = NULL) {
-  if (is.null(entities)) {
-    entities <- .litxr_read_project_entities_index(cfg)
-  }
-  entities <- data.table::as.data.table(entities)
-  if (!is.null(ref_ids) && length(ref_ids) && nrow(entities)) {
-    ref_ids <- unique(as.character(ref_ids))
-    ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
-    if (length(ref_ids)) {
-      keep <- as.character(entities$primary_ref_id) %in% ref_ids |
-        as.character(entities$preferred_citation_ref_id) %in% ref_ids |
-        as.character(entities$arxiv_id) %in% ref_ids |
-        paste0("doi:", as.character(entities$doi)) %in% ref_ids
-      entities <- entities[keep, ]
-    }
-  }
-  if (!is.null(entity_ids) && length(entity_ids) && nrow(entities)) {
-    entity_ids <- unique(as.character(entity_ids))
-    entity_ids <- entity_ids[!is.na(entity_ids) & nzchar(entity_ids)]
-    if (length(entity_ids)) {
-      entities <- entities[as.character(entities$entity_id) %in% entity_ids, ]
-    }
-  }
-  if (!nrow(entities)) {
+  identity_map <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  if (!nrow(identity_map)) {
     return(data.table::data.table(
       ref_id = character(),
       entity_id = character()
     ))
   }
 
-  arxiv_ids <- if ("arxiv_id" %in% names(entities)) as.character(entities$arxiv_id) else rep(NA_character_, nrow(entities))
-  doi_ids <- if ("doi" %in% names(entities)) as.character(entities$doi) else rep(NA_character_, nrow(entities))
-  doi_ids <- ifelse(is.na(doi_ids) | !nzchar(doi_ids), NA_character_, paste0("doi:", doi_ids))
+  identity_map <- identity_map[!is.na(identity_map$ref_id) & nzchar(identity_map$ref_id), ]
+  if (!nrow(identity_map)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      entity_id = character()
+    ))
+  }
 
-  rows <- data.table::rbindlist(list(
-    data.table::data.table(
-      ref_id = as.character(entities$primary_ref_id),
-      entity_id = as.character(entities$entity_id)
-    ),
-    data.table::data.table(
-      ref_id = as.character(entities$preferred_citation_ref_id),
-      entity_id = as.character(entities$entity_id)
-    ),
-    data.table::data.table(
-      ref_id = arxiv_ids,
-      entity_id = as.character(entities$entity_id)
-    ),
-    data.table::data.table(
-      ref_id = doi_ids,
-      entity_id = as.character(entities$entity_id)
-    )
-  ), fill = TRUE)
-  rows <- rows[!is.na(rows$ref_id) & nzchar(rows$ref_id), ]
+  if (!is.null(ref_ids) && length(ref_ids)) {
+    ref_ids <- unique(as.character(ref_ids))
+    ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+    if (length(ref_ids)) {
+      identity_map <- identity_map[identity_map$ref_id %in% ref_ids, ]
+    }
+  }
+  if (!is.null(entity_ids) && length(entity_ids) && nrow(identity_map)) {
+    entity_ids <- unique(as.character(entity_ids))
+    entity_ids <- entity_ids[!is.na(entity_ids) & nzchar(entity_ids)]
+    if (length(entity_ids)) {
+      identity_map <- identity_map[identity_map$entity_id %in% entity_ids, ]
+    }
+  }
+
+  if (!nrow(identity_map)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      entity_id = character()
+    ))
+  }
+
+  rows <- identity_map[, c("ref_id", "entity_id"), with = FALSE]
   rows <- rows[!duplicated(paste(rows$ref_id, rows$entity_id, sep = "\r")), ]
   rows
 }
@@ -511,9 +498,8 @@
 }
 
 .litxr_normalized_authoritative_state_audit <- function(cfg) {
-  entities <- .litxr_read_project_entities_index(cfg)
-  entity_links <- .litxr_ref_entity_resolution_map(cfg, entities = entities)
-  entity_ref_ids <- unique(as.character(entity_links$ref_id))
+  identity_map <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  entity_ref_ids <- unique(as.character(identity_map$ref_id))
   entity_ref_ids <- entity_ref_ids[!is.na(entity_ref_ids) & nzchar(entity_ref_ids)]
 
   arxiv_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_arxiv_path(cfg))
@@ -522,7 +508,7 @@
   compatibility_state <- .litxr_audit_reference_cache_state(cfg)
 
   list(
-    duplicate_identity_conflicts = .litxr_normalized_duplicate_identity_conflicts(entities),
+    duplicate_identity_conflicts = .litxr_normalized_duplicate_identity_conflicts(identity_map),
     orphan_arxiv_payload_rows = .litxr_normalized_orphan_payload_rows(arxiv_payload, entity_ref_ids, id_type = "arxiv"),
     orphan_doi_payload_rows = .litxr_normalized_orphan_payload_rows(doi_payload, entity_ref_ids, id_type = "doi"),
     unresolved_local_pending_rows = pending_payload,

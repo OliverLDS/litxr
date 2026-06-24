@@ -117,7 +117,7 @@ test_that("refactor hardening paths work through identity/entity layer", {
   expect_true(is.list(migration))
   expect_true(any(migration$selected_collection_ids == "arxiv_cs_ai"))
   expect_true(any(migration$selected_collection_ids == journal$journal_id))
-  expect_false(file.exists(migration$project_paths$ref_identity_map))
+  expect_true(file.exists(migration$project_paths$ref_identity_map))
   expect_true(file.exists(migration$project_paths$entity_status))
 
   diag_script <- find_script("scripts", "diagnose_refactor_store.R")

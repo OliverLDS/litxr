@@ -83,7 +83,7 @@ litxr_sync_all <- function(config = NULL) {
     lapply(collections, function(journal) litxr_sync_collection(journal$collection_id, cfg, refresh_entity_indexes = FALSE)),
     vapply(collections, `[[`, character(1), "collection_id")
   )
-  .litxr_refresh_entity_indexes_from_project_indexes(cfg)
+  .litxr_refresh_ref_identity_map(cfg)
   results
 }
 
@@ -2877,8 +2877,8 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
 
   refs <- litxr_read_references(cfg)
   entity_status <- litxr_read_entity_status(cfg)
-  entity_links <- data.table::as.data.table(litxr_read_entity_collections(cfg))
-  entity_map <- data.table::as.data.table(.litxr_ref_entity_resolution_map(cfg, ref_ids = if (nrow(refs)) refs$ref_id else character()))
+  ref_identity_map <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  collection_links <- data.table::as.data.table(litxr_read_reference_collections(cfg))
 
   if (!nrow(refs)) {
     return(data.table::data.table(
@@ -2898,15 +2898,14 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
     title = as.character(refs$title),
     entry_type = as.character(refs$entry_type)
   )
-  entity_map <- entity_map[!is.na(entity_map$ref_id) & nzchar(entity_map$ref_id), ]
-  data.table::setkey(entity_map, ref_id)
-  idx <- match(ref_view$ref_id, entity_map$ref_id)
+  ref_identity_map <- ref_identity_map[!is.na(ref_identity_map$ref_id) & nzchar(ref_identity_map$ref_id), ]
+  idx <- match(ref_view$ref_id, ref_identity_map$ref_id)
   keep <- !is.na(idx)
   out <- ref_view[keep, ]
   if (!nrow(out)) {
     out <- ref_view[0, ]
   } else {
-    out$entity_id <- entity_map$entity_id[idx[keep]]
+    out$entity_id <- ref_identity_map$entity_id[idx[keep]]
   }
   if (nrow(entity_status)) {
     status_view <- data.table::data.table(
@@ -2921,17 +2920,29 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
     out$has_md <- FALSE
     out$has_llm_digest <- FALSE
   }
-  collection_map <- if (nrow(entity_links)) {
-    collection_map_df <- stats::aggregate(
-      collection_id ~ entity_id,
-      data = as.data.frame(entity_links),
-      FUN = function(x) paste(sort(unique(as.character(x))), collapse = ",")
-    )
-    collection_map_dt <- data.table::as.data.table(collection_map_df)
-    if ("collection_id" %in% names(collection_map_dt)) {
-      data.table::setnames(collection_map_dt, "collection_id", "collection_ids")
+  collection_map <- if (nrow(collection_links) && nrow(ref_identity_map)) {
+    link_dt <- data.table::copy(collection_links[, c("ref_id", "collection_id"), with = FALSE])
+    link_dt <- link_dt[link_dt$ref_id %in% out$ref_id, ]
+    if (nrow(link_dt)) {
+      link_dt$entity_id <- ref_identity_map$entity_id[match(link_dt$ref_id, ref_identity_map$ref_id)]
+      link_dt <- link_dt[!is.na(link_dt$entity_id) & nzchar(link_dt$entity_id), ]
+      if (nrow(link_dt)) {
+        collection_map_df <- stats::aggregate(
+          collection_id ~ entity_id,
+          data = as.data.frame(link_dt),
+          FUN = function(x) paste(sort(unique(as.character(x))), collapse = ",")
+        )
+        collection_map_dt <- data.table::as.data.table(collection_map_df)
+        if ("collection_id" %in% names(collection_map_dt)) {
+          data.table::setnames(collection_map_dt, "collection_id", "collection_ids")
+        }
+        collection_map_dt
+      } else {
+        data.table::data.table(entity_id = character(), collection_ids = character())
+      }
+    } else {
+      data.table::data.table(entity_id = character(), collection_ids = character())
     }
-    collection_map_dt
   } else {
     data.table::data.table(entity_id = character(), collection_ids = character())
   }
@@ -3048,7 +3059,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     incoming
   })
 
-  .litxr_refresh_entity_indexes_from_project_indexes(cfg)
+  .litxr_refresh_ref_identity_map(cfg)
   data.table::rbindlist(out, fill = TRUE)
 }
 
@@ -3246,8 +3257,11 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
   .litxr_update_collection_row(cfg, arxiv_row, refresh_entity_indexes = FALSE)
   .litxr_update_collection_row(cfg, doi_row, refresh_entity_indexes = FALSE)
 
-  .litxr_refresh_entity_indexes_from_project_indexes(cfg)
-  linked_entity_ids <- .litxr_entity_ids_for_ref_ids(cfg, c(arxiv_ref_id, doi_ref_id))
+  .litxr_refresh_ref_identity_map(cfg)
+  identity_map <- litxr_read_ref_identity_map(cfg)
+  linked_entity_ids <- unique(as.character(identity_map$entity_id[
+    identity_map$ref_id %in% c(arxiv_ref_id, doi_ref_id)
+  ]))
   if (length(linked_entity_ids) != 1L) {
     stop(
       "DOI/arXiv link update did not converge to a single entity_id for ",
@@ -3258,9 +3272,9 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
     )
   }
 
-  linked_entity <- .litxr_read_project_entities_index(cfg)
+  linked_entity <- .litxr_read_project_ref_identity_index(cfg)
   linked_entity <- linked_entity[linked_entity$entity_id == linked_entity_ids[[1]], ]
-  primary_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$primary_ref_id) else NA_character_
+  primary_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$ref_id[linked_entity$is_primary_ref_id %in% TRUE]) else NA_character_
 
   list(
     arxiv_ref_id = arxiv_ref_id,
@@ -5870,6 +5884,15 @@ litxr_add_refs <- function(
   dir_path
 }
 
+.litxr_refresh_ref_identity_map <- function(cfg, refs = NULL) {
+  if (is.null(refs)) {
+    refs <- .litxr_authoritative_project_records(cfg)
+  }
+  identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
+  .litxr_write_project_ref_identity_index(cfg, identities)
+  invisible(identities)
+}
+
 .litxr_ensure_project_llm_dir <- function(cfg) {
   dir_path <- .litxr_project_llm_dir(cfg)
   if (!dir.exists(dir_path)) {
@@ -6199,9 +6222,7 @@ litxr_add_refs <- function(
   if (nrow(incoming_refs)) {
     .litxr_refresh_normalized_reference_scaffold(cfg, records = incoming_refs, refresh_entity_indexes = FALSE)
   }
-  if (isTRUE(refresh_entity_indexes)) {
-    .litxr_refresh_entity_indexes_from_project_indexes(cfg)
-  }
+  .litxr_refresh_ref_identity_map(cfg)
   invisible(NULL)
 }
 
@@ -6658,23 +6679,22 @@ litxr_add_refs <- function(
     return(.litxr_entity_status_empty())
   }
 
-  entities <- data.table::as.data.table(.litxr_read_project_entities_index(cfg))
-  if (!nrow(entities)) {
+  identity_map <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  if (!nrow(identity_map)) {
     return(.litxr_entity_status_empty())
   }
-  entity_rows <- entities[entities[["entity_id"]] %in% entity_ids, ]
-  if (!nrow(entity_rows)) {
+  identity_map <- identity_map[identity_map$entity_id %in% entity_ids, ]
+  if (!nrow(identity_map)) {
     return(.litxr_entity_status_empty())
   }
 
-  entity_map <- .litxr_ref_entity_resolution_map(cfg, entities = entity_rows)
-  entity_map <- entity_map[!is.na(entity_map$ref_id) & nzchar(entity_map$ref_id), ]
+  entity_map <- identity_map[!is.na(identity_map$ref_id) & nzchar(identity_map$ref_id), ]
   entity_map <- entity_map[!duplicated(paste(entity_map$entity_id, entity_map$ref_id, sep = "\r")), ]
   if (!nrow(entity_map)) {
     return(.litxr_entity_status_empty())
   }
 
-  status <- data.table::data.table(entity_id = unique(as.character(entity_rows$entity_id)))
+  status <- data.table::data.table(entity_id = unique(as.character(identity_map$entity_id)))
   data.table::setkey(status, entity_id)
   status$has_ref_json <- TRUE
   status$has_fulltxt_md <- FALSE
@@ -6746,13 +6766,13 @@ litxr_add_refs <- function(
       digest_join$digest_revision <- suppressWarnings(as.integer(digest_join$digest_revision))
       digest_join$updated_at <- as.character(digest_join$updated_at)
       data.table::setorder(digest_join, entity_id, -digest_revision, -updated_at, ref_id)
-      digest_latest <- digest_join[, .SD[1L], by = entity_id]
-      digest_status <- digest_latest[, data.table::data.table(
-        entity_id = as.character(entity_id),
-        digest_schema_version = as.character(schema_version),
-        digest_revision_latest = suppressWarnings(as.integer(digest_revision)),
-        llm_paper_type = as.character(paper_type)
-      )]
+      digest_latest <- digest_join[!duplicated(digest_join$entity_id), ]
+      digest_status <- data.table::data.table(
+        entity_id = as.character(digest_latest$entity_id),
+        digest_schema_version = as.character(digest_latest$schema_version),
+        digest_revision_latest = suppressWarnings(as.integer(digest_latest$digest_revision)),
+        llm_paper_type = as.character(digest_latest$paper_type)
+      )
       hit <- match(status$entity_id, digest_status$entity_id)
       if (any(!is.na(hit))) {
         idx <- !is.na(hit)
@@ -6890,8 +6910,8 @@ litxr_add_refs <- function(
 }
 
 .litxr_build_entity_status_index <- function(cfg, identities = NULL, refs = NULL) {
-  entities <- .litxr_read_project_entities_index(cfg)
-  entity_ids <- if (nrow(entities)) unique(as.character(entities$entity_id)) else character()
+  identity_map <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  entity_ids <- if (nrow(identity_map)) unique(as.character(identity_map$entity_id)) else character()
   out <- .litxr_entity_status_rows_for_entities_fast(cfg, entity_ids = entity_ids)
   if (!nrow(out)) {
     out <- .litxr_entity_status_empty()
@@ -6921,11 +6941,14 @@ litxr_add_refs <- function(
 }
 
 .litxr_read_project_ref_identity_index <- function(cfg, columns = NULL) {
-  stop("ref_identity_map.fst is retired; use litxr_read_ref_identity_map() for runtime resolution output.", call. = FALSE)
+  path <- .litxr_project_ref_identity_index_path(cfg)
+  .litxr_read_fst_subset(path, columns = columns)
 }
 
 .litxr_write_project_ref_identity_index <- function(cfg, records) {
-  stop("ref_identity_map.fst is retired and is no longer written.", call. = FALSE)
+  .litxr_ensure_project_index_dir(cfg)
+  fst::write_fst(as.data.frame(records), .litxr_project_ref_identity_index_path(cfg))
+  invisible(.litxr_project_ref_identity_index_path(cfg))
 }
 
 .litxr_read_project_entities_index <- function(cfg, columns = NULL) {
@@ -7255,14 +7278,14 @@ litxr_add_refs <- function(
 }
 
 .litxr_audit_entity_status_state <- function(cfg) {
-  entities <- .litxr_read_project_entities_index(cfg)
+  identities <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
   refs <- .litxr_authoritative_project_records(cfg)
   if (nrow(refs)) {
     refs <- refs[, intersect(c("ref_id", "title", "doi", "linked_doi_ref_id", "linked_arxiv_ref_id", "entry_type", "year", "authors", "source"), names(refs)), with = FALSE]
   }
   expected <- .litxr_entity_status_rows_for_entities(
     cfg,
-    entity_ids = if (nrow(entities)) unique(as.character(entities$entity_id)) else character(),
+    entity_ids = if (nrow(identities)) unique(as.character(identities$entity_id)) else character(),
     refs = refs
   )
   actual <- .litxr_read_project_entity_status_index(cfg)

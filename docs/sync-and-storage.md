@@ -19,22 +19,22 @@ durable collection-local storage.
 
 Under `project.data_root/`:
 
-- `index/ref_identity_map.fst`: thin identity-to-entity index
-- `index/entities.fst`: thin entity-level search projection
-- `index/entity_collections.fst`: thin entity-to-collection memberships
-- `index/entity_status.fst`: thin entity-level artifact status
-- `index/references.fst`: compatibility projection of project references
-- `index/reference_collections.fst`: compatibility projection of ref-to-collection memberships
-- `index/enrichment_status.fst`: markdown/digest coverage
+- `ref_arxiv.fst`: authoritative arXiv payload table
+- `ref_doi.fst`: authoritative DOI payload table
+- `ref_local_pending.fst`: unresolved local bibliographic input
+- `index/ref_identity_map.fst`: narrow identity routing output used only when a
+  runtime identity view is needed
 - `index/sync_state.fst`: sync and repair history
 - `embeddings/`: cached embedding metadata, matrices, and manifests
 - `llm/`: project-level structured digests keyed by `ref_id`
 - `md/`: project-level markdown keyed by `ref_id`
 
-The thin `entity_*` and `ref_identity_map` indexes are the operational identity
-layer. The heavy project `references.fst` and `reference_collections.fst`
-files remain for backward compatibility and are rebuilt as compatibility
-projections when needed.
+The authoritative bibliographic stores are `ref_arxiv.fst`, `ref_doi.fst`, and
+`ref_local_pending.fst`. Any wide compatibility view over entities or
+collections is runtime-only and should not be treated as a durable project file.
+The old `references.fst`, `reference_collections.fst`, `entities.fst`,
+`entity_collections.fst`, and `enrichment_status.fst` durable projection files
+are not part of the target storage model.
 
 ## Sync APIs
 
@@ -98,13 +98,13 @@ Helpers:
 
 `scripts/repair_arxiv_range.R` records successful day-level repair windows in
 `sync_state.fst` and skips already completed days unless `--force` is used. It
-writes fetched pages to `index/references_delta.fst` during the run, then
-compacts that delta into `index/references.fst` at the end and on exit/error by
-default. This avoids repeatedly rewriting the full collection index after every
-day. Use `--flush-each-day` only when day-by-day full-index visibility is more
-important than speed. By default, it refreshes only the collection-level index;
-use `--refresh-project-index` when project-level reference indexes must be
-refreshed during the repair run.
+writes fetched pages directly into the collection-local JSON store and updates
+the narrow project routing outputs after the run. There is no durable
+`references_delta.fst` or project-wide compatibility projection in the target
+model. Use `--flush-each-day` only when day-by-day visibility is more important
+than speed. By default, it refreshes only the collection-local state; use
+`--refresh-project-index` when narrow project routing outputs must be refreshed
+during the repair run.
 
 Use `litxr_refresh_collection_index()` when recently written JSON files need to
 be merged into the existing `fst` index without a full JSON scan. Use
@@ -188,9 +188,7 @@ During the staged `v0.1.0` refactor, operator-facing behavior is:
 - citation export prefers the published DOI-backed identity when one is linked
 - digest/full-text prompting may prefer a linked arXiv identity for source hints
 - DOI/arXiv linking preserves existing surface `ref_id` values and records the
-  equivalence through link fields and thin entity indexes
-- collection membership can now be viewed either as `ref_id` links or as thin
-  entity-level memberships
+  equivalence through the narrow identity routing outputs
 
 See [refactor-operator-guide.md](./refactor-operator-guide.md) for the stable
 policy details.

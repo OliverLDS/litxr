@@ -40,26 +40,26 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
     return(rows)
   }
   out <- rows
-  if (!("entity_id" %in% names(out))) {
-    identities <- tryCatch(
-      .litxr_ref_entity_resolution_map(cfg, ref_ids = out$ref_id),
-      error = function(e) data.table::data.table()
-    )
-    if (nrow(identities)) {
-      out <- .litxr_attach_entity_ids_to_refs(out, identities = identities)
-    }
+  identity_map <- tryCatch(litxr_read_ref_identity_map(cfg), error = function(e) data.table::data.table())
+  if (nrow(identity_map) && !("entity_id" %in% names(out))) {
+    out <- .litxr_attach_entity_ids_to_refs(out, identities = identity_map)
   }
-  if ("entity_id" %in% names(out)) {
-    entities <- tryCatch(litxr_read_entities(cfg), error = function(e) data.table::data.table())
-    if (nrow(entities) && "preferred_citation_ref_id" %in% names(entities)) {
-      preferred_ids <- entities$preferred_citation_ref_id[match(out$entity_id, entities$entity_id)]
-      preferred_ids <- unique(as.character(preferred_ids[!is.na(preferred_ids) & nzchar(preferred_ids)]))
+  if (nrow(identity_map) && "entity_id" %in% names(out) && "is_published_form" %in% names(identity_map)) {
+    preferred_map <- identity_map[
+      identity_map$is_published_form %in% TRUE & !is.na(identity_map$entity_id) & nzchar(identity_map$entity_id),
+    ]
+    if (nrow(preferred_map)) {
+      preferred_map <- preferred_map[!duplicated(as.character(preferred_map$entity_id)), ]
+      preferred_ids <- unique(as.character(preferred_map$ref_id))
+      preferred_ids <- preferred_ids[!is.na(preferred_ids) & nzchar(preferred_ids)]
       if (length(preferred_ids)) {
-        preferred_rows <- .litxr_authoritative_project_records(cfg)
-        preferred_rows <- preferred_rows[preferred_rows$ref_id %in% preferred_ids, ]
+        preferred_rows <- .litxr_read_normalized_reference_rows_by_keys(cfg, preferred_ids)
         if (nrow(preferred_rows)) {
-          preferred_entity_ids <- entities$entity_id[match(preferred_ids, entities$preferred_citation_ref_id)]
-          preferred_entity_ids <- unique(as.character(preferred_entity_ids[!is.na(preferred_entity_ids) & nzchar(preferred_entity_ids)]))
+          if (!("entity_id" %in% names(preferred_rows))) {
+            preferred_rows <- .litxr_attach_entity_ids_to_refs(preferred_rows, identities = identity_map)
+          }
+          preferred_entity_ids <- unique(as.character(preferred_rows$entity_id))
+          preferred_entity_ids <- preferred_entity_ids[!is.na(preferred_entity_ids) & nzchar(preferred_entity_ids)]
           keep_rows <- out[is.na(match(out$entity_id, preferred_entity_ids)), ]
           out <- data.table::rbindlist(list(keep_rows, preferred_rows), fill = TRUE)
         }
@@ -177,21 +177,26 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
   if (!length(collection_ids) || !nrow(refs)) {
     return(refs[0, ])
   }
+  if (is.null(identities)) {
+    identities <- tryCatch(litxr_read_ref_identity_map(cfg), error = function(e) data.table::data.table())
+  }
+  if (!nrow(identities)) {
+    return(refs[0, ])
+  }
   if (is.null(entity_links)) {
-    entity_links <- .litxr_read_project_entity_collections_index(cfg)
+    entity_links <- tryCatch(litxr_read_reference_collections(cfg), error = function(e) data.table::data.table())
   }
   if (!nrow(entity_links)) {
     return(refs[0, ])
   }
-  if (!("entity_id" %in% names(refs))) {
-    stop("Collection-scoped lookup requires entity_id in canonical rows.", call. = FALSE)
-  }
-  scoped_entity_ids <- unique(as.character(
-    entity_links$entity_id[entity_links$collection_id %in% collection_ids]
-  ))
+  scoped_ref_ids <- unique(as.character(entity_links$ref_id[entity_links$collection_id %in% collection_ids]))
+  scoped_entity_ids <- unique(as.character(identities$entity_id[identities$ref_id %in% scoped_ref_ids]))
   scoped_entity_ids <- scoped_entity_ids[!is.na(scoped_entity_ids) & nzchar(scoped_entity_ids)]
   if (!length(scoped_entity_ids)) {
     return(refs[0, ])
+  }
+  if (!("entity_id" %in% names(refs))) {
+    refs <- .litxr_attach_entity_ids_to_refs(refs, identities = identities)
   }
   out <- refs[refs$entity_id %in% scoped_entity_ids, ]
   if (!nrow(out)) {
@@ -260,7 +265,7 @@ litxr_read_reference_collections <- function(config = NULL) {
 litxr_read_ref_identity_map <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_ref_entity_resolution_map(cfg)
+  .litxr_read_project_ref_identity_index(cfg)
 }
 
 #' Read the thin entity projection index
@@ -273,7 +278,7 @@ litxr_read_ref_identity_map <- function(config = NULL) {
 litxr_read_entities <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_read_project_entities_index(cfg)
+  .litxr_read_project_ref_identity_index(cfg)
 }
 
 #' Read the thin entity-to-collection membership index
@@ -286,7 +291,30 @@ litxr_read_entities <- function(config = NULL) {
 litxr_read_entity_collections <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_read_project_entity_collections_index(cfg)
+  links <- data.table::as.data.table(litxr_read_reference_collections(cfg))
+  identities <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  if (!nrow(links) || !nrow(identities)) {
+    return(data.table::data.table(
+      entity_id = character(),
+      collection_id = character(),
+      recorded_at = character()
+    ))
+  }
+  links$entity_id <- identities$entity_id[match(links$ref_id, identities$ref_id)]
+  links <- links[!is.na(links$entity_id) & nzchar(links$entity_id), ]
+  if (!nrow(links)) {
+    return(data.table::data.table(
+      entity_id = character(),
+      collection_id = character(),
+      recorded_at = character()
+    ))
+  }
+  out <- stats::aggregate(
+    recorded_at ~ entity_id + collection_id,
+    data = as.data.frame(links[, c("entity_id", "collection_id", "recorded_at"), with = FALSE]),
+    FUN = function(x) as.character(max(as.character(x), na.rm = TRUE))
+  )
+  data.table::as.data.table(out)
 }
 
 #' Read the thin entity artifact-status index
@@ -491,7 +519,7 @@ litxr_find_refs <- function(
   } else {
     tryCatch(.litxr_ref_entity_resolution_map(cfg), error = function(e) data.table::data.table())
   }
-  entity_links <- .litxr_read_project_entity_collections_index(cfg)
+  collection_links <- data.table::as.data.table(litxr_read_reference_collections(cfg))
   lookup_columns <- .litxr_project_reference_lookup_columns()
   target_collection <- NULL
   if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
@@ -517,11 +545,11 @@ litxr_find_refs <- function(
       if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
         refs <- .litxr_filter_refs_by_collection_scope(
           cfg,
-          refs,
-          collection_id = collection_id,
-          identities = identities,
-          entity_links = entity_links
-        )
+        refs,
+        collection_id = collection_id,
+        identities = identities,
+        entity_links = collection_links
+      )
       }
       if (nrow(refs)) {
         return(.litxr_finalize_find_refs_rows(cfg, refs, hydrate = TRUE))
@@ -549,13 +577,13 @@ litxr_find_refs <- function(
   refs <- .litxr_attach_entity_ids_to_refs(refs, identities = identities)
 
   if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
-    refs <- .litxr_filter_refs_by_collection_scope(
-      cfg,
-      refs,
-      collection_id = collection_id,
-      identities = identities,
-      entity_links = entity_links
-    )
+      refs <- .litxr_filter_refs_by_collection_scope(
+        cfg,
+        refs,
+        collection_id = collection_id,
+        identities = identities,
+        entity_links = collection_links
+      )
   }
 
   if (!is.null(entry_type) && nzchar(as.character(entry_type))) {

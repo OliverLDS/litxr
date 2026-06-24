@@ -2622,7 +2622,10 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     ))
   }
 
-  identities <- data.table::as.data.table(.litxr_ref_entity_resolution_map(cfg, ref_ids = if (nrow(refs)) refs$ref_id else character()))
+  identities <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  if (nrow(identities) && nrow(refs)) {
+    identities <- identities[identities$ref_id %in% refs$ref_id, ]
+  }
   entity_status <- .litxr_read_project_entity_status_index(
     cfg,
     columns = c(
@@ -2641,7 +2644,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
       "digest_schema_version"
     )
   )
-  entity_links <- data.table::as.data.table(.litxr_read_project_entity_collections_index(cfg, columns = c("entity_id", "collection_id")))
+  collection_links <- data.table::as.data.table(litxr_read_reference_collections(cfg))
 
   out <- data.table::data.table(
     ref_id = as.character(refs$ref_id),
@@ -2693,13 +2696,19 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
     out$n_citation_logic_nodes <- 0L
   }
 
-  collection_map <- if (nrow(entity_links)) {
-    entity_links_df <- as.data.frame(entity_links)
-    stats::aggregate(
-      collection_id ~ entity_id,
-      data = entity_links_df,
-      FUN = function(x) paste(sort(unique(as.character(x))), collapse = ",")
-    )
+  collection_map <- if (nrow(collection_links) && nrow(identities)) {
+    link_dt <- data.table::copy(collection_links[, c("ref_id", "collection_id"), with = FALSE])
+    link_dt$entity_id <- identities$entity_id[match(link_dt$ref_id, identities$ref_id)]
+    link_dt <- link_dt[!is.na(link_dt$entity_id) & nzchar(link_dt$entity_id), ]
+    if (nrow(link_dt)) {
+      stats::aggregate(
+        collection_id ~ entity_id,
+        data = as.data.frame(link_dt),
+        FUN = function(x) paste(sort(unique(as.character(x))), collapse = ",")
+      )
+    } else {
+      data.table::data.table(entity_id = character(), collection_ids = character())
+    }
   } else {
     data.table::data.table(entity_id = character(), collection_ids = character())
   }

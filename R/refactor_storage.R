@@ -194,45 +194,6 @@
   out
 }
 
-.litxr_entity_index_maybe_refresh <- function(cfg) {
-  entities_path <- .litxr_project_entities_index_path(cfg)
-  entity_collections_path <- .litxr_project_entity_collections_index_path(cfg)
-  entity_status_path <- .litxr_project_entity_status_index_path(cfg)
-  collections <- .litxr_config_collections(cfg)
-  needs_build <- !file.exists(entities_path) ||
-    !file.exists(entity_collections_path) ||
-    !file.exists(entity_status_path)
-  if (!needs_build && length(collections)) {
-    entity_mtime <- file.info(entities_path)$mtime
-    collection_mtimes <- vapply(collections, function(collection) {
-      local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-      index_path <- .litxr_index_path(local_path)
-      if (!file.exists(index_path)) {
-        return(as.POSIXct(NA))
-      }
-      file.info(index_path)$mtime
-    }, as.POSIXct(NA))
-    if (length(collection_mtimes)) {
-      needs_build <- any(vapply(collection_mtimes, function(x) isTRUE(entity_mtime < x), logical(1)))
-    }
-  }
-  if (isTRUE(needs_build)) {
-    .litxr_build_entity_indexes(cfg)
-  }
-  invisible(NULL)
-}
-
-.litxr_refresh_entity_indexes_from_project_indexes <- function(cfg) {
-  inputs <- .litxr_authoritative_entity_inputs(cfg)
-  refs <- inputs$refs
-  links <- inputs$links
-  identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
-  .litxr_build_entities_index(cfg, refs = refs, identities = identities)
-  .litxr_build_entity_collections_index(cfg, identities = identities, links = links)
-  .litxr_build_entity_status_index(cfg, identities = identities, refs = refs)
-  invisible(NULL)
-}
-
 .litxr_migrate_refactor_indexes <- function(cfg, collection_ids = NULL, rebuild_collection_indexes = TRUE) {
   collections <- .litxr_config_collections(cfg)
   configured_ids <- vapply(collections, `[[`, character(1), "collection_id")
