@@ -14,6 +14,7 @@ omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
 Named list of \code{data.table} audit reports.
 }
 \description{
-Compares \code{index/entity_status.fst} against the current md/digest/findings
-artifact state derived from the authoritative identity/entity layer.
+Derives entity status from the authoritative identity map, current markdown
+and digest artifacts, and schema-derived tables, then reports the current
+runtime state.
 }

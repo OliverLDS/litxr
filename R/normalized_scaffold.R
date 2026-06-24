@@ -162,32 +162,17 @@
 }
 
 .litxr_write_scaffold_table <- function(path, records, key_cols) {
-  key_cols <- as.character(key_cols)
   records <- data.table::as.data.table(records)
   if (!nrow(records)) {
     fst::write_fst(as.data.frame(records), path)
     return(invisible(path))
   }
 
-  if (!file.exists(path)) {
-    fst::write_fst(as.data.frame(records), path)
-    return(invisible(path))
+  if (!missing(key_cols) && length(key_cols) && !all(as.character(key_cols) %in% names(records))) {
+    stop("Missing key column(s) for scaffold write: ", paste(setdiff(as.character(key_cols), names(records)), collapse = ", "), call. = FALSE)
   }
 
-  existing <- tryCatch(fst::read_fst(path, as.data.table = TRUE), error = function(e) data.table::data.table())
-  if (!nrow(existing)) {
-    merged <- records
-  } else {
-    if (!all(key_cols %in% names(records))) {
-      stop("Missing key column(s) for scaffold upsert: ", paste(setdiff(key_cols, names(records)), collapse = ", "), call. = FALSE)
-    }
-    existing <- data.table::as.data.table(existing)
-    merged <- data.table::rbindlist(list(existing, records), fill = TRUE)
-    merged_key <- do.call(paste, c(as.list(merged[, key_cols, with = FALSE]), sep = "\r"))
-    merged <- merged[!duplicated(merged_key, fromLast = TRUE), ]
-  }
-
-  fst::write_fst(as.data.frame(merged), path)
+  fst::write_fst(as.data.frame(records), path)
   invisible(path)
 }
 

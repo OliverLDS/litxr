@@ -2,7 +2,7 @@
 % Please edit documentation in R/sync.R
 \name{litxr_refresh_collection_index}
 \alias{litxr_refresh_collection_index}
-\title{Refresh the local collection fst index from recently changed JSON files}
+\title{Refresh the collection-derived reference stores from recently changed JSON files}
 \usage{
 litxr_refresh_collection_index(collection_id, config = NULL)
 }
@@ -17,7 +17,5 @@ Invisibly returns the refreshed fst index path.
 }
 \description{
 This is a fast, mtime-based refresh for the common case where JSON record
-files were written after \code{index/references.fst} was last updated. It does
-not replace \code{litxr_rebuild_collection_index()}, which remains the
-correctness-first full rebuild for schema migrations and legacy cleanup.
+files were written after the thin authoritative stores were last updated.
 }

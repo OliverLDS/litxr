@@ -1,3 +1,10 @@
+# litxr 0.1.7.3
+
+- Removed the merge-on-write bottleneck from the normalized scaffold writer.
+- Narrowed local JSON hydration for rebuild paths so projection rows are built
+  without per-row `data.table` materialization.
+- Kept the direct arXiv/DOI identity pairing path strict and graph-free.
+
 # litxr 0.1.7.2
 
 - Removed the remaining file-backed entity-status and collection-projection

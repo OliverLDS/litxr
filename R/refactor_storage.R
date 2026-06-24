@@ -154,7 +154,8 @@
   }
 
   refs <- if (length(refs_list)) data.table::rbindlist(refs_list, fill = TRUE) else data.table::data.table()
-  .litxr_refresh_ref_identity_map(cfg, refs = refs)
+  identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
+  .litxr_refresh_ref_identity_map(cfg, identities = identities)
   .litxr_refresh_normalized_reference_scaffold(cfg, refs = refs, refresh_entity_indexes = FALSE)
   invisible(NULL)
 }

@@ -7,7 +7,8 @@
 litxr_sync_collection(
   collection_id,
   config = NULL,
-  refresh_entity_indexes = TRUE
+  refresh_entity_indexes = TRUE,
+  refresh_ref_identity_map = TRUE
 )
 }
 \arguments{
