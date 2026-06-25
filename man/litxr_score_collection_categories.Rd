@@ -25,7 +25,7 @@ litxr_score_collection_categories(
 \item{query_set_id}{Identifier of a cached category query set.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{field}{Embedded text field. Must match the collection embedding index.}
 

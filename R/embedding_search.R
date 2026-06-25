@@ -6,7 +6,7 @@
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Text field to embed, such as `"abstract"`.
 #' @param embed_fun Function taking a character vector and returning embeddings
 #'   as a matrix, data frame, or list of numeric vectors.
@@ -70,7 +70,7 @@ litxr_embed_collection_delta <- function(
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Text field to embed, such as `"abstract"`.
 #' @param embed_fun Function taking a character vector and returning embeddings
 #'   as a matrix, data frame, or list of numeric vectors.
@@ -153,7 +153,7 @@ litxr_build_embedding_index <- function(
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param model Exact embedding model name used when building the cache.
 #' @param provider Optional provider label used in the resulting manifest.
@@ -197,7 +197,7 @@ litxr_compact_embedding_delta <- function(
 #' @param query Query text. Ignored when `query_vec` is supplied.
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param embed_fun Function taking a character vector and returning embeddings.
 #'   Required only when `query_vec` is not supplied.
@@ -263,7 +263,7 @@ litxr_search_embedding_delta <- function(
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param model Exact embedding model name used when building the cache.
 #'
@@ -287,7 +287,7 @@ litxr_read_embedding_index <- function(collection_id, config = NULL, field = "ab
 #' @param query Query text. Ignored when `query_vec` is supplied.
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param embed_fun Function taking a character vector and returning embeddings.
 #'   Required only when `query_vec` is not supplied.
@@ -374,7 +374,7 @@ litxr_search_embeddings <- function(
 #'   query sentences, or a path to a JSON/YAML file containing that structure.
 #' @param query_set_id Identifier for this category query set.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param embed_fun Function taking a character vector and returning embeddings.
 #' @param model Exact embedding model name.
 #' @param provider Optional provider label, such as `"openrouter"` or
@@ -481,7 +481,7 @@ litxr_build_label_query_index <- function(
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param query_set_id Identifier of a cached category query set.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field. Must match the collection embedding index.
 #' @param model Exact embedding model name. Must match both corpus and query
 #'   indexes.

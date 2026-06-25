@@ -3,7 +3,7 @@ run_json_script <- function(script_path, args = character(), config_path = NULL)
   on.exit(unlink(stderr_path), add = TRUE)
   env <- character()
   if (!is.null(config_path)) {
-    env <- c(env, paste0("LITXR_CONFIG=", config_path))
+    env <- c(env, paste0("LITXR_DATA_ROOT=", dirname(config_path)))
   }
   out <- system2(
     "Rscript",
@@ -63,15 +63,15 @@ make_record <- function(ref_id, source, source_id, title, collection_id, collect
 make_temp_refactor_project <- function() {
   td <- tempfile("litxr-refactor-report-")
   dir.create(td)
-  config_path <- file.path(td, ".litxr", "config.yaml")
+  config_path <- file.path(td, "config.yaml")
 
-  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-  Sys.setenv(LITXR_CONFIG = config_path)
+  old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+  Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
   on.exit({
     if (is.na(old_litxr_config)) {
-      Sys.unsetenv("LITXR_CONFIG")
+      Sys.unsetenv("LITXR_DATA_ROOT")
     } else {
-      Sys.setenv(LITXR_CONFIG = old_litxr_config)
+      Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
     }
   }, add = TRUE)
 
@@ -200,15 +200,15 @@ make_temp_refactor_project <- function() {
 make_temp_sync_project <- function() {
   td <- tempfile("litxr-refactor-sync-")
   dir.create(td)
-  config_path <- file.path(td, ".litxr", "config.yaml")
+  config_path <- file.path(td, "config.yaml")
 
-  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-  Sys.setenv(LITXR_CONFIG = config_path)
+  old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+  Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
   on.exit({
     if (is.na(old_litxr_config)) {
-      Sys.unsetenv("LITXR_CONFIG")
+      Sys.unsetenv("LITXR_DATA_ROOT")
     } else {
-      Sys.setenv(LITXR_CONFIG = old_litxr_config)
+      Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
     }
   }, add = TRUE)
 

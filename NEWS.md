@@ -1,4 +1,4 @@
-# litxr 0.1.7.5
+# litxr 0.1.7.6
 
 - Added the DOI collection sync log as a shared project-level TSV under
   `log/`, keyed by `collection_id`.
@@ -659,7 +659,8 @@
 
 # litxr 0.0.1
 
-- Added project initialization with local `.litxr/config.yaml` support.
+- Added project initialization with shared `config.yaml` support under
+  `LITXR_DATA_ROOT`.
 - Added journal-centric local storage and BibTeX export helpers.
 - Added arXiv and Crossref parsing helpers for a unified reference schema.
 - Added cursor-paginated Crossref journal sync support.

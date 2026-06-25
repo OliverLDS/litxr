@@ -1,13 +1,16 @@
 # Configuration
 
-`litxr` reads its project config path from `LITXR_CONFIG`.
+`litxr` reads its project config path from `file.path(LITXR_DATA_ROOT,
+"config.yaml")`.
+
+Set `LITXR_DATA_ROOT` in `.Renviron` to the root of your shared data store.
 
 ## Setup
 
-Add this to `.Renviron` and restart R:
+Set `LITXR_DATA_ROOT` in `.Renviron` and restart R:
 
 ```sh
-LITXR_CONFIG=/absolute/path/to/project/config.yaml
+LITXR_DATA_ROOT=/absolute/path/to/shared/litxr/data
 ```
 
 Then initialize the file once:

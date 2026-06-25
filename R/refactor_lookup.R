@@ -6,7 +6,7 @@
 #' @param keys Optional character vector of record identifiers to export. Keys
 #'   are matched against `doi`, `ref_id`, or `source_id`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the output path.
 #' @export
@@ -231,7 +231,7 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
 #' Read the canonical project-level reference index
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of canonical references across collections.
 #' @export
@@ -244,7 +244,7 @@ litxr_read_references <- function(config = NULL) {
 #' Read the project-level reference-collection membership index
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of `ref_id` to `collection_id` links.
 #' @export
@@ -257,7 +257,7 @@ litxr_read_reference_collections <- function(config = NULL) {
 #' Read the thin identity map
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` mapping surface `ref_id` values to internal
 #'   `entity_id`s.
@@ -271,7 +271,7 @@ litxr_read_ref_identity_map <- function(config = NULL) {
 #' Read the thin entity projection index
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of entity-level search and status projections.
 #' @export
@@ -284,7 +284,7 @@ litxr_read_entities <- function(config = NULL) {
 #' Read the thin entity-to-collection membership index
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of `entity_id` to `collection_id` links.
 #' @export
@@ -320,7 +320,7 @@ litxr_read_entity_collections <- function(config = NULL) {
 #' Read the thin entity artifact-status index
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of entity-level artifact and digest status flags.
 #' @export
@@ -340,7 +340,7 @@ litxr_read_entity_status <- function(config = NULL) {
 #' indexes.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Named list describing the written index paths and row counts.
 #' @export
@@ -358,7 +358,7 @@ litxr_build_entity_indexes <- function(config = NULL) {
 #' retired.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Named list of `data.table` audit reports.
 #' @export
@@ -375,7 +375,7 @@ litxr_audit_reference_cache_state <- function(config = NULL) {
 #' runtime state.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Named list of `data.table` audit reports.
 #' @export
@@ -392,7 +392,7 @@ litxr_audit_entity_status_state <- function(config = NULL) {
 #' identity-first storage model.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param oversized_mb Size threshold in megabytes used to flag index files as
 #'   oversized in the health report.
 #'
@@ -411,7 +411,7 @@ litxr_audit_entity_indexes <- function(config = NULL, oversized_mb = 25) {
 #' authoritative state.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Named list of `data.table` audit reports.
 #' @export
@@ -428,7 +428,7 @@ litxr_audit_normalized_authoritative_state <- function(config = NULL) {
 #' calling low-level helpers one by one.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param oversized_mb Size threshold used when classifying indexes as
 #'   oversized.
 #'
@@ -447,7 +447,7 @@ litxr_refactor_diagnostics <- function(config = NULL, oversized_mb = 25) {
 #' collection records.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_ids Optional character vector of collection ids to sync.
 #'   Default is all configured collections.
 #' @param json_mtime_after Optional timestamp. When supplied, only JSON files
@@ -481,7 +481,7 @@ litxr_sync_thin_ref_stores_from_json <- function(config = NULL, collection_ids =
 #' @param isbn Optional ISBN filter.
 #' @param issn Optional ISSN substring filter.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param runtime_wide_projection_limit Maximum number of project-reference rows
 #'   that may be wide-materialized in one lookup before the call aborts. The
 #'   default is `300`.

@@ -1,15 +1,15 @@
 make_temp_sync_project <- function() {
   td <- tempfile("litxr-refactor-sync-")
   dir.create(td)
-  config_path <- file.path(td, ".litxr", "config.yaml")
+  config_path <- file.path(td, "config.yaml")
 
-  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-  Sys.setenv(LITXR_CONFIG = config_path)
+  old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+  Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
   on.exit({
     if (is.na(old_litxr_config)) {
-      Sys.unsetenv("LITXR_CONFIG")
+      Sys.unsetenv("LITXR_DATA_ROOT")
     } else {
-      Sys.setenv(LITXR_CONFIG = old_litxr_config)
+      Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
     }
   }, add = TRUE)
 

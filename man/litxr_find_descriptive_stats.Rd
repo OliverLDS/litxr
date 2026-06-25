@@ -22,7 +22,7 @@ litxr_find_descriptive_stats(
 \item{variable}{Optional exact \code{variable} filter.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Filtered \code{data.table}.

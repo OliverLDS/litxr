@@ -18,7 +18,7 @@ litxr_add_refs(
 \item{collection_id}{Target collection identifier.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{auto_register}{Whether to create the target collection automatically
 when it does not already exist.}

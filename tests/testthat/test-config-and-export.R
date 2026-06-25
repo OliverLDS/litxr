@@ -1,20 +1,20 @@
 td <- tempfile("litxr-test-")
 dir.create(td)
-config_path <- file.path(td, ".litxr", "config.yaml")
+config_path <- file.path(td, "config.yaml")
 
-old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-Sys.unsetenv("LITXR_CONFIG")
+old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+Sys.unsetenv("LITXR_DATA_ROOT")
 on.exit({
   if (is.na(old_litxr_config)) {
-    Sys.unsetenv("LITXR_CONFIG")
+    Sys.unsetenv("LITXR_DATA_ROOT")
   } else {
-    Sys.setenv(LITXR_CONFIG = old_litxr_config)
+    Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
   }
 }, add = TRUE)
 
 stopifnot(inherits(try(litxr::litxr_init(), silent = TRUE), "try-error"))
 
-Sys.setenv(LITXR_CONFIG = config_path)
+Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
 config_path <- litxr::litxr_init()
 stopifnot(file.exists(config_path))
 stopifnot(identical(
@@ -22,7 +22,7 @@ stopifnot(identical(
   litxr::litxr_config_path()
 ))
 
-Sys.setenv(LITXR_CONFIG = config_path)
+Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
 cfg <- litxr::litxr_read_config()
 stopifnot(identical(cfg$project$name, basename(td)))
 stopifnot(length(cfg$collections) == 3L)
@@ -54,9 +54,9 @@ stopifnot(identical(tab_cfg$collections[[1]]$collection_id, "journal_of_finance"
 
 td_export <- tempfile("litxr-test-")
 dir.create(td_export)
-cfg_path <- file.path(td_export, ".litxr", "config.yaml")
+cfg_path <- file.path(td_export, "config.yaml")
 
-Sys.setenv(LITXR_CONFIG = cfg_path)
+Sys.setenv(LITXR_DATA_ROOT = dirname(cfg_path))
 cfg_path <- litxr::litxr_init()
 cfg_export <- litxr::litxr_read_config()
 journal <- cfg_export$journals[[1]]

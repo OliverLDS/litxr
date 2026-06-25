@@ -16,7 +16,7 @@ litxr_embedding_date_stats(
 \item{collection_id}{Collection identifier from \code{config.yaml}.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{field}{Embedded text field.}
 

@@ -191,7 +191,7 @@ if (is.na(collection_ref_dir) || !nzchar(collection_ref_dir)) {
 }
 
 paths <- litxr:::.litxr_ensure_collection_ref_dir(cfg, parsed$collection)
-update_log_path <- litxr:::.litxr_project_collection_fetch_log_path(cfg)
+update_log_path <- litxr:::.litxr_project_doi_collection_fetch_log_path(cfg)
 should_record_latest_update <- !has_text(parsed$end)
 
 log_line("syncing doi collection from Crossref")

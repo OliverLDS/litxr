@@ -14,7 +14,7 @@ litxr_compact_collection_index(
 \item{collection_id}{Collection identifier from \code{config.yaml}.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{refresh_project_index}{Whether to refresh project-level canonical
 reference indexes after compaction.}

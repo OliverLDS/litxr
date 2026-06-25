@@ -8,7 +8,7 @@ litxr_read_enrichment_status(config = NULL)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 \code{data.table} with one row per reference and enrichment flags.

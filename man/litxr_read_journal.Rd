@@ -11,7 +11,7 @@ litxr_read_journal(journal_id, config = NULL)
 is kept for backward compatibility.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 \code{data.table} of local records.

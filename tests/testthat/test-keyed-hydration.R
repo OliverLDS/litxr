@@ -88,15 +88,15 @@ test_that("collection hydration tolerates duplicate slug files and prefers the f
 test_that("keyed journal lookup batches large key sets and deduplicates duplicate canonical ids", {
   td <- tempfile("litxr-keyed-read-")
   dir.create(td)
-  config_path <- file.path(td, ".litxr", "config.yaml")
+  config_path <- file.path(td, "config.yaml")
 
-  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-  Sys.setenv(LITXR_CONFIG = config_path)
+  old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+  Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
   on.exit({
     if (is.na(old_litxr_config)) {
-      Sys.unsetenv("LITXR_CONFIG")
+      Sys.unsetenv("LITXR_DATA_ROOT")
     } else {
-      Sys.setenv(LITXR_CONFIG = old_litxr_config)
+      Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
     }
   }, add = TRUE)
 
@@ -158,15 +158,15 @@ test_that("keyed journal lookup batches large key sets and deduplicates duplicat
 test_that("project rows linked to multiple collections keep collection ids and wide projection guardrails", {
   td <- tempfile("litxr-multi-collection-")
   dir.create(td)
-  config_path <- file.path(td, ".litxr", "config.yaml")
+  config_path <- file.path(td, "config.yaml")
 
-  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-  Sys.setenv(LITXR_CONFIG = config_path)
+  old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+  Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
   on.exit({
     if (is.na(old_litxr_config)) {
-      Sys.unsetenv("LITXR_CONFIG")
+      Sys.unsetenv("LITXR_DATA_ROOT")
     } else {
-      Sys.setenv(LITXR_CONFIG = old_litxr_config)
+      Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
     }
   }, add = TRUE)
 

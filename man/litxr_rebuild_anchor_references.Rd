@@ -8,7 +8,7 @@ litxr_rebuild_anchor_references(config = NULL)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Invisibly returns the rebuilt main fst path.

@@ -20,7 +20,7 @@ litxr_repair_journal(
 is kept for backward compatibility.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{search_query}{Optional replacement query for this repair run.}
 

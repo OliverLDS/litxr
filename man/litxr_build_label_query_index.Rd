@@ -22,7 +22,7 @@ query sentences, or a path to a JSON/YAML file containing that structure.}
 \item{query_set_id}{Identifier for this category query set.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{embed_fun}{Function taking a character vector and returning embeddings.}
 

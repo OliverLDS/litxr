@@ -10,7 +10,7 @@ litxr_read_llm_digest_history(ref_id, config = NULL, include_current = TRUE)
 \item{ref_id}{Reference identifier.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{include_current}{Whether to include the current digest in the returned
 history table.}

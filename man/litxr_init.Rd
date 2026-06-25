@@ -10,9 +10,9 @@ litxr_init()
 Invisibly returns the config path.
 }
 \description{
-Reads the target config path from \code{LITXR_CONFIG}. If the file does not exist,
-\code{litxr_init()} writes a starter \code{config.yaml} there. If the file already
-exists, it refuses to overwrite it and instructs the user to edit that file
-manually. After creating the file, it reminds the user to update
+Reads the target config path from \code{LITXR_DATA_ROOT}. If the file does not
+exist, \code{litxr_init()} writes a starter \code{config.yaml} there. If the file
+already exists, it refuses to overwrite it and instructs the user to edit
+that file manually. After creating the file, it reminds the user to update
 \code{project.data_root} and each collection \code{local_path}.
 }

@@ -10,7 +10,7 @@ litxr_add_dois(dois, config = NULL, auto_register = TRUE)
 \item{dois}{Character vector of DOIs.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{auto_register}{Whether to auto-register missing collections into
 \code{config.yaml}.}

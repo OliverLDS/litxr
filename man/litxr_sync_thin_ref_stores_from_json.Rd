@@ -12,7 +12,7 @@ litxr_sync_thin_ref_stores_from_json(
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{collection_ids}{Optional character vector of collection ids to sync.
 Default is all configured collections.}

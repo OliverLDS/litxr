@@ -1925,7 +1925,7 @@ litxr_validate_standardized_findings <- function(findings) {
 #' @param findings Data frame, data.table, or named list of standardized
 #'   findings rows.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the delta fst path.
 #' @export
@@ -1945,7 +1945,7 @@ litxr_write_standardized_findings <- function(findings, config = NULL) {
 #' Read standardized findings from main and delta stores
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param ref_ids Optional character vector of `ref_id` values to keep.
 #'
 #' @return `data.table` of standardized findings.
@@ -1971,7 +1971,7 @@ litxr_read_standardized_findings <- function(config = NULL, ref_ids = NULL) {
 #' @param finding_id Optional exact `finding_id` filter.
 #' @param paper_type Optional paper-type filter.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Filtered `data.table`.
 #' @export
@@ -2012,7 +2012,7 @@ litxr_find_standardized_findings <- function(query = NULL, ref_id = NULL, findin
 #' Compact standardized findings delta into the main store
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the main fst path.
 #' @export
@@ -2092,7 +2092,7 @@ litxr_validate_descriptive_stats <- function(stats) {
 #' @param stats Data frame, data.table, or named list of descriptive-statistics
 #'   rows.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the delta fst path.
 #' @export
@@ -2112,7 +2112,7 @@ litxr_write_descriptive_stats <- function(stats, config = NULL) {
 #' Read descriptive statistics from main and delta stores
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param ref_ids Optional character vector of `ref_id` values to keep.
 #'
 #' @return `data.table` of descriptive statistics.
@@ -2138,7 +2138,7 @@ litxr_read_descriptive_stats <- function(config = NULL, ref_ids = NULL) {
 #' @param table_id Optional exact `table_id` filter.
 #' @param variable Optional exact `variable` filter.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Filtered `data.table`.
 #' @export
@@ -2171,7 +2171,7 @@ litxr_find_descriptive_stats <- function(query = NULL, ref_id = NULL, table_id =
 #' Compact descriptive statistics delta into the main store
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the main fst path.
 #' @export
@@ -2200,7 +2200,7 @@ litxr_compact_descriptive_stats <- function(config = NULL) {
 #' rewrites the main fst, and clears the delta fst.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the rebuilt main fst path.
 #' @export
@@ -2214,7 +2214,7 @@ litxr_rebuild_standardized_findings <- function(config = NULL) {
 #' rewrites the main fst, and clears the delta fst.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the rebuilt main fst path.
 #' @export
@@ -2275,7 +2275,7 @@ litxr_validate_anchor_references <- function(anchors) {
 #' @param anchors Data frame, data.table, or named list of anchor-reference
 #'   rows.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the delta fst path.
 #' @export
@@ -2298,7 +2298,7 @@ litxr_write_anchor_references <- function(anchors, config = NULL) {
 #' Read anchor references from main and delta stores
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param ref_ids Optional character vector of `ref_id` values to keep.
 #'
 #' @return `data.table` of anchor references.
@@ -2323,7 +2323,7 @@ litxr_read_anchor_references <- function(config = NULL, ref_ids = NULL) {
 #' @param ref_id Optional exact `ref_id` filter.
 #' @param anchor_rank Optional exact `anchor_rank` filter.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Filtered `data.table`.
 #' @export
@@ -2356,7 +2356,7 @@ litxr_find_anchor_references <- function(query = NULL, ref_id = NULL, anchor_ran
 #' Compact anchor references delta into the main store
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the main fst path.
 #' @export
@@ -2382,7 +2382,7 @@ litxr_compact_anchor_references <- function(config = NULL) {
 #' Rebuild anchor references main store from current local tables
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the rebuilt main fst path.
 #' @export
@@ -2447,7 +2447,7 @@ litxr_validate_citation_logic_nodes <- function(nodes) {
 #'
 #' @param nodes Data frame, data.table, or named list of citation-logic rows.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the delta fst path.
 #' @export
@@ -2470,7 +2470,7 @@ litxr_write_citation_logic_nodes <- function(nodes, config = NULL) {
 #' Read citation logic nodes from main and delta stores
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param ref_ids Optional character vector of `ref_id` values to keep.
 #'
 #' @return `data.table` of citation logic nodes.
@@ -2495,7 +2495,7 @@ litxr_read_citation_logic_nodes <- function(config = NULL, ref_ids = NULL) {
 #' @param ref_id Optional exact `ref_id` filter.
 #' @param node_id Optional exact `node_id` filter.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Filtered `data.table`.
 #' @export
@@ -2531,7 +2531,7 @@ litxr_find_citation_logic_nodes <- function(query = NULL, ref_id = NULL, node_id
 #' Compact citation logic nodes delta into the main store
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the main fst path.
 #' @export
@@ -2557,7 +2557,7 @@ litxr_compact_citation_logic_nodes <- function(config = NULL) {
 #' Rebuild citation logic nodes main store from current local tables
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the rebuilt main fst path.
 #' @export
@@ -2571,7 +2571,7 @@ litxr_rebuild_citation_logic_nodes <- function(config = NULL) {
 #' statistics coverage for canonical references.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
@@ -2754,7 +2754,7 @@ litxr_read_research_schema_status <- function(config = NULL, collection_id = NUL
 #' Find references missing LLM digests
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
@@ -2770,7 +2770,7 @@ litxr_find_refs_missing_llm_digest <- function(config = NULL, collection_id = NU
 #' Find references missing standardized findings
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
@@ -2786,7 +2786,7 @@ litxr_find_refs_missing_standardized_findings <- function(config = NULL, collect
 #' Find references missing descriptive statistics
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
@@ -2802,7 +2802,7 @@ litxr_find_refs_missing_descriptive_stats <- function(config = NULL, collection_
 #' Find references missing anchor references
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
@@ -2818,7 +2818,7 @@ litxr_find_refs_missing_anchor_references <- function(config = NULL, collection_
 #' Find references missing citation logic nodes
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
@@ -2839,7 +2839,7 @@ litxr_find_refs_missing_citation_logic_nodes <- function(config = NULL, collecti
 #' @param ref_ids Character vector of reference ids to upgrade. When omitted,
 #'   all existing project-level digests are upgraded.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the upgraded ref ids.
 #' @export

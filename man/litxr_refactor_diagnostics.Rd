@@ -8,7 +8,7 @@ litxr_refactor_diagnostics(config = NULL, oversized_mb = 25)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{oversized_mb}{Size threshold used when classifying indexes as
 oversized.}

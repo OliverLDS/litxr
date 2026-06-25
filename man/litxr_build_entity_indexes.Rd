@@ -8,7 +8,7 @@ litxr_build_entity_indexes(config = NULL)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Named list describing the written index paths and row counts.

@@ -8,7 +8,7 @@ litxr_read_llm_digests(config = NULL, ref_ids = NULL, columns = NULL)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{ref_ids}{Optional character vector of reference ids to keep.}
 }

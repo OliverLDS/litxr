@@ -38,7 +38,7 @@ canonical ids such as \code{"arxiv:2405.03710"} and bare ids such as
 \item{issn}{Optional ISSN substring filter.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{runtime_wide_projection_limit}{Maximum number of project-reference rows
 that may be wide-materialized in one lookup before the call aborts. The

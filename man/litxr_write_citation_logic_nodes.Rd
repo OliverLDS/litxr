@@ -10,7 +10,7 @@ litxr_write_citation_logic_nodes(nodes, config = NULL)
 \item{nodes}{Data frame, data.table, or named list of citation-logic rows.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Invisibly returns the delta fst path.

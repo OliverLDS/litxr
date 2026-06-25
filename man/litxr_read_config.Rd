@@ -8,7 +8,7 @@ litxr_read_config(path = NULL)
 }
 \arguments{
 \item{path}{Optional direct path to a config file. When omitted, \code{litxr}
-reads \code{LITXR_CONFIG}.}
+reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Parsed config list.

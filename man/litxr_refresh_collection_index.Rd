@@ -10,7 +10,7 @@ litxr_refresh_collection_index(collection_id, config = NULL)
 \item{collection_id}{Collection identifier from \code{config.yaml}.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Invisibly returns the refreshed fst index path.

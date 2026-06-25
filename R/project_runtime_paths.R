@@ -48,8 +48,8 @@
   file.path(.litxr_project_log_dir(cfg), "collection_thin_sync_latest.tsv")
 }
 
-.litxr_project_collection_fetch_log_path <- function(cfg) {
-  file.path(.litxr_project_log_dir(cfg), "collection_fetch_latest.tsv")
+.litxr_project_doi_collection_fetch_log_path <- function(cfg) {
+  file.path(.litxr_project_log_dir(cfg), "doi_collection_fetch_latest.tsv")
 }
 
 .litxr_collection_ref_dir <- function(cfg, collection_id) {
@@ -82,6 +82,147 @@
   format(max(as.POSIXct(mtimes, tz = "UTC")), tz = "UTC", usetz = TRUE)
 }
 
+.litxr_collection_fetch_history_path <- function(cfg, collection_id) {
+  collection_id <- as.character(collection_id)[[1L]]
+  file.path(.litxr_project_log_dir(cfg), paste0(collection_id, "_collection_fetch_history.tsv"))
+}
+
+.litxr_empty_collection_fetch_history <- function() {
+  data.table::data.table(
+    completed_collection_date = character(),
+    total_ref_jsons = integer()
+  )
+}
+
+.litxr_infer_collection_fetch_history <- function(cfg, collection_id) {
+  collection_id <- as.character(collection_id)[[1L]]
+  dir_path <- .litxr_collection_ref_dir(cfg, collection_id)
+  if (!dir.exists(dir_path)) {
+    return(.litxr_empty_collection_fetch_history())
+  }
+
+  records <- tryCatch(
+    .litxr_read_journal_records_from_json(dir_path),
+    error = function(e) data.table::data.table()
+  )
+  if (!nrow(records) || !("pub_date" %in% names(records))) {
+    return(.litxr_empty_collection_fetch_history())
+  }
+
+  pub_dates <- as.Date(records$pub_date)
+  pub_dates <- pub_dates[!is.na(pub_dates)]
+  if (!length(pub_dates)) {
+    return(.litxr_empty_collection_fetch_history())
+  }
+
+  days <- sort(unique(pub_dates))
+  counts <- data.table::data.table(
+    completed_collection_date = as.character(days),
+    total_ref_jsons = as.integer(vapply(days, function(day) {
+      sum(pub_dates == day)
+    }, integer(1)))
+  )
+  data.table::setorder(counts, completed_collection_date)
+  counts
+}
+
+.litxr_read_collection_fetch_history <- function(cfg, collection_id) {
+  path <- .litxr_collection_fetch_history_path(cfg, collection_id)
+  if (!file.exists(path)) {
+    history <- .litxr_infer_collection_fetch_history(cfg, collection_id)
+    if (nrow(history)) {
+      .litxr_write_collection_fetch_history(cfg, collection_id, history)
+    }
+    return(history)
+  }
+  rows <- tryCatch(
+    data.table::fread(path, sep = "\t", header = TRUE, na.strings = c("", "NA")),
+    error = function(e) .litxr_empty_collection_fetch_history()
+  )
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    return(.litxr_empty_collection_fetch_history())
+  }
+  if (!("completed_collection_date" %in% names(rows))) rows$completed_collection_date <- character()
+  if (!("total_ref_jsons" %in% names(rows))) rows$total_ref_jsons <- integer()
+  rows <- rows[, c("completed_collection_date", "total_ref_jsons"), with = FALSE]
+  rows$completed_collection_date <- as.character(rows$completed_collection_date)
+  rows$total_ref_jsons <- suppressWarnings(as.integer(rows$total_ref_jsons))
+  rows <- rows[!is.na(rows$completed_collection_date) & nzchar(rows$completed_collection_date)]
+  if (nrow(rows)) {
+    rows <- rows[!duplicated(rows$completed_collection_date, fromLast = TRUE), ]
+    data.table::setorder(rows, completed_collection_date)
+  }
+  rows
+}
+
+.litxr_write_collection_fetch_history <- function(cfg, collection_id, rows) {
+  path <- .litxr_collection_fetch_history_path(cfg, collection_id)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    data.table::fwrite(.litxr_empty_collection_fetch_history(), path, sep = "\t")
+    return(invisible(path))
+  }
+  if (!("completed_collection_date" %in% names(rows))) {
+    stop("Collection fetch history rows require `completed_collection_date`.", call. = FALSE)
+  }
+  if (!("total_ref_jsons" %in% names(rows))) {
+    stop("Collection fetch history rows require `total_ref_jsons`.", call. = FALSE)
+  }
+  rows <- data.table::data.table(
+    completed_collection_date = as.character(rows$completed_collection_date),
+    total_ref_jsons = suppressWarnings(as.integer(rows$total_ref_jsons))
+  )
+  rows <- rows[!is.na(rows$completed_collection_date) & nzchar(rows$completed_collection_date), , drop = FALSE]
+  if (nrow(rows)) {
+    rows <- rows[!duplicated(rows$completed_collection_date, fromLast = TRUE), , drop = FALSE]
+    data.table::setorder(rows, completed_collection_date)
+  }
+  data.table::fwrite(rows, path, sep = "\t")
+  invisible(path)
+}
+
+.litxr_append_collection_fetch_history <- function(cfg, collection_id, completed_collection_date, total_ref_jsons) {
+  collection_id <- as.character(collection_id)[[1L]]
+  completed_collection_date <- as.character(completed_collection_date)[[1L]]
+  total_ref_jsons <- suppressWarnings(as.integer(total_ref_jsons))
+  if (length(total_ref_jsons) < 1L || is.na(total_ref_jsons[[1L]])) {
+    total_ref_jsons <- NA_integer_
+  } else {
+    total_ref_jsons <- total_ref_jsons[[1L]]
+  }
+  if (is.na(completed_collection_date) || !nzchar(completed_collection_date)) {
+    stop("`completed_collection_date` must be non-empty.", call. = FALSE)
+  }
+  rows <- .litxr_read_collection_fetch_history(cfg, collection_id)
+  hit <- which(rows$completed_collection_date == completed_collection_date)
+  if (length(hit)) {
+    rows$total_ref_jsons[hit[1L]] <- total_ref_jsons
+  } else {
+    rows <- data.table::rbindlist(
+      list(
+        rows,
+        data.table::data.table(
+          completed_collection_date = completed_collection_date,
+          total_ref_jsons = total_ref_jsons
+        )
+      ),
+      fill = TRUE
+    )
+  }
+  .litxr_write_collection_fetch_history(cfg, collection_id, rows)
+  invisible(total_ref_jsons)
+}
+
+.litxr_latest_collection_fetch_completed_date <- function(cfg, collection_id) {
+  rows <- .litxr_read_collection_fetch_history(cfg, collection_id)
+  if (!nrow(rows)) {
+    return(NA_character_)
+  }
+  as.character(rows$completed_collection_date[[nrow(rows)]])
+}
+
 .litxr_project_llm_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "digest", "llm")
 }
@@ -96,10 +237,6 @@
 
 .litxr_project_ref_identity_index_path <- function(cfg) {
   file.path(.litxr_project_index_dir(cfg), "ref_identity_map.fst")
-}
-
-.litxr_sync_state_index_path <- function(cfg) {
-  file.path(.litxr_project_index_dir(cfg), "sync_state.fst")
 }
 
 .litxr_ensure_project_index_dir <- function(cfg) {
@@ -282,107 +419,6 @@
   file.path(.litxr_project_index_dir(cfg), "enrichment_status.fst")
 }
 
-.litxr_empty_sync_state <- function() {
-  data.table::data.table(
-    collection_id = character(),
-    remote_channel = character(),
-    sync_type = character(),
-    status = character(),
-    started_at = character(),
-    completed_at = character(),
-    query = character(),
-    range_from = character(),
-    range_to = character(),
-    fetched_from = character(),
-    fetched_to = character(),
-    page_start = integer(),
-    page_size = integer(),
-    records_fetched = integer(),
-    records_after = integer(),
-    notes = character()
-  )
-}
-
-.litxr_make_sync_state_row <- function(
-  collection_id,
-  remote_channel,
-  sync_type,
-  status,
-  started_at,
-  completed_at,
-  query = NA_character_,
-  range_from = NA_character_,
-  range_to = NA_character_,
-  fetched_from = NA_character_,
-  fetched_to = NA_character_,
-  page_start = NA_integer_,
-  page_size = NA_integer_,
-  records_fetched = NA_integer_,
-  records_after = NA_integer_,
-  notes = NA_character_
-) {
-  data.table::data.table(
-    collection_id = as.character(collection_id %||% NA_character_),
-    remote_channel = as.character(remote_channel %||% NA_character_),
-    sync_type = as.character(sync_type %||% NA_character_),
-    status = as.character(status %||% NA_character_),
-    started_at = as.character(started_at %||% NA_character_),
-    completed_at = as.character(completed_at %||% NA_character_),
-    query = as.character(query %||% NA_character_),
-    range_from = as.character(range_from %||% NA_character_),
-    range_to = as.character(range_to %||% NA_character_),
-    fetched_from = as.character(fetched_from %||% NA_character_),
-    fetched_to = as.character(fetched_to %||% NA_character_),
-    page_start = as.integer(page_start %||% NA_integer_),
-    page_size = as.integer(page_size %||% NA_integer_),
-    records_fetched = as.integer(records_fetched %||% NA_integer_),
-    records_after = as.integer(records_after %||% NA_integer_),
-    notes = as.character(notes %||% NA_character_)
-  )
-}
-
-.litxr_infer_collection_sync_state <- function(cfg, collection) {
-  local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-  paths <- .litxr_journal_paths(local_path)
-
-  record_count <- 0L
-  timestamp <- NA_character_
-  notes <- character()
-
-  if (dir.exists(paths$json)) {
-    json_files <- sort(list.files(paths$json, pattern = "\\.json$", full.names = TRUE))
-    json_files <- json_files[basename(json_files) != "_upsert_conflicts.jsonl"]
-    if (length(json_files)) {
-      info <- file.info(json_files)
-      timestamp <- format(as.POSIXct(max(info$mtime, na.rm = TRUE), tz = "UTC"), tz = "UTC", usetz = TRUE)
-      record_count <- length(json_files)
-      notes <- c(notes, "inferred_from=json_files")
-    }
-  }
-
-  if (!isTRUE(record_count > 0L) || is.na(timestamp) || !nzchar(timestamp)) {
-    return(.litxr_empty_sync_state())
-  }
-
-  .litxr_make_sync_state_row(
-    collection_id = collection$collection_id,
-    remote_channel = collection$remote_channel,
-    sync_type = "inferred_rebuild",
-    status = "inferred",
-    started_at = timestamp,
-    completed_at = timestamp,
-    query = .litxr_sync_query_text(collection),
-    range_from = NA_character_,
-    range_to = NA_character_,
-    fetched_from = NA_character_,
-    fetched_to = NA_character_,
-    page_start = NA_integer_,
-    page_size = collection$sync$rows %||% if (identical(collection$remote_channel, "crossref")) 1000L else 100L,
-    records_fetched = as.integer(record_count),
-    records_after = as.integer(record_count),
-    notes = paste(notes, collapse = ";")
-  )
-}
 
 .litxr_records_date_range <- function(records) {
   if (is.null(records) || !nrow(records)) {
@@ -412,30 +448,6 @@
   }
 
   list(from = NA_character_, to = NA_character_)
-}
-
-.litxr_read_sync_state_index <- function(cfg) {
-  path <- .litxr_sync_state_index_path(cfg)
-  if (!file.exists(path)) {
-    return(.litxr_empty_sync_state())
-  }
-  fst::read_fst(path, as.data.table = TRUE)
-}
-
-.litxr_write_sync_state_index <- function(cfg, rows) {
-  .litxr_ensure_project_index_dir(cfg)
-  if (is.null(rows) || !nrow(rows)) {
-    rows <- .litxr_empty_sync_state()
-  }
-  fst::write_fst(as.data.frame(rows), .litxr_sync_state_index_path(cfg))
-  invisible(.litxr_sync_state_index_path(cfg))
-}
-
-.litxr_append_sync_state <- function(cfg, row) {
-  existing <- .litxr_read_sync_state_index(cfg)
-  incoming <- if (is.null(row) || !nrow(row)) .litxr_empty_sync_state() else row
-  merged <- data.table::rbindlist(list(existing, incoming), fill = TRUE)
-  .litxr_write_sync_state_index(cfg, merged)
 }
 
 .litxr_sync_query_text <- function(journal) {

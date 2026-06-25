@@ -22,7 +22,7 @@ litxr_find_standardized_findings(
 \item{paper_type}{Optional paper-type filter.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Filtered \code{data.table}.

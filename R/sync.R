@@ -6,7 +6,7 @@
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of synced records.
 #' @export
@@ -38,24 +38,6 @@ litxr_sync_collection <- function(
     refresh_entity_indexes = refresh_entity_indexes,
     refresh_ref_identity_map = refresh_ref_identity_map
   )
-  .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
-    collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
-    remote_channel = journal$remote_channel,
-    sync_type = "full",
-    status = "success",
-    started_at = started_at,
-    completed_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
-    query = .litxr_sync_query_text(journal),
-    range_from = NA_character_,
-    range_to = NA_character_,
-    fetched_from = .litxr_records_date_range(incoming)$from,
-    fetched_to = .litxr_records_date_range(incoming)$to,
-    page_start = if (identical(journal$remote_channel, "arxiv")) journal$sync$start %||% 0L else NA_integer_,
-    page_size = journal$sync$rows %||% if (identical(journal$remote_channel, "crossref")) 1000L else 100L,
-    records_fetched = nrow(incoming),
-    records_after = nrow(records),
-    notes = ""
-  ))
   records
 }
 
@@ -66,7 +48,7 @@ litxr_sync_collection <- function(
 #' @param journal_id Collection identifier from `config.yaml`. The argument name
 #'   is kept for backward compatibility.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of synced records.
 #' @export
@@ -77,7 +59,7 @@ litxr_sync_journal <- function(journal_id, config = NULL) {
 #' Sync all configured collections
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Named list of synced `data.table`s.
 #' @export
@@ -110,7 +92,7 @@ litxr_sync_all <- function(config = NULL) {
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of local records.
 #' @export
@@ -130,7 +112,7 @@ litxr_read_collection <- function(collection_id, config = NULL) {
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param by One of `"day"`, `"month"`, or `"year"`.
 #'
 #' @return `data.table` with `date` and `n`, plus attributes
@@ -189,7 +171,7 @@ litxr_collection_date_stats <- function(collection_id, config = NULL, by = c("da
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param model Exact embedding model name used when building the cache.
 #'
@@ -240,7 +222,7 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param model Exact embedding model name used when building the cache.
 #'
@@ -366,7 +348,7 @@ litxr_diagnose_embedding_cache <- function(collection_id, config = NULL, field =
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param model Exact embedding model name used when building the cache.
 #' @param preserve_delta Whether to keep existing delta shards.
@@ -422,7 +404,7 @@ litxr_reset_embedding_cache <- function(
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param field Embedded text field.
 #' @param model Exact embedding model name used when building the cache.
 #' @param by One of `"day"`, `"month"`, or `"year"`.
@@ -508,76 +490,6 @@ litxr_embedding_date_stats <- function(
   out
 }
 
-#' Compute the next arXiv repair date range
-#'
-#' Returns the next day range to pass to `scripts/repair_arxiv_range.R`.
-#' `basis = "sync_state"` uses the latest successful arXiv `repair_range_day`
-#' row. `basis = "collection_index"` uses the maximum `pub_date` currently
-#' visible in the collection index.
-#'
-#' @param collection_id Collection identifier from `config.yaml`.
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
-#' @param basis Whether to use the sync ledger or collection index to choose the
-#'   latest completed date.
-#' @param date_to Last date to include in the proposed repair range. Defaults to
-#'   `Sys.Date()`.
-#'
-#' @return One-row `data.table` with `collection_id`, `basis`, `latest_date`,
-#'   `date_from`, `date_to`, and `needs_repair`.
-#' @export
-litxr_next_arxiv_repair_range <- function(
-  collection_id,
-  config = NULL,
-  basis = c("sync_state", "collection_index"),
-  date_to = Sys.Date()
-) {
-  basis <- match.arg(basis)
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, collection_id)
-  if (!identical(journal$remote_channel, "arxiv")) {
-    stop("`litxr_next_arxiv_repair_range()` only supports arXiv collections.", call. = FALSE)
-  }
-
-  date_to <- as.Date(date_to)
-  if (is.na(date_to)) {
-    stop("`date_to` must be parseable as a Date.", call. = FALSE)
-  }
-
-  latest_date <- switch(
-    basis,
-    sync_state = {
-      state <- litxr_read_sync_state(config = cfg, collection_id = collection_id)
-      done <- state[
-        state$remote_channel == "arxiv" &
-          state$sync_type == "repair_range_day" &
-          state$status == "success" &
-          !is.na(state$range_to),
-      ]
-      dates <- suppressWarnings(as.Date(done$range_to))
-      dates <- dates[!is.na(dates)]
-      if (length(dates)) max(dates) else as.Date(NA)
-    },
-    collection_index = {
-      stats_day <- litxr_collection_date_stats(collection_id, cfg, by = "day")
-      dates <- suppressWarnings(as.Date(stats_day$date))
-      dates <- dates[!is.na(dates)]
-      if (length(dates)) max(dates) else as.Date(NA)
-    }
-  )
-
-  date_from <- if (is.na(latest_date)) as.Date(NA) else latest_date + 1L
-  data.table::data.table(
-    collection_id = collection_id,
-    basis = basis,
-    latest_date = latest_date,
-    date_from = date_from,
-    date_to = date_to,
-    needs_repair = !is.na(date_from) && date_from <= date_to
-  )
-}
-
 #' Read locally stored records for one journal
 #'
 #' Backward-compatible wrapper around `litxr_read_collection()`.
@@ -585,7 +497,7 @@ litxr_next_arxiv_repair_range <- function(
 #' @param journal_id Collection identifier from `config.yaml`. The argument name
 #'   is kept for backward compatibility.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of local records.
 #' @export
@@ -601,7 +513,7 @@ litxr_read_journal <- function(journal_id, config = NULL) {
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param search_query Optional replacement query for this repair run.
 #' @param submitted_from Optional lower bound date/time for arXiv submittedDate.
 #' @param submitted_to Optional upper bound date/time for arXiv submittedDate.
@@ -651,24 +563,6 @@ litxr_repair_collection <- function(
     cfg = cfg,
     refresh_entity_indexes = refresh_entity_indexes
   )
-  .litxr_append_sync_state(cfg, .litxr_make_sync_state_row(
-    collection_id = if (!is.null(journal$collection_id)) journal$collection_id else journal$journal_id,
-    remote_channel = journal$remote_channel,
-    sync_type = "repair",
-    status = "success",
-    started_at = started_at,
-    completed_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
-    query = .litxr_sync_query_text(journal),
-    range_from = submitted_from %||% NA_character_,
-    range_to = submitted_to %||% NA_character_,
-    fetched_from = .litxr_records_date_range(incoming)$from,
-    fetched_to = .litxr_records_date_range(incoming)$to,
-    page_start = if (identical(journal$remote_channel, "arxiv")) journal$sync$start %||% 0L else NA_integer_,
-    page_size = journal$sync$rows %||% if (identical(journal$remote_channel, "crossref")) 1000L else 100L,
-    records_fetched = nrow(incoming),
-    records_after = nrow(records),
-    notes = ""
-  ))
   records
 }
 
@@ -679,7 +573,7 @@ litxr_repair_collection <- function(
 #' @param journal_id Collection identifier from `config.yaml`. The argument name
 #'   is kept for backward compatibility.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param search_query Optional replacement query for this repair run.
 #' @param submitted_from Optional lower bound date/time for arXiv submittedDate.
 #' @param submitted_to Optional upper bound date/time for arXiv submittedDate.
@@ -714,7 +608,7 @@ litxr_repair_journal <- function(
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the rebuilt fst index path.
 #' @export
@@ -737,7 +631,7 @@ litxr_rebuild_collection_index <- function(collection_id, config = NULL) {
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the refreshed fst index path.
 #' @export
@@ -755,7 +649,7 @@ litxr_refresh_collection_index <- function(collection_id, config = NULL) {
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param refresh_project_index Whether to refresh project-level canonical
 #'   reference indexes after compaction.
 #'
@@ -779,7 +673,7 @@ litxr_compact_collection_index <- function(collection_id, config = NULL, refresh
 #' @param journal_id Collection identifier from `config.yaml`. The argument name
 #'   is kept for backward compatibility.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the rebuilt fst index path.
 #' @export
@@ -816,7 +710,7 @@ litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {
 #' @param ref_id Reference identifier.
 #' @param digest Named list containing digest fields.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param keep_history Whether to archive the previous current digest into
 #'   `project.data_root/llm_history/` before replacing it.
 #' @param bump_revision Whether to increment the digest revision when an
@@ -888,7 +782,7 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history =
 #' @param ref_id Reference identifier.
 #' @param builder Function taking arguments `ref`, `markdown`, and `template`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param overwrite Whether to overwrite an existing digest.
 #' @param write Whether to write the digest to disk. If `FALSE`, returns the
 #'   validated digest without writing.
@@ -945,7 +839,7 @@ litxr_build_llm_digest <- function(ref_id, builder, config = NULL, overwrite = F
 #'
 #' @param builder Function taking arguments `ref`, `markdown`, and `template`.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param ref_ids Optional explicit character vector of reference ids to build.
 #' @param overwrite Whether to overwrite existing digests.
 #' @param limit Optional maximum number of digests to build in this run.
@@ -989,7 +883,7 @@ litxr_build_llm_digests <- function(builder, config = NULL, ref_ids = NULL, over
 #'
 #' @param ref_id Reference identifier.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Named list digest, or `NULL` if not found.
 #' @export
@@ -1008,7 +902,7 @@ litxr_read_llm_digest <- function(ref_id, config = NULL) {
 #' Read all project-level LLM digests
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #'
 #' @return `data.table` of digest summaries with selected structured fields.
@@ -1085,7 +979,7 @@ litxr_read_llm_digests <- function(config = NULL, ref_ids = NULL, columns = NULL
 #' @param collection_id Optional collection membership filter via `ref_id`.
 #' @param ref_id Optional direct reference id filter.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Filtered `data.table` of digests.
 #' @export
@@ -1157,7 +1051,7 @@ litxr_find_llm <- function(query = NULL, collection_id = NULL, ref_id = NULL, co
 #'
 #' @param ref_id Reference identifier.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` describing available current and archived digest
 #'   revisions.
@@ -1232,7 +1126,7 @@ litxr_list_llm_digest_revisions <- function(ref_id, config = NULL) {
 #'
 #' @param ref_id Reference identifier.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param include_current Whether to include the current digest in the returned
 #'   history table.
 #'
@@ -1271,7 +1165,7 @@ litxr_read_llm_digest_history <- function(ref_id, config = NULL, include_current
 #' @param ref_id Reference identifier.
 #' @param text Markdown text.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Invisibly returns the written markdown path.
 #' @export
@@ -1289,7 +1183,7 @@ litxr_write_md <- function(ref_id, text, config = NULL) {
 #'
 #' @param ref_id Reference identifier.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return Character scalar markdown text, or `NULL` if not found.
 #' @export
@@ -1421,7 +1315,7 @@ litxr_validate_llm_digest <- function(digest) {
 #' Read project-level enrichment status
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` with one row per reference and enrichment flags.
 #' @export
@@ -1431,79 +1325,6 @@ litxr_read_enrichment_status <- function(config = NULL) {
   .litxr_read_enrichment_status_index(cfg)
 }
 
-#' Read project-level sync state
-#'
-#' Returns the project sync ledger used to track completed sync and repair runs.
-#' This state lives under `project.data_root/index/` and is separate from
-#' `config.yaml`.
-#'
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
-#' @param collection_id Optional collection filter.
-#'
-#' @return `data.table` of sync ledger rows.
-#' @export
-litxr_read_sync_state <- function(config = NULL, collection_id = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  out <- .litxr_read_sync_state_index(cfg)
-  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
-    out <- out[out$collection_id == as.character(collection_id[[1]]), ]
-  }
-  out
-}
-
-#' Rebuild a first-pass sync ledger from existing local data
-#'
-#' Infers one sync ledger row per collection from existing local storage and
-#' index file timestamps. This is intended for backfilling `sync_state.fst` when
-#' local data already exists from older package versions that did not record
-#' sync history.
-#'
-#' The inferred rows are approximate. They record that local data exists and
-#' when the local collection index was last modified, but they do not recover
-#' exact remote cursors, arXiv day windows, or original sync arguments.
-#'
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
-#' @param overwrite Whether to replace the existing sync ledger instead of only
-#'   adding inferred rows for collections not already present.
-#'
-#' @return `data.table` of the rebuilt sync ledger.
-#' @export
-litxr_rebuild_sync_state <- function(config = NULL, overwrite = FALSE) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-
-  collections <- .litxr_config_collections(cfg)
-  existing <- .litxr_read_sync_state_index(cfg)
-  inferred <- lapply(collections, function(collection) {
-    .litxr_infer_collection_sync_state(cfg, collection)
-  })
-  inferred <- data.table::rbindlist(inferred, fill = TRUE)
-
-  if (!nrow(inferred)) {
-    if (isTRUE(overwrite)) {
-      .litxr_write_sync_state_index(cfg, .litxr_empty_sync_state())
-      return(.litxr_empty_sync_state())
-    }
-    return(existing)
-  }
-
-  if (isTRUE(overwrite) || !nrow(existing)) {
-    out <- inferred
-  } else {
-    covered <- unique(existing$collection_id)
-    out <- data.table::rbindlist(
-      list(existing, inferred[!(inferred$collection_id %in% covered), ]),
-      fill = TRUE
-    )
-  }
-
-  .litxr_write_sync_state_index(cfg, out)
-  out
-}
-
 #' List enrichment candidates and exclusion reasons
 #'
 #' Combines the canonical reference store, collection memberships, and
@@ -1511,7 +1332,7 @@ litxr_rebuild_sync_state <- function(config = NULL, overwrite = FALSE) {
 #' for digest building and why others are excluded.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param collection_id Optional collection membership filter.
 #' @param ref_ids Optional character vector of reference ids to keep.
 #' @param include_ready Whether to keep rows that are currently ready for digest
@@ -1649,7 +1470,7 @@ litxr_list_enrichment_candidates <- function(config = NULL, collection_id = NULL
 #'
 #' @param dois Character vector of DOIs.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param auto_register Whether to auto-register missing collections into
 #'   `config.yaml`.
 #'
@@ -1817,7 +1638,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
 #' @param arxiv_ref_id Canonical arXiv ref id or bare arXiv id.
 #' @param doi DOI string, DOI URL, or canonical `doi:` ref id.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param add_doi Whether to ingest the DOI from Crossref when it is not already
 #'   present locally.
 #' @param auto_register Whether missing Crossref collections may be
@@ -1944,7 +1765,7 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
 #' @param refs A `data.frame` or `data.table` of normalized reference fields.
 #' @param collection_id Target collection identifier.
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #' @param auto_register Whether to create the target collection automatically
 #'   when it does not already exist.
 #' @param collection_title Optional collection title used when auto-registering.

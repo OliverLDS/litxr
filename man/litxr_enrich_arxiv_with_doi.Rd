@@ -18,7 +18,7 @@ litxr_enrich_arxiv_with_doi(
 \item{doi}{DOI string, DOI URL, or canonical \verb{doi:} ref id.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{add_doi}{Whether to ingest the DOI from Crossref when it is not already
 present locally.}

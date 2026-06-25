@@ -8,7 +8,7 @@ litxr_read_ref_identity_map(config = NULL)
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 \code{data.table} mapping surface \code{ref_id} values to internal

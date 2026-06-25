@@ -20,10 +20,10 @@ Focused guides live under [`docs/`](docs):
 
 ## Quick Start
 
-Set `LITXR_CONFIG` in `.Renviron` and restart R:
+Set `LITXR_DATA_ROOT` in `.Renviron` and restart R:
 
 ```sh
-LITXR_CONFIG=/absolute/path/to/project/config.yaml
+LITXR_DATA_ROOT=/absolute/path/to/shared/litxr/data
 ```
 
 Then initialize and inspect the project config:

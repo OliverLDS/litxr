@@ -12,7 +12,7 @@ litxr_write_md(ref_id, text, config = NULL)
 \item{text}{Markdown text.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Invisibly returns the written markdown path.

@@ -1,29 +1,29 @@
-#' Return the litxr config path from `LITXR_CONFIG`
+#' Return the litxr config path
 #'
-#' `litxr` reads the config path from the `LITXR_CONFIG` environment variable.
-#' Users should set that variable in `.Renviron`.
+#' `litxr` resolves the config file as `file.path(LITXR_DATA_ROOT,
+#' "config.yaml")`.
 #'
 #' @return Character scalar path.
 #' @export
 litxr_config_path <- function() {
-  env_path <- Sys.getenv("LITXR_CONFIG", unset = "")
-  if (!nzchar(env_path)) {
+  data_root <- Sys.getenv("LITXR_DATA_ROOT", unset = "")
+  if (!nzchar(data_root)) {
     stop(
-      "LITXR_CONFIG is not set. Add `LITXR_CONFIG=/absolute/path/to/config.yaml` ",
+      "LITXR_DATA_ROOT is not set. Add `LITXR_DATA_ROOT=/absolute/path/to/shared/data/root` ",
       "to `.Renviron` and restart R.",
       call. = FALSE
     )
   }
 
-  normalizePath(env_path, winslash = "/", mustWork = FALSE)
+  normalizePath(file.path(data_root, "config.yaml"), winslash = "/", mustWork = FALSE)
 }
 
 #' Initialize a litxr project
 #'
-#' Reads the target config path from `LITXR_CONFIG`. If the file does not exist,
-#' `litxr_init()` writes a starter `config.yaml` there. If the file already
-#' exists, it refuses to overwrite it and instructs the user to edit that file
-#' manually. After creating the file, it reminds the user to update
+#' Reads the target config path from `LITXR_DATA_ROOT`. If the file does not
+#' exist, `litxr_init()` writes a starter `config.yaml` there. If the file
+#' already exists, it refuses to overwrite it and instructs the user to edit
+#' that file manually. After creating the file, it reminds the user to update
 #' `project.data_root` and each collection `local_path`.
 #'
 #' @return Invisibly returns the config path.
@@ -58,7 +58,7 @@ litxr_init <- function() {
 #' Read a litxr config file
 #'
 #' @param path Optional direct path to a config file. When omitted, `litxr`
-#'   reads `LITXR_CONFIG`.
+#'   reads `LITXR_DATA_ROOT`.
 #'
 #' @return Parsed config list.
 #' @export
@@ -86,7 +86,7 @@ litxr_read_config <- function(path = NULL) {
 #' List collections registered in the config
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of collection registrations.
 #' @export
@@ -113,7 +113,7 @@ litxr_list_collections <- function(config = NULL) {
 #' collection config.
 #'
 #' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_CONFIG`.
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
 #'
 #' @return `data.table` of collection registrations with legacy journal column
 #'   names.

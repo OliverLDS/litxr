@@ -24,7 +24,7 @@ Under `project.data_root/`:
 - `ref_local_pending.fst`: unresolved local bibliographic input
 - `index/ref_identity_map.fst`: narrow identity routing output used only when a
   runtime identity view is needed
-- `index/sync_state.fst`: sync and repair history
+- `log/<collection>_collection_fetch_history.tsv`: collection-level fetch history
 - `embeddings/`: cached embedding metadata, matrices, and manifests
 - `llm/`: project-level structured digests keyed by `ref_id`
 - `md/`: project-level markdown keyed by `ref_id`
@@ -67,8 +67,8 @@ Recommended model:
 - upsert into local storage
 - export BibTeX from the local store
 
-Crossref sync history is recorded in `sync_state.fst`, but automatic incremental
-`from-update-date` sync is not implemented yet.
+Crossref sync history is recorded in `log/doi_collection_fetch_latest.tsv`.
+Incremental DOI sync uses the latest-update log as its cutoff when present.
 
 ## arXiv
 
@@ -92,19 +92,13 @@ Practical notes:
 Helpers:
 
 - `litxr_repair_collection(..., submitted_from = ..., submitted_to = ...)`
-- `litxr_next_arxiv_repair_range()`
-- `scripts/repair_arxiv_range.R`
-- `scripts/repair_arxiv_latest.R`
+- `scripts/sync_arxiv_collection_json.R`
 
-`scripts/repair_arxiv_range.R` records successful day-level repair windows in
-`sync_state.fst` and skips already completed days unless `--force` is used. It
-writes fetched pages directly into the collection-local JSON store and updates
-the narrow project routing outputs after the run. There is no durable
-`references_delta.fst` or project-wide compatibility projection in the target
-model. Use `--flush-each-day` only when day-by-day visibility is more important
-than speed. By default, it refreshes only the collection-local state; use
-`--refresh-project-index` when narrow project routing outputs must be refreshed
-during the repair run.
+`scripts/sync_arxiv_collection_json.R` records successful day-level fetches in
+`log/<collection>_collection_fetch_history.tsv` and skips already completed days
+unless `--force` is used. It writes fetched pages directly into the collection
+JSON store. There is no durable `references_delta.fst` or project-wide
+compatibility projection in the target model.
 
 Use `litxr_refresh_collection_index()` when recently written JSON files need to
 be merged into the existing `fst` index without a full JSON scan. Use
@@ -120,18 +114,16 @@ attr(stats_day, "date_max")
 attr(stats_day, "missing_dates")
 ```
 
-To plan the next repair window through today, use either the sync ledger or the
-collection index explicitly:
+To plan the next arXiv sync window through today, use the fetch history log:
 
 ```r
-litxr_next_arxiv_repair_range("arxiv_cs_ai", cfg, basis = "sync_state")
-litxr_next_arxiv_repair_range("arxiv_cs_ai", cfg, basis = "collection_index")
+litxr:::.litxr_latest_collection_fetch_completed_date(cfg, "arxiv_cs_ai")
 ```
 
 For shell-driven updates from the next collection-index date through today:
 
 ```sh
-Rscript scripts/repair_arxiv_latest.R --collection-id arxiv_cs_ai
+Rscript scripts/sync_arxiv_collection_json.R --collection arxiv_cs_ai
 ```
 
 ## DOI And Manual Ingest

@@ -13,7 +13,7 @@ litxr_list_enrichment_candidates(
 }
 \arguments{
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{collection_id}{Optional collection membership filter.}
 

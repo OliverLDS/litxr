@@ -10,7 +10,7 @@ litxr_list_llm_digest_revisions(ref_id, config = NULL)
 \item{ref_id}{Reference identifier.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 \code{data.table} describing available current and archived digest

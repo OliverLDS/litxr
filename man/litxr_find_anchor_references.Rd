@@ -19,7 +19,7 @@ litxr_find_anchor_references(
 \item{anchor_rank}{Optional exact \code{anchor_rank} filter.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Filtered \code{data.table}.

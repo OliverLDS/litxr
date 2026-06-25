@@ -2,7 +2,7 @@
 % Please edit documentation in R/config.R
 \name{litxr_config_path}
 \alias{litxr_config_path}
-\title{Return the litxr config path from \code{LITXR_CONFIG}}
+\title{Return the litxr config path}
 \usage{
 litxr_config_path()
 }
@@ -10,6 +10,5 @@ litxr_config_path()
 Character scalar path.
 }
 \description{
-\code{litxr} reads the config path from the \code{LITXR_CONFIG} environment variable.
-Users should set that variable in \code{.Renviron}.
+\code{litxr} resolves the config file as \code{file.path(LITXR_DATA_ROOT, "config.yaml")}.
 }

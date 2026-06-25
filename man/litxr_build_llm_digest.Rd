@@ -18,7 +18,7 @@ litxr_build_llm_digest(
 \item{builder}{Function taking arguments \code{ref}, \code{markdown}, and \code{template}.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 
 \item{overwrite}{Whether to overwrite an existing digest.}
 

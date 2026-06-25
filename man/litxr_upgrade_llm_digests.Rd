@@ -11,7 +11,7 @@ litxr_upgrade_llm_digests(ref_ids = NULL, config = NULL)
 all existing project-level digests are upgraded.}
 
 \item{config}{Optional parsed config list or a direct config path. When
-omitted, \code{litxr} reads \code{LITXR_CONFIG}.}
+omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 }
 \value{
 Invisibly returns the upgraded ref ids.
