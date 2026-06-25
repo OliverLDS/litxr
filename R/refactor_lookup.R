@@ -441,30 +441,25 @@ litxr_refactor_diagnostics <- function(config = NULL, oversized_mb = 25) {
   .litxr_refactor_diagnostics(cfg, oversized_mb = oversized_mb)
 }
 
-#' Migrate current stores onto the thin v0.1.0 refactor indexes
+#' Sync thin reference stores from local JSON
 #'
-#' Rebuilds collection projection indexes, refreshes project projection caches,
-#' and rebuilds identity/entity indexes so mixed older stores move onto the current
-#' thin-index architecture without changing source JSON payloads.
+#' Rebuilds the thin canonical reference stores directly from local JSON-backed
+#' collection records.
 #'
 #' @param config Optional parsed config list or a direct config path. When
 #'   omitted, `litxr` reads `LITXR_CONFIG`.
-#' @param collection_ids Optional character vector of collection ids to refresh.
+#' @param collection_ids Optional character vector of collection ids to sync.
 #'   Default is all configured collections.
-#' @param rebuild_collection_indexes Whether to rebuild each selected collection
-#'   index from `ref_json/` before refreshing project-level caches.
+#' @param json_mtime_after Optional timestamp. When supplied, only JSON files
+#'   with mtime after this timestamp are read and the thin stores are updated
+#'   incrementally.
 #'
-#' @return Named list describing refreshed collections, written index paths, and
-#'   resulting row counts.
+#' @return Named list describing written index paths, row counts, and diffs.
 #' @export
-litxr_migrate_refactor_indexes <- function(config = NULL, collection_ids = NULL, rebuild_collection_indexes = TRUE) {
+litxr_sync_thin_ref_stores_from_json <- function(config = NULL, collection_ids = NULL, json_mtime_after = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_migrate_refactor_indexes(
-    cfg,
-    collection_ids = collection_ids,
-    rebuild_collection_indexes = rebuild_collection_indexes
-  )
+  .litxr_sync_thin_ref_stores_from_json(cfg, collection_ids = collection_ids, json_mtime_after = json_mtime_after)
 }
 
 #' Find references in the canonical project-level store

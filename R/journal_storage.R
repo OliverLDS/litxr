@@ -649,6 +649,8 @@
 
 .litxr_read_journal_records_from_json <- function(
   local_path,
+  json_files = NULL,
+  modified_after = NULL,
   chunk_size = getOption("litxr.json_read_chunk_size", 2000L)
 ) {
   paths <- .litxr_journal_paths(local_path)
@@ -657,7 +659,32 @@
     return(data.table::data.table())
   }
 
-  files <- sort(list.files(json_dir, pattern = "\\.json$", full.names = TRUE))
+  files <- if (is.null(json_files)) {
+    sort(list.files(json_dir, pattern = "\\.json$", full.names = TRUE))
+  } else {
+    unique(as.character(json_files))
+  }
+  if (!length(files)) {
+    return(data.table::data.table())
+  }
+
+  files <- files[file.exists(files)]
+  if (!length(files)) {
+    return(data.table::data.table())
+  }
+
+  if (!is.null(modified_after)) {
+    if (inherits(modified_after, "POSIXt")) {
+      cutoff <- as.POSIXct(modified_after, tz = "UTC")
+    } else {
+      cutoff <- suppressWarnings(as.POSIXct(modified_after, tz = "UTC"))
+    }
+    if (!is.na(cutoff)) {
+      info <- file.info(files)
+      keep <- !is.na(info$mtime) & as.POSIXct(info$mtime, tz = "UTC") > cutoff
+      files <- files[keep]
+    }
+  }
   if (!length(files)) {
     return(data.table::data.table())
   }

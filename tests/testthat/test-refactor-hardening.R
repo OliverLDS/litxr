@@ -113,7 +113,7 @@ test_that("refactor hardening paths work through identity/entity layer", {
   expect_true(all(c("summary", "reference_cache", "entity_indexes", "entity_status") %in% names(diag)))
   expect_equal(nrow(diag$summary), 1L)
 
-  migration <- litxr::litxr_migrate_refactor_indexes(cfg)
+  migration <- litxr::litxr_sync_thin_ref_stores_from_json(cfg)
   expect_true(is.list(migration))
   expect_true(any(migration$selected_collection_ids == "arxiv_cs_ai"))
   expect_true(any(migration$selected_collection_ids == journal$journal_id))
@@ -123,11 +123,33 @@ test_that("refactor hardening paths work through identity/entity layer", {
   expect_true("ref_local_pending" %in% names(migration$project_paths))
 
   diag_script <- find_script("scripts", "diagnose_refactor_store.R")
-  migrate_script <- find_script("scripts", "migrate_refactor_indexes.R")
+  migrate_script <- find_script("scripts", "sync_thin_ref_stores.R")
   human_enrich_script <- find_script("scripts", "human", "enrich_arxiv_with_doi.R")
   expect_silent(parse(file = diag_script))
   expect_silent(parse(file = migrate_script))
   expect_silent(parse(file = human_enrich_script))
+
+  arxiv_with_doi <- make_record(
+    "arxiv:2501.00004",
+    "arxiv",
+    "2501.00004",
+    "ArXiv Example Paper Four",
+    arxiv_collection$collection_id,
+    arxiv_collection$title
+  )
+  arxiv_with_doi$doi[[1]] <- "10.9999/misfiled-arxiv-doi"
+  arxiv_with_doi$url_landing[[1]] <- "https://arxiv.org/abs/2501.00004v1"
+  arxiv_with_doi$url_pdf[[1]] <- "https://arxiv.org/pdf/2501.00004v1"
+  arxiv_with_doi$arxiv_version[[1]] <- 1L
+  arxiv_with_doi$arxiv_primary_category[[1]] <- "cs.AI"
+  arxiv_with_doi$arxiv_categories_raw[[1]] <- "cs.AI"
+  litxr:::.litxr_write_journal_records(arxiv_with_doi, arxiv_local_path, arxiv_collection, cfg = cfg)
+
+  migration2 <- litxr::litxr_sync_thin_ref_stores_from_json(cfg, collection_ids = c("arxiv_cs_ai", journal$journal_id))
+  expect_true(file.exists(migration2$project_paths$ref_doi))
+  doi_thin <- fst::read_fst(migration2$project_paths$ref_doi, as.data.table = TRUE)
+  expect_true(any(doi_thin$doi == "10.1000/published-example"))
+  expect_false(any(doi_thin$doi == "10.9999/misfiled-arxiv-doi"))
 
   doi_record2 <- make_record(
     "doi:10.1000/published-example-two",

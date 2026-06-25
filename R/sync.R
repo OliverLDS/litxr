@@ -3732,15 +3732,10 @@ litxr_add_refs <- function(
   }
   if (!nrow(refs)) {
     out <- data.table::data.table(
+      arxiv_id = character(),
+      doi = character(),
       ref_id = character(),
-      entity_id = character(),
-      id_type = character(),
-      source = character(),
-      source_id = character(),
-      is_primary_ref_id = logical(),
-      is_published_form = logical(),
-      linked_at = character(),
-      status_code = character()
+      entity_id = character()
     )
     return(out)
   }
@@ -3748,23 +3743,6 @@ litxr_add_refs <- function(
   refs <- data.table::copy(refs)
   if (!("linked_doi_ref_id" %in% names(refs))) refs[["linked_doi_ref_id"]] <- rep(NA_character_, nrow(refs))
   if (!("linked_arxiv_ref_id" %in% names(refs))) refs[["linked_arxiv_ref_id"]] <- rep(NA_character_, nrow(refs))
-  ref_ids <- as.character(refs$ref_id)
-  ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
-  if (!length(ref_ids)) {
-    return(data.table::data.table(
-      ref_id = character(),
-      entity_id = character(),
-      id_type = character(),
-      source = character(),
-      source_id = character(),
-      is_primary_ref_id = logical(),
-      is_published_form = logical(),
-      linked_at = character(),
-      status_code = character()
-    ))
-  }
-
-  refs <- refs[!is.na(refs$ref_id) & nzchar(refs$ref_id), ]
   refs$ref_id <- as.character(refs$ref_id)
   refs$linked_doi_ref_id <- as.character(refs$linked_doi_ref_id)
   refs$linked_arxiv_ref_id <- as.character(refs$linked_arxiv_ref_id)
@@ -3775,69 +3753,55 @@ litxr_add_refs <- function(
 
   pair_links <- data.table::rbindlist(list(
     data.table::data.table(
-      arxiv_ref_id = refs$ref_id[arxiv_rows],
-      doi_ref_id = refs$linked_doi_ref_id[arxiv_rows]
+      arxiv_id = sub("^arxiv:", "", as.character(refs$ref_id[arxiv_rows])),
+      doi = sub("^doi:", "", as.character(refs$linked_doi_ref_id[arxiv_rows]))
     ),
     data.table::data.table(
-      arxiv_ref_id = refs$linked_arxiv_ref_id[doi_rows],
-      doi_ref_id = refs$ref_id[doi_rows]
+      arxiv_id = sub("^arxiv:", "", as.character(refs$linked_arxiv_ref_id[doi_rows])),
+      doi = sub("^doi:", "", as.character(refs$ref_id[doi_rows]))
     )
   ), fill = TRUE)
 
-  pair_links <- pair_links[!is.na(pair_links$arxiv_ref_id) & nzchar(pair_links$arxiv_ref_id) &
-    !is.na(pair_links$doi_ref_id) & nzchar(pair_links$doi_ref_id), ]
+  pair_links <- pair_links[!is.na(pair_links$arxiv_id) & nzchar(pair_links$arxiv_id) &
+    !is.na(pair_links$doi) & nzchar(pair_links$doi), ]
   if (nrow(pair_links)) {
-    pair_links[, pair_key := paste(arxiv_ref_id, doi_ref_id, sep = "\r")]
-    pair_links <- pair_links[!duplicated(pair_key), ]
+    pair_links <- data.table::as.data.table(pair_links)
+    pair_links[["pair_key"]] <- paste(pair_links$arxiv_id, pair_links$doi, sep = "\r")
+    pair_links <- pair_links[!duplicated(pair_links$pair_key), ]
 
-    arxiv_conflicts <- pair_links[, .(n = data.table::uniqueN(doi_ref_id)), by = arxiv_ref_id][n > 1L]
-    doi_conflicts <- pair_links[, .(n = data.table::uniqueN(arxiv_ref_id)), by = doi_ref_id][n > 1L]
+    arxiv_counts <- stats::aggregate(
+      doi ~ arxiv_id,
+      data = as.data.frame(pair_links[, c("arxiv_id", "doi"), with = FALSE]),
+      FUN = function(x) length(unique(x))
+    )
+    doi_counts <- stats::aggregate(
+      arxiv_id ~ doi,
+      data = as.data.frame(pair_links[, c("doi", "arxiv_id"), with = FALSE]),
+      FUN = function(x) length(unique(x))
+    )
+    arxiv_conflicts <- data.table::as.data.table(arxiv_counts[arxiv_counts$doi > 1L, , drop = FALSE])
+    doi_conflicts <- data.table::as.data.table(doi_counts[doi_counts$arxiv_id > 1L, , drop = FALSE])
     if (nrow(arxiv_conflicts) || nrow(doi_conflicts)) {
       conflict_text <- c(
-        if (nrow(arxiv_conflicts)) paste0("arxiv_ref_id(s): ", paste(arxiv_conflicts$arxiv_ref_id, collapse = ", ")),
-        if (nrow(doi_conflicts)) paste0("doi_ref_id(s): ", paste(doi_conflicts$doi_ref_id, collapse = ", "))
+        if (nrow(arxiv_conflicts)) paste0("arxiv_id(s): ", paste(arxiv_conflicts$arxiv_id, collapse = ", ")),
+        if (nrow(doi_conflicts)) paste0("doi(s): ", paste(doi_conflicts$doi, collapse = ", "))
       )
       stop("Ambiguous direct arxiv/doi link(s): ", paste(conflict_text, collapse = "; "), call. = FALSE)
     }
   }
 
-  pair_entity_map <- if (nrow(pair_links)) {
-    data.table::data.table(
-      ref_id = c(pair_links$arxiv_ref_id, pair_links$doi_ref_id),
-      entity_id = rep(.litxr_entity_id_from_root_ref(pair_links$arxiv_ref_id), 2L),
-      root_ref_id = rep(pair_links$arxiv_ref_id, 2L)
-    )
-  } else {
-    data.table::data.table(ref_id = character(), entity_id = character(), root_ref_id = character())
-  }
-  if (nrow(pair_entity_map)) {
-    pair_entity_map <- pair_entity_map[!duplicated(pair_entity_map$ref_id), ]
+  if (!nrow(pair_links)) {
+    return(data.table::data.table(
+      arxiv_id = character(),
+      doi = character(),
+      ref_id = character(),
+      entity_id = character()
+    ))
   }
 
-  linked_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
-  out <- data.table::data.table(
-    ref_id = refs$ref_id,
-    entity_id = pair_entity_map$entity_id[match(refs$ref_id, pair_entity_map$ref_id)],
-    id_type = ref_type,
-    source = if ("source" %in% names(refs)) as.character(refs$source) else rep(NA_character_, nrow(refs)),
-    source_id = if ("source_id" %in% names(refs)) as.character(refs$source_id) else rep(NA_character_, nrow(refs)),
-    is_primary_ref_id = FALSE,
-    is_published_form = ref_type == "doi",
-    linked_at = linked_at,
-    status_code = "active"
-  )
-  missing_entity <- is.na(out$entity_id) | !nzchar(out$entity_id)
-  if (any(missing_entity)) {
-    out$entity_id[missing_entity] <- vapply(out$ref_id[missing_entity], .litxr_entity_id_from_root_ref, character(1))
-  }
-  root_ref_id <- pair_entity_map$root_ref_id[match(out$ref_id, pair_entity_map$ref_id)]
-  root_ref_id[is.na(root_ref_id) | !nzchar(root_ref_id)] <- out$ref_id[is.na(root_ref_id) | !nzchar(root_ref_id)]
-  out[["is_primary_ref_id"]] <- out$ref_id == root_ref_id
-  data.table::setcolorder(out, c(
-    "ref_id", "entity_id", "id_type", "source", "source_id",
-    "is_primary_ref_id", "is_published_form", "linked_at", "status_code"
-  ))
-  out
+  pair_links$ref_id <- paste0("arxiv:", pair_links$arxiv_id)
+  pair_links$entity_id <- paste0("arxiv:", pair_links$arxiv_id)
+  pair_links[, c("arxiv_id", "doi", "ref_id", "entity_id"), with = FALSE]
 }
 
 .litxr_build_entities_index_fast <- function(cfg, refs = NULL, identities = NULL) {
@@ -4342,11 +4306,43 @@ litxr_add_refs <- function(
 
 .litxr_read_project_ref_identity_index <- function(cfg, columns = NULL) {
   path <- .litxr_project_ref_identity_index_path(cfg)
-  .litxr_read_fst_subset(path, columns = columns)
+  records <- .litxr_read_fst_subset(path, columns = columns)
+  records <- data.table::as.data.table(records)
+  if (!nrow(records)) {
+    return(data.table::data.table(
+      arxiv_id = character(),
+      doi = character(),
+      ref_id = character(),
+      entity_id = character()
+    ))
+  }
+  if (!("arxiv_id" %in% names(records))) records[["arxiv_id"]] <- rep(NA_character_, nrow(records))
+  if (!("doi" %in% names(records))) records[["doi"]] <- rep(NA_character_, nrow(records))
+  if (all(is.na(records$arxiv_id)) && all(is.na(records$doi)) && "ref_id" %in% names(records)) {
+    ref_ids <- as.character(records$ref_id)
+    arxiv_mask <- grepl("^arxiv:", ref_ids)
+    doi_mask <- grepl("^doi:", ref_ids)
+    records$arxiv_id[arxiv_mask] <- sub("^arxiv:", "", ref_ids[arxiv_mask])
+    records$doi[doi_mask] <- sub("^doi:", "", ref_ids[doi_mask])
+  }
+  records$arxiv_id <- as.character(records$arxiv_id)
+  records$doi <- as.character(records$doi)
+  records$ref_id <- ifelse(!is.na(records$arxiv_id) & nzchar(records$arxiv_id), paste0("arxiv:", records$arxiv_id), paste0("doi:", records$doi))
+  records$entity_id <- records$ref_id
+  records[, c("arxiv_id", "doi", "ref_id", "entity_id"), with = FALSE]
 }
 
 .litxr_write_project_ref_identity_index <- function(cfg, records) {
   .litxr_ensure_project_index_dir(cfg)
-  fst::write_fst(as.data.frame(records), .litxr_project_ref_identity_index_path(cfg))
+  records <- data.table::as.data.table(records)
+  keep <- intersect(c("arxiv_id", "doi"), names(records))
+  out <- if (length(keep)) records[, keep, with = FALSE] else data.table::data.table(arxiv_id = character(), doi = character())
+  if (!("arxiv_id" %in% names(out))) out[["arxiv_id"]] <- character()
+  if (!("doi" %in% names(out))) out[["doi"]] <- character()
+  out <- out[!is.na(out$arxiv_id) & nzchar(out$arxiv_id) & !is.na(out$doi) & nzchar(out$doi), ]
+  if (nrow(out)) {
+    out <- out[!duplicated(paste(out$arxiv_id, out$doi, sep = "\r")), ]
+  }
+  fst::write_fst(as.data.frame(out), .litxr_project_ref_identity_index_path(cfg))
   invisible(.litxr_project_ref_identity_index_path(cfg))
 }

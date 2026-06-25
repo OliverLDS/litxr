@@ -15,18 +15,17 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/migrate_refactor_indexes.R [--collection-id ID1,ID2,...] [--no-rebuild-collection-indexes]",
+      "  Rscript scripts/sync_thin_ref_stores.R [--collection-id ID1,ID2,...] [--json-mtime-after TIMESTAMP]",
       "",
       "Options:",
-      "  --collection-id IDS            Optional comma-separated collection ids to refresh.",
-      "                                 Default: all configured collections.",
-      "  --no-rebuild-collection-indexes",
-      "                                 Reuse current collection projection indexes",
-      "                                 instead of rebuilding them from ref_json.",
-      "  -h, --help                     Show this help message.",
+      "  --collection-id IDS   Optional comma-separated collection ids to sync.",
+      "                        Default: all configured collections.",
+      "  --json-mtime-after T  Optional cutoff timestamp. When supplied, only",
+      "                        JSON files modified after this time are used.",
+      "  -h, --help            Show this help message.",
       "",
       "Behavior:",
-      "  - Rebuilds thin refactor indexes for mixed or older stores.",
+      "  - Rebuilds the thin canonical reference stores directly from local JSON.",
       "  - Writes progress logs to stderr and compact JSON to stdout.",
       sep = "\n"
     )
@@ -37,7 +36,7 @@ parse_args <- function(args) {
   out <- list(
     help = FALSE,
     collection_ids = NULL,
-    rebuild_collection_indexes = TRUE
+    json_mtime_after = NULL
   )
   i <- 1L
   while (i <= length(args)) {
@@ -47,16 +46,17 @@ parse_args <- function(args) {
       i <- i + 1L
       next
     }
-    if (identical(key, "--no-rebuild-collection-indexes")) {
-      out$rebuild_collection_indexes <- FALSE
-      i <- i + 1L
-      next
-    }
     if (identical(key, "--collection-id")) {
       if (i == length(args)) stop("Missing value for --collection-id", call. = FALSE)
       ids <- trimws(strsplit(args[[i + 1L]], ",", fixed = TRUE)[[1]])
       ids <- ids[nzchar(ids)]
       out$collection_ids <- unique(ids)
+      i <- i + 2L
+      next
+    }
+    if (identical(key, "--json-mtime-after")) {
+      if (i == length(args)) stop("Missing value for --json-mtime-after", call. = FALSE)
+      out$json_mtime_after <- args[[i + 1L]]
       i <- i + 2L
       next
     }
@@ -79,10 +79,10 @@ if (isTRUE(parsed$help)) {
 }
 
 cfg <- litxr::litxr_read_config()
-log_line("migrating refactor indexes")
-report <- litxr::litxr_migrate_refactor_indexes(
+log_line("syncing thin ref stores from json")
+report <- litxr::litxr_sync_thin_ref_stores_from_json(
   cfg,
   collection_ids = parsed$collection_ids,
-  rebuild_collection_indexes = parsed$rebuild_collection_indexes
+  json_mtime_after = parsed$json_mtime_after
 )
 emit_json(c(list(status = "ok"), report))

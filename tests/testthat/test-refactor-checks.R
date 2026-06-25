@@ -196,6 +196,44 @@ make_temp_refactor_project <- function() {
   )
 }
 
+make_temp_sync_project <- function() {
+  td <- tempfile("litxr-refactor-sync-")
+  dir.create(td)
+  config_path <- file.path(td, ".litxr", "config.yaml")
+
+  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
+  Sys.setenv(LITXR_CONFIG = config_path)
+  on.exit({
+    if (is.na(old_litxr_config)) {
+      Sys.unsetenv("LITXR_CONFIG")
+    } else {
+      Sys.setenv(LITXR_CONFIG = old_litxr_config)
+    }
+  }, add = TRUE)
+
+  litxr::litxr_init()
+  cfg <- litxr::litxr_read_config()
+  cfg$project$data_root <- file.path(td, "data", "literature")
+  cfg$collections[[1]]$local_path <- file.path(cfg$project$data_root, "journal_of_finance")
+  cfg$collections[[2]]$local_path <- file.path(cfg$project$data_root, "journal_of_financial_economics")
+  cfg$collections[[3]]$local_path <- file.path(cfg$project$data_root, "arxiv_cs_ai")
+  dir.create(dirname(cfg$collections[[1]]$local_path), recursive = TRUE, showWarnings = FALSE)
+  yaml::write_yaml(cfg, config_path)
+  cfg <- litxr::litxr_read_config(config_path)
+
+  arxiv_collection <- Filter(function(collection) identical(collection$remote_channel, "arxiv"), cfg$collections)[[1]]
+  arxiv_local_path <- litxr:::.litxr_resolve_local_path(cfg, arxiv_collection$local_path)
+  dir.create(file.path(arxiv_local_path, "ref_json"), recursive = TRUE, showWarnings = FALSE)
+
+  list(
+    root = td,
+    config_path = config_path,
+    cfg = cfg,
+    arxiv_collection = arxiv_collection,
+    arxiv_local_path = arxiv_local_path
+  )
+}
+
 test_that("completeness scoring prefers the most complete duplicate record", {
   complete <- data.table::data.table(
     ref_id = "arxiv:2501.00001",
@@ -272,7 +310,7 @@ test_that("legacy delta migration no longer creates or mutates retired projectio
     }
   }, add = TRUE)
 
-  migration <- litxr::litxr_migrate_refactor_indexes(project$cfg, rebuild_collection_indexes = FALSE)
+  migration <- litxr::litxr_sync_thin_ref_stores_from_json(project$cfg)
   expect_true(is.list(migration))
   expect_true(is.list(migration$project_paths))
   expect_false(file.exists(file.path(litxr:::.litxr_project_root(project$cfg), "index", "references.fst")))

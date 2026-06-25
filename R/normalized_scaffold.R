@@ -10,6 +10,60 @@
   file.path(.litxr_project_index_dir(cfg), "ref_local_pending.fst")
 }
 
+.litxr_bare_arxiv_id <- function(ref_id = NULL, source_id = NULL, arxiv_versioned = NULL) {
+  candidates <- c(source_id, arxiv_versioned, ref_id)
+  candidates <- as.character(candidates)
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+  if (!length(candidates)) {
+    return(NA_character_)
+  }
+  for (candidate in candidates) {
+    candidate <- sub("^arxiv:", "", candidate, ignore.case = TRUE)
+    candidate <- sub("v[0-9]+$", "", candidate)
+    candidate <- trimws(candidate)
+    if (nzchar(candidate)) return(candidate)
+  }
+  NA_character_
+}
+
+.litxr_bare_doi <- function(ref_id = NULL, doi = NULL, source_id = NULL) {
+  candidates <- c(doi, source_id, ref_id)
+  candidates <- as.character(candidates)
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+  if (!length(candidates)) {
+    return(NA_character_)
+  }
+  for (candidate in candidates) {
+    candidate <- sub("^doi:", "", candidate, ignore.case = TRUE)
+    candidate <- trimws(candidate)
+    if (nzchar(candidate)) return(candidate)
+  }
+  NA_character_
+}
+
+.litxr_arxiv_version_value <- function(ref_id = NULL, version = NULL, versioned_id = NULL, source_id = NULL) {
+  candidates <- list(version, versioned_id, source_id, ref_id)
+  for (candidate in candidates) {
+    if (is.null(candidate)) next
+    candidate <- as.character(candidate)
+    candidate <- candidate[!is.na(candidate) & nzchar(candidate)]
+    if (!length(candidate)) next
+    candidate <- candidate[[1]]
+    if (grepl("^arxiv:", candidate, ignore.case = TRUE)) {
+      candidate <- sub("^arxiv:", "", candidate, ignore.case = TRUE)
+    }
+    m <- regexec("^(.+?)v(\\d+)$", candidate)
+    reg <- regmatches(candidate, m)[[1]]
+    if (length(reg) == 3L) {
+      value <- suppressWarnings(as.integer(reg[[3]]))
+      if (!is.na(value)) return(value)
+    }
+    value <- suppressWarnings(as.integer(candidate))
+    if (!is.na(value)) return(value)
+  }
+  0L
+}
+
 .litxr_validate_arxiv_id <- function(x) {
   x <- as.character(x)
   x <- x[!is.na(x) & nzchar(x)]
@@ -101,20 +155,90 @@
   key_type <- match.arg(key_type)
   records <- data.table::as.data.table(records)
   if (!nrow(records)) {
-    out <- data.table::data.table(ref_id = character(), key_type = character(), key_value = character())
+    out <- switch(
+      key_type,
+      arxiv_id = data.table::data.table(arxiv_id = character()),
+      doi = data.table::data.table(doi = character(), year = integer()),
+      local_pending = data.table::data.table(ref_id = character())
+    )
     return(out)
   }
 
-  keep_cols <- intersect(
-    .litxr_reference_projection_columns(),
-    names(records)
+  if (identical(key_type, "arxiv_id")) {
+    arxiv_rows <- grepl("^arxiv:", as.character(records$ref_id))
+    if ("collection_id" %in% names(records)) {
+      arxiv_rows <- arxiv_rows & as.character(records$collection_id) %in% c("arxiv_cs_ai", "manual_arxiv_refs")
+    } else if ("collection_type" %in% names(records)) {
+      arxiv_rows <- arxiv_rows & as.character(records$collection_type) == "arxiv_category"
+    }
+    idx <- which(arxiv_rows)
+    if (!length(idx)) {
+      return(data.table::data.table(arxiv_id = character()))
+    }
+    arxiv_rows_dt <- data.table::data.table(
+      arxiv_id = vapply(idx, function(i) {
+      .litxr_bare_arxiv_id(
+        ref_id = if ("ref_id" %in% names(records)) records$ref_id[[i]] else NULL,
+        source_id = if ("source_id" %in% names(records)) records$source_id[[i]] else NULL,
+        arxiv_versioned = if ("arxiv_id_versioned" %in% names(records)) records$arxiv_id_versioned[[i]] else NULL
+      )
+    }, character(1)),
+      arxiv_version = vapply(idx, function(i) {
+        .litxr_arxiv_version_value(
+          ref_id = if ("ref_id" %in% names(records)) records$ref_id[[i]] else NULL,
+          version = if ("arxiv_version" %in% names(records)) records$arxiv_version[[i]] else NULL,
+          versioned_id = if ("arxiv_id_versioned" %in% names(records)) records$arxiv_id_versioned[[i]] else NULL,
+          source_id = if ("source_id" %in% names(records)) records$source_id[[i]] else NULL
+        )
+      }, integer(1))
+    )
+    arxiv_rows_dt <- arxiv_rows_dt[!is.na(arxiv_rows_dt$arxiv_id) & nzchar(arxiv_rows_dt$arxiv_id), ]
+    if (!nrow(arxiv_rows_dt)) {
+      return(data.table::data.table(arxiv_id = character()))
+    }
+    data.table::setorder(arxiv_rows_dt, arxiv_id, -arxiv_version)
+    arxiv_rows_dt <- arxiv_rows_dt[!duplicated(arxiv_rows_dt$arxiv_id), ]
+    arxiv_rows_dt$arxiv_version <- NULL
+    return(arxiv_rows_dt[, c("arxiv_id"), with = FALSE])
+  }
+
+  if (identical(key_type, "doi")) {
+    doi_rows <- if ("doi" %in% names(records)) !is.na(records$doi) & nzchar(records$doi) else grepl("^doi:", as.character(records$ref_id))
+    if ("collection_id" %in% names(records)) {
+      doi_rows <- doi_rows & !(as.character(records$collection_id) %in% c("arxiv_cs_ai", "manual_arxiv_refs"))
+    }
+    idx <- which(doi_rows)
+    if (!length(idx)) {
+      return(data.table::data.table(doi = character(), year = integer()))
+    }
+    doi <- vapply(idx, function(i) {
+      .litxr_bare_doi(
+        ref_id = if ("ref_id" %in% names(records)) records$ref_id[[i]] else NULL,
+        doi = if ("doi" %in% names(records)) records$doi[[i]] else NULL,
+        source_id = if ("source_id" %in% names(records)) records$source_id[[i]] else NULL
+      )
+    }, character(1))
+    year <- if ("year" %in% names(records)) suppressWarnings(as.integer(records$year[idx])) else rep(NA_integer_, length(idx))
+    keep <- !is.na(doi) & nzchar(doi)
+    doi <- doi[keep]
+    year <- year[keep]
+    if (length(doi)) {
+      dup <- duplicated(doi)
+      if (any(dup)) {
+        stop("Duplicate DOI id(s) found while rebuilding thin DOI store: ", paste(unique(doi[dup]), collapse = ", "), call. = FALSE)
+      }
+    }
+    return(data.table::data.table(doi = doi, year = year))
+  }
+
+  pending <- data.table::data.table(
+    ref_id = if ("ref_id" %in% names(records)) as.character(records$ref_id) else rep(NA_character_, nrow(records))
   )
-  keep <- data.table::copy(records)[, keep_cols, with = FALSE]
-  route <- .litxr_route_ref_ids(keep$ref_id)
-  keep[["key_type"]] <- route$key_type
-  keep[["key_value"]] <- route$key_value
-  keep <- keep[keep$key_type == key_type, ]
-  keep
+  pending <- pending[!is.na(pending$ref_id) & nzchar(pending$ref_id), , drop = FALSE]
+  if (nrow(pending) > 0L) {
+    pending <- pending[!duplicated(pending$ref_id), , drop = FALSE]
+  }
+  pending
 }
 
 .litxr_ref_entity_resolution_map <- function(cfg, entities = NULL, ref_ids = NULL, entity_ids = NULL) {
@@ -183,19 +307,26 @@
   }
   records <- data.table::as.data.table(records)
 
-  arxiv_rows <- .litxr_normalized_payload_projection(records, key_type = "arxiv_id")
-  doi_rows <- .litxr_normalized_payload_projection(records, key_type = "doi")
+  arxiv_collection_ids <- c("arxiv_cs_ai", "manual_arxiv_refs")
+  arxiv_records <- if (nrow(records) && "collection_id" %in% names(records)) {
+    records[grepl("^arxiv:", as.character(records$ref_id)) & as.character(records$collection_id) %in% arxiv_collection_ids, ]
+  } else if (nrow(records) && "collection_type" %in% names(records)) {
+    records[grepl("^arxiv:", as.character(records$ref_id)) & as.character(records$collection_type) == "arxiv_category", ]
+  } else {
+    records[grepl("^arxiv:", as.character(records$ref_id)), ]
+  }
+  arxiv_rows <- .litxr_normalized_payload_projection(arxiv_records, key_type = "arxiv_id")
+  doi_records <- if (nrow(records) && "collection_id" %in% names(records)) {
+    records[!(as.character(records$collection_id) %in% arxiv_collection_ids), ]
+  } else {
+    records
+  }
+  doi_rows <- .litxr_normalized_payload_projection(doi_records, key_type = "doi")
   pending_rows <- .litxr_normalized_payload_projection(records, key_type = "local_pending")
 
-  if (nrow(arxiv_rows)) {
-    .litxr_write_scaffold_table(.litxr_ref_arxiv_path(cfg), arxiv_rows, key_cols = "ref_id")
-  }
-  if (nrow(doi_rows)) {
-    .litxr_write_scaffold_table(.litxr_ref_doi_path(cfg), doi_rows, key_cols = "ref_id")
-  }
-  if (nrow(pending_rows)) {
-    .litxr_write_scaffold_table(.litxr_ref_local_pending_path(cfg), pending_rows, key_cols = "ref_id")
-  }
+  .litxr_write_scaffold_table(.litxr_ref_arxiv_path(cfg), arxiv_rows, key_cols = "arxiv_id")
+  .litxr_write_scaffold_table(.litxr_ref_doi_path(cfg), doi_rows, key_cols = "doi")
+  .litxr_write_scaffold_table(.litxr_ref_local_pending_path(cfg), pending_rows, key_cols = "ref_id")
 
   invisible(list(
     ref_arxiv = .litxr_ref_arxiv_path(cfg),
@@ -221,32 +352,19 @@
     return(data.table::data.table())
   }
 
-  payloads <- list(
-    .litxr_read_scaffold_table_safe(.litxr_ref_arxiv_path(cfg)),
-    .litxr_read_scaffold_table_safe(.litxr_ref_doi_path(cfg)),
-    .litxr_read_scaffold_table_safe(.litxr_ref_local_pending_path(cfg))
-  )
-  payloads <- payloads[vapply(payloads, nrow, integer(1L)) > 0L]
-  if (!length(payloads)) {
+  cfg <- if (is.character(cfg)) litxr_read_config(cfg) else cfg
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  out <- .litxr_authoritative_project_records(cfg)
+  if (!nrow(out)) {
     return(data.table::data.table())
   }
-
-  matched <- lapply(payloads, function(payload) {
-    if (!("ref_id" %in% names(payload))) {
-      return(payload[0, ])
-    }
-    hit <- as.character(payload$ref_id) %in% keys
-    if (!any(hit)) {
-      return(payload[0, ])
-    }
-    payload[hit, ]
-  })
-  matched <- matched[vapply(matched, nrow, integer(1L)) > 0L]
-  if (!length(matched)) {
-    return(data.table::data.table())
+  key_cols <- intersect(c("ref_id", "source_id", "doi"), names(out))
+  if (length(key_cols)) {
+    key_mask <- Reduce(`|`, lapply(key_cols, function(col) as.character(out[[col]]) %in% keys))
+    out <- out[key_mask, ]
+  } else {
+    out <- out[0, ]
   }
-
-  out <- data.table::rbindlist(matched, fill = TRUE)
   if (!nrow(out)) {
     return(out)
   }
