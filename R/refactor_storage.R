@@ -158,11 +158,16 @@
   folders
 }
 
-.litxr_sync_thin_rows_from_payload <- function(payload, branch = c("arxiv", "doi")) {
+.litxr_sync_thin_rows_from_payload <- function(payload, branch = c("arxiv", "doi"), collection_index = NA_integer_, json_filename = NA_character_) {
   branch <- match.arg(branch, c("arxiv", "doi", "isbn"))
   ref_id <- .litxr_sync_scalar_chr(payload$ref_id)
   source_id <- .litxr_sync_scalar_chr(payload$source_id)
   arxiv_versioned <- .litxr_sync_scalar_chr(payload$arxiv_id_versioned)
+  collection_index <- suppressWarnings(as.integer(collection_index))
+  if (length(collection_index) != 1L || is.na(collection_index) || collection_index < 1L) {
+    collection_index <- NA_integer_
+  }
+  json_filename <- .litxr_sync_scalar_chr(json_filename)
 
   if (identical(branch, "arxiv")) {
     arxiv_value <- .litxr_bare_arxiv_id(ref_id = ref_id, source_id = source_id, arxiv_versioned = arxiv_versioned)
@@ -186,6 +191,8 @@
         versioned_id = arxiv_versioned,
         source_id = source_id
       ),
+      collection_index = collection_index,
+      json_filename = json_filename,
       doi = doi_value
     ))
   }
@@ -212,7 +219,9 @@
 
   list(
     doi = doi_value,
-    year = .litxr_sync_scalar_int(payload$year, default = NA_integer_)
+    year = .litxr_sync_scalar_int(payload$year, default = NA_integer_),
+    collection_index = collection_index,
+    json_filename = json_filename
   )
 }
 
@@ -341,6 +350,7 @@
   arxiv_branch_folders <- intersect(folders, c("arxiv_cs_ai", "manual_arxiv_refs"))
   doi_branch_folders <- setdiff(folders, arxiv_branch_folders)
   collections <- .litxr_config_collections(cfg)
+  collection_ids_cfg <- vapply(collections, function(collection) as.character(collection$collection_id %||% collection$journal_id %||% NA_character_), character(1))
   isbn_branch_ids <- vapply(collections, function(collection) identical(collection$remote_channel, "isbn"), logical(1))
   isbn_branch_folders <- intersect(folders, vapply(collections[isbn_branch_ids], `[[`, character(1), "collection_id"))
 
@@ -353,9 +363,15 @@
   isbn_count <- 0L
 
   for (folder in arxiv_branch_folders) {
+    collection_index <- match(folder, collection_ids_cfg)
     files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
     for (path in files) {
-      rows <- .litxr_sync_thin_rows_from_payload(jsonlite::fromJSON(path, simplifyVector = FALSE), branch = "arxiv")
+      rows <- .litxr_sync_thin_rows_from_payload(
+        jsonlite::fromJSON(path, simplifyVector = FALSE),
+        branch = "arxiv",
+        collection_index = collection_index,
+        json_filename = basename(path)
+      )
       if (!is.null(rows)) {
         arxiv_count <- arxiv_count + 1L
         arxiv_rows_list[[arxiv_count]] <- rows
@@ -364,9 +380,15 @@
   }
 
   for (folder in doi_branch_folders) {
+    collection_index <- match(folder, collection_ids_cfg)
     files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
     for (path in files) {
-      rows <- .litxr_sync_thin_rows_from_payload(jsonlite::fromJSON(path, simplifyVector = FALSE), branch = "doi")
+      rows <- .litxr_sync_thin_rows_from_payload(
+        jsonlite::fromJSON(path, simplifyVector = FALSE),
+        branch = "doi",
+        collection_index = collection_index,
+        json_filename = basename(path)
+      )
       if (!is.null(rows)) {
         doi_count <- doi_count + 1L
         doi_rows_list[[doi_count]] <- rows
@@ -375,9 +397,15 @@
   }
 
   for (folder in isbn_branch_folders) {
+    collection_index <- match(folder, collection_ids_cfg)
     files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
     for (path in files) {
-      rows <- .litxr_sync_thin_rows_from_payload(jsonlite::fromJSON(path, simplifyVector = FALSE), branch = "isbn")
+      rows <- .litxr_sync_thin_rows_from_payload(
+        jsonlite::fromJSON(path, simplifyVector = FALSE),
+        branch = "isbn",
+        collection_index = collection_index,
+        json_filename = basename(path)
+      )
       if (!is.null(rows)) {
         isbn_count <- isbn_count + 1L
         isbn_rows_list[[isbn_count]] <- rows
@@ -385,9 +413,9 @@
     }
   }
 
-  arxiv_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), doi = character())
-  doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), year = integer())
-  isbn_rows <- if (length(isbn_rows_list)) data.table::rbindlist(isbn_rows_list, fill = TRUE) else data.table::data.table(isbn = character())
+  arxiv_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), collection_index = integer(), json_filename = character(), doi = character())
+  doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), year = integer(), collection_index = integer(), json_filename = character())
+  isbn_rows <- if (length(isbn_rows_list)) data.table::rbindlist(isbn_rows_list, fill = TRUE) else data.table::data.table(isbn = character(), collection_index = integer(), json_filename = character())
 
   if (nrow(arxiv_rows)) {
     arxiv_rows$arxiv_version <- suppressWarnings(as.integer(arxiv_rows$arxiv_version))
@@ -596,6 +624,9 @@
   }
   if (nrow(arxiv_rows) && "doi" %in% names(arxiv_rows)) {
     data.table::set(arxiv_rows, j = "doi", value = NULL)
+  }
+  if (nrow(arxiv_rows) && "arxiv_version" %in% names(arxiv_rows)) {
+    data.table::set(arxiv_rows, j = "arxiv_version", value = NULL)
   }
   arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows, "arxiv_id", remove_missing = remove_missing)
   doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows, "doi", remove_missing = remove_missing)
