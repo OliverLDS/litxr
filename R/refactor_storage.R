@@ -347,7 +347,7 @@
 }
 
 .litxr_sync_thin_ref_store_inputs <- function(cfg, collection_ids = NULL, json_mtime_after = NULL) {
-  root <- .litxr_project_root(cfg)
+  root <- file.path(.litxr_project_root(cfg), "ref")
   folders <- .litxr_sync_collection_folder_names(cfg, collection_ids = collection_ids)
   arxiv_branch_folders <- intersect(folders, c("arxiv_cs_ai", "manual_arxiv_refs"))
   doi_branch_folders <- setdiff(folders, arxiv_branch_folders)
@@ -715,11 +715,14 @@
     NA_character_
   }
 
+  report_collection_id <- if (length(selected_ids) == 1L) selected_ids[[1L]] else NA_character_
+  report_collection_ref_dir <- if (length(selected_ids) == 1L) .litxr_collection_ref_dir(cfg, selected_ids[[1L]]) else NA_character_
+
   list(
     selected_collection_ids = selected_ids,
     mode = current_mode,
     collection_results = list(
-      list(collection_id = NA_character_, rebuilt_collection_index = FALSE, collection_local_path = NA_character_, refs_written = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows), links_written = nrow(identities), refs_removed = length(arxiv_store$removed) + length(doi_store$removed) + length(isbn_store$removed))
+      list(collection_id = report_collection_id, rebuilt_collection_index = FALSE, collection_ref_dir = report_collection_ref_dir, refs_written = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows), links_written = nrow(identities), refs_removed = length(arxiv_store$removed) + length(doi_store$removed) + length(isbn_store$removed))
     ),
     diff_paths = list(
       ref_identity_map = list(
@@ -739,7 +742,7 @@
         removed = isbn_removed_path
       )
     ),
-    update_log_path = .litxr_project_collection_sync_log_path(cfg),
+    update_log_path = .litxr_project_collection_thin_sync_log_path(cfg),
     project_paths = list(
       ref_identity_map = .litxr_project_ref_identity_index_path(cfg),
       ref_arxiv = .litxr_ref_arxiv_path(cfg),

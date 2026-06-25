@@ -100,9 +100,12 @@ report <- litxr::litxr_sync_thin_ref_stores_from_json(
   json_mtime_after = parsed$json_mtime_after
 )
 if (length(report$selected_collection_ids)) {
-  now <- format(Sys.time(), tz = "UTC", usetz = TRUE)
   for (collection_id in report$selected_collection_ids) {
-    litxr:::.litxr_upsert_collection_sync_log(cfg, collection_id, now)
+    latest_update_timestamp <- litxr:::.litxr_latest_collection_ref_json_mtime(cfg, collection_id)
+    if (is.na(latest_update_timestamp) || !nzchar(latest_update_timestamp)) {
+      latest_update_timestamp <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+    }
+    litxr:::.litxr_upsert_collection_sync_log(cfg, collection_id, latest_update_timestamp)
   }
 }
 emit_json(c(list(status = "ok"), report))

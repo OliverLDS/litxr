@@ -44,8 +44,8 @@ usage <- function() {
       "  - By default, the script fetches records updated after the current cutoff timestamp.",
       "  - `--start` / `--end` switch the fetch into a date-range mode.",
       "  - `--full-time` fetches the full Crossref journal history.",
-      "  - Writes fetched records as local JSON files directly under the collection folder.",
-  "  - Updates a project-level latest-update log under `log/` after a successful run.",
+      "  - Writes fetched records as JSON files directly under ref/COLLECTION_ID.",
+      "  - Updates a project-level latest-update log under `log/` after a successful run.",
       sep = "\n"
     )
   )
@@ -117,14 +117,17 @@ normalize_date_arg <- function(x, arg_name) {
 }
 
 fetch_crossref_journal_works_filtered <- function(issn, start_date = NULL, end_date = NULL, rows = 1000L) {
+  has_scalar_text <- function(x) {
+    isTRUE(length(x) == 1L && !is.na(x[[1L]]) && nzchar(as.character(x[[1L]])))
+  }
   cursor <- "*"
   out <- list()
   total <- 0L
   filter_parts <- paste0("issn:", issn)
-  if (!is.na(start_date) && nzchar(start_date)) {
+  if (has_scalar_text(start_date)) {
     filter_parts <- c(filter_parts, paste0("from-update-date:", start_date))
   }
-  if (!is.na(end_date) && nzchar(end_date)) {
+  if (has_scalar_text(end_date)) {
     filter_parts <- c(filter_parts, paste0("until-update-date:", end_date))
   }
   filter_string <- paste(filter_parts, collapse = ",")
@@ -182,18 +185,18 @@ if (!identical(journal$remote_channel, "crossref")) {
   stop("Collection is not Crossref-backed: ", parsed$collection, call. = FALSE)
 }
 
-local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
-if (is.na(local_path) || !nzchar(local_path)) {
-  stop("Unable to resolve local path for collection: ", parsed$collection, call. = FALSE)
+collection_ref_dir <- litxr:::.litxr_collection_ref_dir(cfg, parsed$collection)
+if (is.na(collection_ref_dir) || !nzchar(collection_ref_dir)) {
+  stop("Unable to resolve ref directory for collection: ", parsed$collection, call. = FALSE)
 }
 
-paths <- litxr:::.litxr_ensure_journal_dirs(local_path)
-update_log_path <- litxr:::.litxr_project_collection_sync_log_path(cfg)
+paths <- litxr:::.litxr_ensure_collection_ref_dir(cfg, parsed$collection)
+update_log_path <- litxr:::.litxr_project_collection_fetch_log_path(cfg)
 should_record_latest_update <- !has_text(parsed$end)
 
 log_line("syncing doi collection from Crossref")
 log_line("collection_id=", parsed$collection)
-log_line("collection_local_path=", local_path)
+log_line("collection_ref_dir=", collection_ref_dir)
 
 cutoff_source <- NA_character_
 cutoff_timestamp <- NA_character_
@@ -208,11 +211,11 @@ if (isTRUE(parsed$full_time)) {
   fetch_start <- normalize_date_arg(parsed$start, "start")
   fetch_end <- normalize_date_arg(parsed$end, "end")
 } else {
-  cutoff_timestamp <- litxr:::.litxr_latest_collection_sync_timestamp(cfg, parsed$collection)
+  cutoff_timestamp <- litxr:::.litxr_latest_collection_sync_timestamp(cfg, parsed$collection, path = update_log_path)
   if (!is.na(cutoff_timestamp) && nzchar(cutoff_timestamp)) {
     cutoff_source <- "log"
   } else {
-    cutoff_timestamp <- infer_cutoff_timestamp(local_path)
+    cutoff_timestamp <- infer_cutoff_timestamp(collection_ref_dir)
     if (!is.na(cutoff_timestamp) && nzchar(cutoff_timestamp)) {
       cutoff_source <- "pub_date"
     }
@@ -260,7 +263,7 @@ items <- unlist(lapply(issns, function(issn) {
   if (!length(items)) {
     now <- format(Sys.time(), tz = "UTC", usetz = TRUE)
     if (should_record_latest_update) {
-      litxr:::.litxr_upsert_collection_sync_log(cfg, parsed$collection, now)
+      litxr:::.litxr_upsert_collection_sync_log(cfg, parsed$collection, now, path = update_log_path)
     }
   emit_json(list(
     status = "ok",
@@ -308,7 +311,7 @@ if (nrow(records) && "doi" %in% names(records)) {
   if (!nrow(records)) {
     now <- format(Sys.time(), tz = "UTC", usetz = TRUE)
     if (should_record_latest_update) {
-      litxr:::.litxr_upsert_collection_sync_log(cfg, parsed$collection, now)
+      litxr:::.litxr_upsert_collection_sync_log(cfg, parsed$collection, now, path = update_log_path)
     }
   emit_json(list(
     status = "ok",
@@ -324,10 +327,13 @@ if (nrow(records) && "doi" %in% names(records)) {
   quit(save = "no", status = 0L)
 }
 
-written_paths <- litxr:::.litxr_write_journal_record_files(records, local_path, journal)
-now <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+written_paths <- litxr:::.litxr_write_journal_record_files(records, collection_ref_dir, journal)
+latest_update_timestamp <- litxr:::.litxr_latest_collection_ref_json_mtime(cfg, parsed$collection)
+if (is.na(latest_update_timestamp) || !nzchar(latest_update_timestamp)) {
+  latest_update_timestamp <- format(Sys.time(), tz = "UTC", usetz = TRUE)
+}
 if (should_record_latest_update) {
-  litxr:::.litxr_upsert_collection_sync_log(cfg, parsed$collection, now)
+  litxr:::.litxr_upsert_collection_sync_log(cfg, parsed$collection, latest_update_timestamp, path = update_log_path)
 }
 
 emit_json(list(
@@ -340,6 +346,6 @@ emit_json(list(
   cutoff_source = nonempty_or(cutoff_source, "none"),
   cutoff_timestamp = nonempty_or(cutoff_timestamp, NA_character_),
   update_log_path = update_log_path,
-  collection_local_path = local_path,
-  json_dir = paths$json
+  collection_ref_dir = collection_ref_dir,
+  json_dir = paths
 ))
