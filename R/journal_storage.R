@@ -1,9 +1,7 @@
 .litxr_ensure_journal_dirs <- function(local_path) {
   paths <- .litxr_journal_paths(local_path)
-  for (path in unname(paths[c("root", "json", "md", "llm")])) {
-    if (!dir.exists(path)) {
-      dir.create(path, recursive = TRUE, showWarnings = FALSE)
-    }
+  if (!dir.exists(paths$root)) {
+    dir.create(paths$root, recursive = TRUE, showWarnings = FALSE)
   }
   paths
 }
@@ -654,7 +652,7 @@
   chunk_size = getOption("litxr.json_read_chunk_size", 2000L)
 ) {
   paths <- .litxr_journal_paths(local_path)
-  json_dir <- .litxr_existing_collection_dir(paths$json, paths$legacy_json)
+  json_dir <- paths$json
   if (!dir.exists(json_dir)) {
     return(data.table::data.table())
   }

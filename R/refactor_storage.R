@@ -141,7 +141,10 @@
 }
 
 .litxr_sync_collection_folder_names <- function(cfg, collection_ids = NULL) {
-  root <- .litxr_project_root(cfg)
+  root <- file.path(.litxr_project_root(cfg), "ref")
+  if (!dir.exists(root)) {
+    return(character())
+  }
   system_folders <- c("index", "llm", "llm_history", "embeddings")
   folders <- list.dirs(root, recursive = FALSE, full.names = FALSE)
   folders <- folders[!folders %in% system_folders]
@@ -219,7 +222,6 @@
 
   list(
     doi = doi_value,
-    year = .litxr_sync_scalar_int(payload$year, default = NA_integer_),
     collection_index = collection_index,
     json_filename = json_filename
   )
@@ -364,7 +366,7 @@
 
   for (folder in arxiv_branch_folders) {
     collection_index <- match(folder, collection_ids_cfg)
-    files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
+    files <- .litxr_sync_json_files_after(file.path(root, folder), json_mtime_after = json_mtime_after)
     for (path in files) {
       rows <- .litxr_sync_thin_rows_from_payload(
         jsonlite::fromJSON(path, simplifyVector = FALSE),
@@ -381,7 +383,7 @@
 
   for (folder in doi_branch_folders) {
     collection_index <- match(folder, collection_ids_cfg)
-    files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
+    files <- .litxr_sync_json_files_after(file.path(root, folder), json_mtime_after = json_mtime_after)
     for (path in files) {
       rows <- .litxr_sync_thin_rows_from_payload(
         jsonlite::fromJSON(path, simplifyVector = FALSE),
@@ -398,7 +400,7 @@
 
   for (folder in isbn_branch_folders) {
     collection_index <- match(folder, collection_ids_cfg)
-    files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
+    files <- .litxr_sync_json_files_after(file.path(root, folder), json_mtime_after = json_mtime_after)
     for (path in files) {
       rows <- .litxr_sync_thin_rows_from_payload(
         jsonlite::fromJSON(path, simplifyVector = FALSE),
@@ -414,7 +416,7 @@
   }
 
   arxiv_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), collection_index = integer(), json_filename = character(), doi = character())
-  doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), year = integer(), collection_index = integer(), json_filename = character())
+  doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), collection_index = integer(), json_filename = character())
   isbn_rows <- if (length(isbn_rows_list)) data.table::rbindlist(isbn_rows_list, fill = TRUE) else data.table::data.table(isbn = character(), collection_index = integer(), json_filename = character())
 
   if (nrow(arxiv_rows)) {
@@ -605,20 +607,23 @@
   arxiv_rows <- inputs$arxiv_rows
   doi_rows <- inputs$doi_rows
   isbn_rows <- inputs$isbn_rows
-  current_mode <- if (is.null(json_mtime_after)) "full" else "incremental"
-  remove_missing <- is.null(json_mtime_after)
-  diff_dir <- .litxr_project_index_dir(cfg)
+  current_mode <- if (is.null(json_mtime_after) && is.null(collection_ids)) "full" else "incremental"
+  remove_missing <- is.null(json_mtime_after) && is.null(collection_ids)
+  diff_dir <- .litxr_ensure_project_log_dir(cfg)
   if (nrow(arxiv_rows)) {
     data.table::set(arxiv_rows, j = "arxiv_version", value = NULL)
   }
   identities <- if (nrow(arxiv_rows) && "doi" %in% names(arxiv_rows)) {
-    doi_values <- trimws(as.character(arxiv_rows$doi))
-    keep <- !is.na(doi_values) & nzchar(doi_values)
-    if (any(keep)) {
-      data.table::data.table(arxiv_id = arxiv_rows$arxiv_id[keep], doi = arxiv_rows$doi[keep])
-    } else {
-      data.table::data.table(arxiv_id = character(), doi = character())
+    identities <- data.table::data.table(
+      arxiv_id = arxiv_rows$arxiv_id,
+      doi = arxiv_rows$doi
+    )
+    identities$doi <- trimws(as.character(identities$doi))
+    identities <- identities[!is.na(identities$doi) & nzchar(identities$doi), ]
+    if (nrow(identities)) {
+      identities <- identities[!duplicated(paste(identities$arxiv_id, identities$doi, sep = "\r")), ]
     }
+    identities
   } else {
     data.table::data.table(arxiv_id = character(), doi = character())
   }
@@ -734,6 +739,7 @@
         removed = isbn_removed_path
       )
     ),
+    update_log_path = .litxr_project_collection_sync_log_path(cfg),
     project_paths = list(
       ref_identity_map = .litxr_project_ref_identity_index_path(cfg),
       ref_arxiv = .litxr_ref_arxiv_path(cfg),

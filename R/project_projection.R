@@ -112,7 +112,7 @@
   }
 
   paths <- .litxr_journal_paths(local_path)
-  json_dir <- .litxr_existing_collection_dir(paths$json, paths$legacy_json)
+  json_dir <- paths$json
   .litxr_hydrate_rows_from_json_dir(rows, json_dir)
 }
 

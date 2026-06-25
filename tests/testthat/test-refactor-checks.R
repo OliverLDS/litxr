@@ -28,6 +28,7 @@ make_record <- function(ref_id, source, source_id, title, collection_id, collect
     ref_id = ref_id,
     source = source,
     source_id = source_id,
+    arxiv_id = if (identical(source, "arxiv")) source_id else NA_character_,
     title = title,
     abstract = sprintf("Abstract for %s", ref_id),
     authors = "Jane Doe; John Smith",
@@ -214,16 +215,16 @@ make_temp_sync_project <- function() {
   litxr::litxr_init()
   cfg <- litxr::litxr_read_config()
   cfg$project$data_root <- file.path(td, "data", "literature")
-  cfg$collections[[1]]$local_path <- file.path(cfg$project$data_root, "journal_of_finance")
-  cfg$collections[[2]]$local_path <- file.path(cfg$project$data_root, "journal_of_financial_economics")
-  cfg$collections[[3]]$local_path <- file.path(cfg$project$data_root, "arxiv_cs_ai")
+  cfg$collections[[1]]$local_path <- file.path(cfg$project$data_root, "ref", "journal_of_finance")
+  cfg$collections[[2]]$local_path <- file.path(cfg$project$data_root, "ref", "journal_of_financial_economics")
+  cfg$collections[[3]]$local_path <- file.path(cfg$project$data_root, "ref", "arxiv_cs_ai")
   dir.create(dirname(cfg$collections[[1]]$local_path), recursive = TRUE, showWarnings = FALSE)
   yaml::write_yaml(cfg, config_path)
   cfg <- litxr::litxr_read_config(config_path)
 
   arxiv_collection <- Filter(function(collection) identical(collection$remote_channel, "arxiv"), cfg$collections)[[1]]
   arxiv_local_path <- litxr:::.litxr_resolve_local_path(cfg, arxiv_collection$local_path)
-  dir.create(file.path(arxiv_local_path, "ref_json"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(arxiv_local_path, recursive = TRUE, showWarnings = FALSE)
 
   list(
     root = td,
@@ -298,40 +299,15 @@ test_that("BibTeX export scalarizes list-valued fields without leaking vector sy
   expect_false(any(grepl("list\\(", bib, fixed = FALSE)))
 })
 
-test_that("legacy delta migration no longer creates or mutates retired projection files", {
-  project <- make_temp_refactor_project()
-  old_litxr_config <- Sys.getenv("LITXR_CONFIG", unset = NA_character_)
-  Sys.setenv(LITXR_CONFIG = project$config_path)
-  on.exit({
-    if (is.na(old_litxr_config)) {
-      Sys.unsetenv("LITXR_CONFIG")
-    } else {
-      Sys.setenv(LITXR_CONFIG = old_litxr_config)
-    }
-  }, add = TRUE)
+test_that("doi collection sync node parses and advertises its strict collection mode", {
+  sync_script <- normalizePath(file.path("..", "..", "scripts", "sync_doi_collection_json.R"), mustWork = TRUE)
 
-  migration <- litxr::litxr_sync_thin_ref_stores_from_json(project$cfg)
-  expect_true(is.list(migration))
-  expect_true(is.list(migration$project_paths))
-  expect_false(file.exists(file.path(litxr:::.litxr_project_root(project$cfg), "index", "references.fst")))
-  expect_false(file.exists(file.path(litxr:::.litxr_project_root(project$cfg), "index", "reference_collections.fst")))
-  expect_true(nrow(litxr::litxr_read_references(project$cfg)) >= 1L)
-  expect_true(nrow(litxr::litxr_read_reference_collections(project$cfg)) >= 1L)
-})
+  expect_silent(parse(file = sync_script))
 
-test_that("refactor audit report and projection scripts parse and expose their node names", {
-  refactor_script <- normalizePath(file.path("..", "..", "scripts", "refactor_audit_nodes.R"), mustWork = TRUE)
-  projection_script <- normalizePath(file.path("..", "..", "scripts", "measure_reference_projection_size.R"), mustWork = TRUE)
-
-  expect_silent(parse(file = refactor_script))
-  expect_silent(parse(file = projection_script))
-
-  refactor_help <- system2("Rscript", c(refactor_script, "--help"), stdout = TRUE, stderr = tempfile())
-  expect_true(any(grepl("derived_append_shard_state", refactor_help, fixed = TRUE)))
-  expect_true(any(grepl("legacy_delta_presence", refactor_help, fixed = TRUE)))
-  expect_true(any(grepl("embedding_search_shard_timing", refactor_help, fixed = TRUE)))
-  expect_true(any(grepl("projection_size_reduction", refactor_help, fixed = TRUE)))
-
-  projection_help <- system2("Rscript", c(projection_script, "--help"), stdout = TRUE, stderr = tempfile())
-  expect_true(any(grepl("projection", projection_help, fixed = TRUE)))
+  sync_help <- system2("Rscript", c(sync_script, "--help"), stdout = TRUE, stderr = tempfile())
+  expect_true(any(grepl("Crossref-backed collection id to sync", sync_help, fixed = TRUE)))
+  expect_true(any(grepl("--collection COLLECTION_ID", sync_help, fixed = TRUE)))
+  expect_true(any(grepl("--start DATE", sync_help, fixed = TRUE)))
+  expect_true(any(grepl("--end DATE", sync_help, fixed = TRUE)))
+  expect_true(any(grepl("--full-time", sync_help, fixed = TRUE)))
 })

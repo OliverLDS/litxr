@@ -3,26 +3,27 @@
 set -eu
 
 script_dir="${0:A:h}"
-source "${script_dir}/_diagnostics.zsh"
-diagnose=false
 
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   cat <<'EOF'
 Usage:
-  scripts/human/get_ref_summary.sh <ref-id-or-bare-arxiv-id> [--report key|complete]
-  scripts/human/get_ref_summary.sh <ref-id-or-bare-arxiv-id> [--key|--complete]
+  scripts/human/get_ref_summary.sh --arxiv-id ARXIV_ID [--report key|complete]
+  scripts/human/get_ref_summary.sh --doi DOI [--report key|complete]
+  scripts/human/get_ref_summary.sh --isbn ISBN [--report key|complete]
 
 Options:
+  --arxiv-id ID  Strict arXiv id lookup. Use a bare arXiv id such as 2202.01677.
+  --doi DOI      Strict DOI lookup. Use the raw DOI string, without `doi:` or URL.
+  --isbn ISBN    Strict ISBN lookup. Use the raw ISBN string.
   --report MODE  Report mode: key or complete. Default: key.
   --key          Report key research-schema fields only. This is the default.
   --complete     Report the complete research-schema digest.
-  --diagnose     Emit step timings and I/O metadata to stderr.
   -h, --help     Show this help message.
 
 Notes:
-  - Accepts a canonical ref_id like arxiv:2405.03710 or doi:10.1000/example.
-  - Also accepts a bare arXiv id like 2405.03710.
-  - Prints the local abstract first.
+  - The parser is strict; the route is determined by the flag, not by guessing.
+  - The script resolves the ref JSON filename from index/ref_arxiv.fst,
+    index/ref_doi.fst, or index/ref_isbn.fst before reading the abstract.
   - Key mode reports Summary, Motivation, Theoretical Mechanism,
     Anchor References, and Citation Logic Nodes.
   - Complete mode reports the full markdown-style research schema rendering.
@@ -31,18 +32,32 @@ EOF
 fi
 
 if [[ $# -lt 1 ]]; then
-  print -u2 "usage: $0 <ref-id-or-bare-arxiv-id> [--report key|complete]"
+  print -u2 "usage: $0 --arxiv-id ARXIV_ID|--doi DOI|--isbn ISBN [--report key|complete]"
   exit 1
 fi
 
-ref_key=""
+ref_kind=""
+ref_value=""
 report_mode="key"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
-      print -u2 "usage: $0 <ref-id-or-bare-arxiv-id> [--report key|complete]"
+      print -u2 "usage: $0 --arxiv-id ARXIV_ID|--doi DOI|--isbn ISBN [--report key|complete]"
       exit 0
+      ;;
+    --arxiv-id|--doi|--isbn)
+      if [[ $# -lt 2 ]]; then
+        print -u2 "Missing value for $1"
+        exit 1
+      fi
+      if [[ -n "$ref_kind" ]]; then
+        print -u2 "Only one of --arxiv-id, --doi, or --isbn may be supplied"
+        exit 1
+      fi
+      ref_kind="${1#--}"
+      ref_value="$2"
+      shift 2
       ;;
     --report)
       if [[ $# -lt 2 ]]; then
@@ -51,10 +66,6 @@ while [[ $# -gt 0 ]]; do
       fi
       report_mode="$2"
       shift 2
-      ;;
-    --diagnose)
-      diagnose=true
-      shift
       ;;
     --key)
       report_mode="key"
@@ -73,18 +84,14 @@ while [[ $# -gt 0 ]]; do
       exit 1
       ;;
     *)
-      if [[ -n "$ref_key" ]]; then
-        print -u2 "Unexpected positional argument: $1"
-        exit 1
-      fi
-      ref_key="$1"
-      shift
+      print -u2 "Unknown or unexpected positional argument: $1"
+      exit 1
       ;;
   esac
 done
 
-if [[ -z "$ref_key" ]]; then
-  print -u2 "Missing <ref-id-or-bare-arxiv-id>"
+if [[ -z "$ref_kind" ]]; then
+  print -u2 "Missing --arxiv-id, --doi, or --isbn"
   exit 1
 fi
 
@@ -93,84 +100,144 @@ if [[ "$report_mode" != "key" && "$report_mode" != "complete" ]]; then
   exit 1
 fi
 
-if $diagnose; then
-  diag_log "script=get_ref_summary.sh ref_key=${ref_key} report_mode=${report_mode}"
-fi
-
-report_started="$(diag_now)"
-report_md="$(Rscript - "$ref_key" "$report_mode" <<'EOF'
+report_md="$(Rscript - "$ref_kind" "$ref_value" "$report_mode" <<'EOF'
 args <- commandArgs(trailingOnly = TRUE)
-ref_key <- args[[1]]
-report_mode <- args[[2]]
-if (!nzchar(ref_key)) {
-  stop("One ref id is required.", call. = FALSE)
+ref_kind <- args[[1]]
+ref_value <- args[[2]]
+report_mode <- args[[3]]
+if (!nzchar(ref_kind) || !nzchar(ref_value)) {
+  stop("One strict reference identifier is required.", call. = FALSE)
 }
-if (!grepl("^[A-Za-z0-9_]+:", ref_key) && grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", ref_key)) {
-  ref_key <- paste0("arxiv:", ref_key)
+if (!ref_kind %in% c("arxiv-id", "doi", "isbn")) {
+  stop("Unsupported ref kind: ", ref_kind, call. = FALSE)
 }
 
 cfg <- litxr::litxr_read_config()
-resolve_exact_reference_row <- function(cfg, ref_key) {
-  collections <- litxr:::.litxr_config_collections(cfg)
-  if (!length(collections)) {
-    return(data.table::data.table())
+resolve_strict_reference_row <- function(cfg, ref_kind, ref_value) {
+  thin_path <- switch(
+    ref_kind,
+    "arxiv-id" = litxr:::.litxr_ref_arxiv_path(cfg),
+    "doi" = litxr:::.litxr_ref_doi_path(cfg),
+    "isbn" = litxr:::.litxr_ref_isbn_path(cfg)
+  )
+  key_col <- switch(
+    ref_kind,
+    "arxiv-id" = "arxiv_id",
+    "doi" = "doi",
+    "isbn" = "isbn"
+  )
+  rows <- litxr:::.litxr_read_scaffold_table_safe(thin_path)
+  if (!nrow(rows)) {
+    stop("Thin store is empty or missing: ", thin_path, call. = FALSE)
+  }
+  if (!(key_col %in% names(rows))) {
+    stop("Thin store is missing key column `", key_col, "`: ", thin_path, call. = FALSE)
   }
 
-  is_doi <- grepl("^doi:", ref_key, ignore.case = TRUE) ||
-    grepl("^https?://(dx\\.)?doi\\.org/", ref_key, ignore.case = TRUE) ||
-    grepl("^10\\.", ref_key)
-  is_arxiv <- grepl("^arxiv:", ref_key, ignore.case = TRUE) ||
-    grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", ref_key)
-  route <- if (is_doi) {
-    "crossref"
-  } else if (is_arxiv) {
-    "arxiv"
-  } else {
-    NULL
-  }
-  if (is.null(route)) {
-    return(data.table::data.table())
+  key_value <- trimws(as.character(ref_value[[1L]]))
+  if (!nzchar(key_value)) {
+    stop("Empty strict reference identifier.", call. = FALSE)
   }
 
-  candidate_collections <- Filter(function(collection) identical(collection$remote_channel, route), collections)
-  if (!length(candidate_collections)) {
-    return(data.table::data.table())
-  }
-
-  row_key <- litxr:::.litxr_record_slug(data.table::data.table(ref_id = ref_key, doi = NA_character_))
-  for (collection in candidate_collections) {
-    local_path <- litxr:::.litxr_resolve_local_path(cfg, collection$local_path)
-    if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) {
-      next
-    }
-    paths <- litxr:::.litxr_journal_paths(local_path[[1]])
-    json_path <- file.path(paths$json, paste0(row_key, ".json"))
-    if (!file.exists(json_path)) {
-      next
-    }
-    row <- tryCatch(
-      litxr:::.litxr_storage_payload_to_row(json_path),
-      error = function(e) data.table::data.table()
+  hits <- rows[!is.na(rows[[key_col]]) & as.character(rows[[key_col]]) == key_value, ]
+  if (!nrow(hits)) {
+    stop(
+      "Requested ",
+      key_col,
+      " not found in local thin store: ",
+      key_value,
+      call. = FALSE
     )
-    if (nrow(row)) {
-      return(row)
-    }
+  }
+  if (nrow(hits) != 1L) {
+    stop(
+      "Expected exactly one thin-store row for ",
+      key_col,
+      " ",
+      key_value,
+      " but found ",
+      nrow(hits),
+      ".",
+      call. = FALSE
+    )
+  }
+  if (!("collection_index" %in% names(hits)) || !("json_filename" %in% names(hits))) {
+    stop("Thin store must contain `collection_index` and `json_filename` columns.", call. = FALSE)
   }
 
-  data.table::data.table()
+  collection_index <- suppressWarnings(as.integer(hits$collection_index[[1L]]))
+  if (is.na(collection_index) || collection_index < 1L) {
+    stop("Invalid collection_index in thin store for ", key_value, ".", call. = FALSE)
+  }
+
+  collections <- litxr::litxr_list_collections(cfg)
+  if (collection_index > nrow(collections)) {
+    stop(
+      "collection_index ",
+      collection_index,
+      " is out of bounds for the current config collections.",
+      call. = FALSE
+    )
+  }
+
+  collection_id <- as.character(collections$collection_id[[collection_index]])
+  local_path <- litxr:::.litxr_resolve_local_path(cfg, collections$local_path[[collection_index]])
+  if (is.na(local_path) || !nzchar(local_path)) {
+    stop("Unable to resolve local path for collection_index ", collection_index, ".", call. = FALSE)
+  }
+  json_filename <- trimws(as.character(hits$json_filename[[1L]]))
+  if (!nzchar(json_filename)) {
+    stop("Thin store row is missing `json_filename` for ", key_value, ".", call. = FALSE)
+  }
+  json_path <- file.path(local_path, json_filename)
+  if (!file.exists(json_path)) {
+    stop(
+      "Resolved JSON file not found for ",
+      key_col,
+      " ",
+      key_value,
+      ": ",
+      json_path,
+      call. = FALSE
+    )
+  }
+
+  ref_id <- switch(
+    ref_kind,
+    "arxiv-id" = paste0("arxiv:", key_value),
+    "doi" = paste0("doi:", key_value),
+    "isbn" = paste0("isbn:", key_value)
+  )
+  list(
+    ref_id = ref_id,
+    collection_id = collection_id,
+    json_path = json_path,
+    json_filename = json_filename,
+    thin_row = hits
+  )
 }
 
-hits <- resolve_exact_reference_row(cfg, ref_key)
-if (!nrow(hits)) {
-  stop("No record found for ", ref_key, ".", call. = FALSE)
+resolved <- resolve_strict_reference_row(cfg, ref_kind, ref_value)
+ref_id <- as.character(resolved$ref_id)
+json_path <- as.character(resolved$json_path)
+title <- NA_character_
+abstract <- NA_character_
+row <- tryCatch(
+  litxr:::.litxr_storage_payload_to_row(json_path),
+  error = function(e) data.table::data.table()
+)
+if (is.list(row) && length(row)) {
+  if ("ref_id" %in% names(row) && !is.null(row$ref_id)) {
+    ref_id <- as.character(row$ref_id[[1L]])
+  }
+  if ("title" %in% names(row) && !is.null(row$title)) {
+    title <- as.character(row$title[[1L]])
+  }
+  if ("abstract" %in% names(row) && !is.null(row$abstract)) {
+    abstract <- as.character(row$abstract[[1L]])
+  }
 }
-if (nrow(hits) != 1L) {
-  stop("Expected exactly one record for ", ref_key, " but found ", nrow(hits), ".", call. = FALSE)
-}
-
-ref_id <- as.character(hits$ref_id[[1]])
-title <- if ("title" %in% names(hits)) as.character(hits$title[[1]]) else ref_id
-abstract <- if ("abstract" %in% names(hits)) as.character(hits$abstract[[1]]) else NA_character_
+if (is.na(title) || !nzchar(title)) title <- ref_id
 
 cat(sprintf("ref_id: %s\n", ref_id))
 cat(sprintf("title: %s\n\n", title))
@@ -468,10 +535,5 @@ if (is.null(digest)) {
 }
 EOF
 )"
-
-if $diagnose; then
-  diag_log "step=render_summary elapsed_sec=$(diag_elapsed "$report_started" "$(diag_now)")"
-  diag_log "report_bytes=$(printf '%s' "$report_md" | wc -c | tr -d ' ')"
-fi
 
 printf '%s\n' "$report_md"

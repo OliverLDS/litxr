@@ -2547,25 +2547,8 @@ litxr_add_refs <- function(
 .litxr_journal_paths <- function(local_path) {
   list(
     root = local_path,
-    index = file.path(local_path, "index"),
-    json = file.path(local_path, "ref_json"),
-    md = file.path(local_path, "fulltxt_md"),
-    llm = file.path(local_path, "llm_json"),
-    legacy_json = file.path(local_path, "json"),
-    legacy_md = file.path(local_path, "md"),
-    legacy_llm = file.path(local_path, "llm"),
-    legacy_pdf = file.path(local_path, "pdf")
+    json = local_path
   )
-}
-
-.litxr_existing_collection_dir <- function(primary_path, legacy_path = NULL) {
-  if (!is.null(primary_path) && dir.exists(primary_path)) {
-    return(primary_path)
-  }
-  if (!is.null(legacy_path) && dir.exists(legacy_path)) {
-    return(legacy_path)
-  }
-  primary_path
 }
 
 .litxr_is_absolute_path <- function(path) {

@@ -50,7 +50,7 @@ litxr_init <- function() {
     "Wrote default config to ", config_path, ". ",
     "Edit `project.data_root` and each collection `local_path` before syncing. ",
     "`project.data_root` is the root folder for your literature data store. ",
-    "Each collection `local_path` is the folder where that collection's ref_json/fulltxt_md/llm_json files and index will be stored."
+    "Each collection `local_path` is the folder where that collection's reference JSON files will be stored."
   )
   invisible(config_path)
 }
@@ -154,7 +154,7 @@ litxr_list_journals <- function(config = NULL) {
         collection_type = "journal",
         title = "Journal of Finance",
         remote_channel = "crossref",
-        local_path = "data/literature/journal_of_finance",
+        local_path = "data/literature/ref/journal_of_finance",
         metadata = list(
           publisher = "Wiley",
           issn_print = "0022-1082",
@@ -171,7 +171,7 @@ litxr_list_journals <- function(config = NULL) {
         collection_type = "journal",
         title = "Journal of Financial Economics",
         remote_channel = "crossref",
-        local_path = "data/literature/journal_of_financial_economics",
+        local_path = "data/literature/ref/journal_of_financial_economics",
         metadata = list(
           publisher = "Elsevier",
           issn_print = "0304-405X"
@@ -187,7 +187,7 @@ litxr_list_journals <- function(config = NULL) {
         collection_type = "arxiv_category",
         title = "arXiv cs.AI",
         remote_channel = "arxiv",
-        local_path = "data/literature/arxiv_cs_ai",
+        local_path = "data/literature/ref/arxiv_cs_ai",
         metadata = list(
           archive = "arXiv",
           category = "cs.AI"

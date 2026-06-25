@@ -16,16 +16,16 @@ make_temp_sync_project <- function() {
   litxr::litxr_init()
   cfg <- litxr::litxr_read_config()
   cfg$project$data_root <- file.path(td, "data", "literature")
-  cfg$collections[[1]]$local_path <- file.path(cfg$project$data_root, "journal_of_finance")
-  cfg$collections[[2]]$local_path <- file.path(cfg$project$data_root, "journal_of_financial_economics")
-  cfg$collections[[3]]$local_path <- file.path(cfg$project$data_root, "arxiv_cs_ai")
+  cfg$collections[[1]]$local_path <- file.path(cfg$project$data_root, "ref", "journal_of_finance")
+  cfg$collections[[2]]$local_path <- file.path(cfg$project$data_root, "ref", "journal_of_financial_economics")
+  cfg$collections[[3]]$local_path <- file.path(cfg$project$data_root, "ref", "arxiv_cs_ai")
   dir.create(dirname(cfg$collections[[1]]$local_path), recursive = TRUE, showWarnings = FALSE)
   yaml::write_yaml(cfg, config_path)
   cfg <- litxr::litxr_read_config(config_path)
 
   arxiv_collection <- Filter(function(collection) identical(collection$remote_channel, "arxiv"), cfg$collections)[[1]]
   arxiv_local_path <- litxr:::.litxr_resolve_local_path(cfg, arxiv_collection$local_path)
-  dir.create(file.path(arxiv_local_path, "ref_json"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(arxiv_local_path, recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(cfg$project$data_root, "index"), recursive = TRUE, showWarnings = FALSE)
 
   list(
@@ -39,7 +39,7 @@ make_temp_sync_project <- function() {
 
 test_that("thin ref store sync collapses arxiv versions before inferring identity links", {
   project <- make_temp_sync_project()
-  arxiv_json_dir <- file.path(project$arxiv_local_path, "ref_json")
+  arxiv_json_dir <- project$arxiv_local_path
 
   arxiv_v1 <- list(
     ref_id = "arxiv:2501.99999",
@@ -83,8 +83,10 @@ test_that("thin ref store sync collapses arxiv versions before inferring identit
   )
   expect_true(is.list(migration))
   arxiv_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_arxiv_path(project$cfg), as.data.table = TRUE))
+  doi_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_doi_path(project$cfg), as.data.table = TRUE))
   identity_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_project_ref_identity_index_path(project$cfg), as.data.table = TRUE))
   expect_identical(names(arxiv_store), c("arxiv_id", "collection_index", "json_filename"))
+  expect_identical(names(doi_store), c("doi", "collection_index", "json_filename"))
   expect_identical(sort(names(identity_store)), c("arxiv_id", "doi"))
   expect_true(is.list(migration$diff_paths))
   expect_true(all(c("ref_identity_map", "ref_arxiv", "ref_doi") %in% names(migration$diff_paths)))
@@ -99,7 +101,7 @@ test_that("thin ref store sync collapses arxiv versions before inferring identit
 
 test_that("incremental thin ref store sync preserves existing rows and emits no removals", {
   project <- make_temp_sync_project()
-  arxiv_json_dir <- file.path(project$arxiv_local_path, "ref_json")
+  arxiv_json_dir <- project$arxiv_local_path
 
   arxiv_record <- list(
     ref_id = "arxiv:2502.12345",
@@ -147,7 +149,7 @@ test_that("incremental thin ref store sync preserves existing rows and emits no 
 
 test_that("arxiv-side identity extraction ignores blank DOI values", {
   project <- make_temp_sync_project()
-  arxiv_json_dir <- file.path(project$arxiv_local_path, "ref_json")
+  arxiv_json_dir <- project$arxiv_local_path
 
   arxiv_record <- list(
     ref_id = "arxiv:2502.54321",

@@ -162,7 +162,7 @@
     out <- switch(
       key_type,
       arxiv_id = data.table::data.table(arxiv_id = character()),
-      doi = data.table::data.table(doi = character(), year = integer()),
+      doi = data.table::data.table(doi = character()),
       local_pending = data.table::data.table(ref_id = character())
     )
     return(out)
@@ -213,7 +213,7 @@
     }
     idx <- which(doi_rows)
     if (!length(idx)) {
-      return(data.table::data.table(doi = character(), year = integer()))
+      return(data.table::data.table(doi = character()))
     }
     doi <- vapply(idx, function(i) {
       .litxr_bare_doi(
@@ -222,17 +222,15 @@
         source_id = if ("source_id" %in% names(records)) records$source_id[[i]] else NULL
       )
     }, character(1))
-    year <- if ("year" %in% names(records)) suppressWarnings(as.integer(records$year[idx])) else rep(NA_integer_, length(idx))
     keep <- !is.na(doi) & nzchar(doi)
     doi <- doi[keep]
-    year <- year[keep]
     if (length(doi)) {
       dup <- duplicated(doi)
       if (any(dup)) {
         stop("Duplicate DOI id(s) found while rebuilding thin DOI store: ", paste(unique(doi[dup]), collapse = ", "), call. = FALSE)
       }
     }
-    return(data.table::data.table(doi = doi, year = year))
+    return(data.table::data.table(doi = doi))
   }
 
   pending <- data.table::data.table(

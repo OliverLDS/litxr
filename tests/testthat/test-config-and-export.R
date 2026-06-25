@@ -45,7 +45,7 @@ writeLines(c(
   "\t- journal_id: journal_of_finance",
   "\t  title: Journal of Finance",
   "\t  remote_channel: crossref",
-  "\t  local_path: journal_of_finance"
+  "\t  local_path: ref/journal_of_finance"
 ), tab_cfg_path)
 tab_cfg <- litxr::litxr_read_config(tab_cfg_path)
 stopifnot(identical(tab_cfg$project$name, "bad_tabs"))
@@ -98,7 +98,7 @@ record <- data.table::data.table(
 
 litxr:::.litxr_write_journal_records(record, local_path, journal, cfg = cfg_export)
 stopifnot(!file.exists(file.path(local_path, "index", "references.fst")))
-stopifnot(dir.exists(file.path(local_path, "llm_json")))
+stopifnot(dir.exists(local_path))
 stopifnot(file.exists(litxr:::.litxr_ref_doi_path(cfg_export)))
 stopifnot(!file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "references.fst")))
 stopifnot(!file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "reference_collections.fst")))
@@ -840,7 +840,7 @@ stopifnot(dir.exists(compacted_path))
 stopifnot(!file.exists(delta_path))
 compacted_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
 stopifnot(any(compacted_records$doi == "10.1000/delta"))
-stopifnot(file.exists(file.path(local_path, "ref_json", paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
+stopifnot(file.exists(file.path(local_path, paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
 
 out <- file.path(td_export, "references.bib")
 litxr::litxr_export_bib(out, journal_ids = journal$journal_id, config = cfg_export)
@@ -894,7 +894,7 @@ merged <- litxr:::.litxr_upsert_journal_records(existing, incoming, local_path)
 stopifnot(nrow(merged) == 1L)
 stopifnot(identical(merged$title[[1]], "New Title"))
 stopifnot(identical(merged$note[[1]], "keep me"))
-stopifnot(file.exists(file.path(local_path, "ref_json", "_upsert_conflicts.jsonl")))
+stopifnot(file.exists(file.path(local_path, "_upsert_conflicts.jsonl")))
 
 legacy_truncated <- data.table::copy(record)
 legacy_truncated[["doi"]] <- NA_character_

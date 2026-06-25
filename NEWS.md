@@ -1,3 +1,10 @@
+# litxr 0.1.7.5
+
+- Added the DOI collection sync log as a shared project-level TSV under
+  `log/`, keyed by `collection_id`.
+- Added single-collection incremental support to the thin ref-store sync
+  wrapper while keeping the default cutoff lookup collection-specific.
+
 # litxr 0.1.7.4
 
 - Fixed the thin-store sync pipeline so incremental refreshes no longer

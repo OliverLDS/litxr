@@ -40,12 +40,20 @@
   file.path(.litxr_project_root(cfg), "index")
 }
 
+.litxr_project_log_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "log")
+}
+
+.litxr_project_collection_sync_log_path <- function(cfg) {
+  file.path(.litxr_project_log_dir(cfg), "collection_sync_latest.tsv")
+}
+
 .litxr_project_llm_dir <- function(cfg) {
-  file.path(.litxr_project_root(cfg), "llm")
+  file.path(.litxr_project_root(cfg), "digest", "llm")
 }
 
 .litxr_project_llm_history_dir <- function(cfg) {
-  file.path(.litxr_project_root(cfg), "llm_history")
+  file.path(.litxr_project_root(cfg), "digest", "llm_history")
 }
 
 .litxr_project_md_dir <- function(cfg) {
@@ -66,6 +74,112 @@
     dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
   }
   dir_path
+}
+
+.litxr_ensure_project_log_dir <- function(cfg) {
+  dir_path <- .litxr_project_log_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
+.litxr_empty_collection_sync_log <- function() {
+  data.table::data.table(
+    collection_id = character(),
+    latest_update_timestamp = character()
+  )
+}
+
+.litxr_read_collection_sync_log <- function(cfg) {
+  path <- .litxr_project_collection_sync_log_path(cfg)
+  if (!file.exists(path)) {
+    return(.litxr_empty_collection_sync_log())
+  }
+  rows <- tryCatch(
+    data.table::fread(path, sep = "\t", header = TRUE, na.strings = c("", "NA")),
+    error = function(e) .litxr_empty_collection_sync_log()
+  )
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    return(.litxr_empty_collection_sync_log())
+  }
+  if (!("collection_id" %in% names(rows))) rows$collection_id <- character()
+  if (!("latest_update_timestamp" %in% names(rows))) rows$latest_update_timestamp <- character()
+  rows <- rows[, c("collection_id", "latest_update_timestamp"), with = FALSE]
+  rows$collection_id <- as.character(rows$collection_id)
+  rows$latest_update_timestamp <- as.character(rows$latest_update_timestamp)
+  rows <- rows[!is.na(rows$collection_id) & nzchar(rows$collection_id)]
+  rows[!duplicated(rows$collection_id, fromLast = TRUE), ]
+}
+
+.litxr_write_collection_sync_log <- function(cfg, rows) {
+  path <- .litxr_project_collection_sync_log_path(cfg)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    data.table::fwrite(.litxr_empty_collection_sync_log(), path, sep = "\t")
+    return(invisible(path))
+  }
+  if (!("collection_id" %in% names(rows))) {
+    stop("Collection sync log rows require `collection_id`.", call. = FALSE)
+  }
+  if (!("latest_update_timestamp" %in% names(rows))) {
+    stop("Collection sync log rows require `latest_update_timestamp`.", call. = FALSE)
+  }
+  rows <- rows[, .(
+    collection_id = as.character(collection_id),
+    latest_update_timestamp = as.character(latest_update_timestamp)
+  )]
+  rows <- rows[!is.na(collection_id) & nzchar(collection_id)]
+  if (nrow(rows)) {
+    rows <- rows[!duplicated(collection_id, fromLast = TRUE)]
+  }
+  data.table::fwrite(rows, path, sep = "\t")
+  invisible(path)
+}
+
+.litxr_upsert_collection_sync_log <- function(cfg, collection_id, latest_update_timestamp) {
+  collection_id <- as.character(collection_id)[[1L]]
+  latest_update_timestamp <- as.character(latest_update_timestamp)[[1L]]
+  if (is.na(collection_id) || !nzchar(collection_id)) {
+    stop("`collection_id` must be non-empty.", call. = FALSE)
+  }
+  rows <- .litxr_read_collection_sync_log(cfg)
+  if (!nrow(rows)) {
+    rows <- .litxr_empty_collection_sync_log()
+  }
+  hit <- which(rows$collection_id == collection_id)
+  if (length(hit)) {
+    rows$latest_update_timestamp[hit[1L]] <- latest_update_timestamp
+  } else {
+    rows <- data.table::rbindlist(
+      list(
+        rows,
+        data.table::data.table(collection_id = collection_id, latest_update_timestamp = latest_update_timestamp)
+      ),
+      fill = TRUE
+    )
+  }
+  .litxr_write_collection_sync_log(cfg, rows)
+  invisible(latest_update_timestamp)
+}
+
+.litxr_latest_collection_sync_timestamp <- function(cfg, collection_id) {
+  collection_id <- as.character(collection_id)[[1L]]
+  if (is.na(collection_id) || !nzchar(collection_id)) {
+    return(NA_character_)
+  }
+  rows <- .litxr_read_collection_sync_log(cfg)
+  if (!nrow(rows)) {
+    return(NA_character_)
+  }
+  hit <- rows[rows$collection_id == collection_id, ]
+  if (!nrow(hit)) {
+    return(NA_character_)
+  }
+  ts <- as.character(hit$latest_update_timestamp[[nrow(hit)]])
+  if (!nzchar(ts)) NA_character_ else ts
 }
 
 .litxr_refresh_ref_identity_map <- function(cfg, refs = NULL, identities = NULL) {
@@ -203,9 +317,8 @@
   timestamp <- NA_character_
   notes <- character()
 
-  if (dir.exists(paths$json) || dir.exists(paths$legacy_json)) {
-    json_dir <- .litxr_existing_collection_dir(paths$json, paths$legacy_json)
-    json_files <- sort(list.files(json_dir, pattern = "\\.json$", full.names = TRUE))
+  if (dir.exists(paths$json)) {
+    json_files <- sort(list.files(paths$json, pattern = "\\.json$", full.names = TRUE))
     json_files <- json_files[basename(json_files) != "_upsert_conflicts.jsonl"]
     if (length(json_files)) {
       info <- file.info(json_files)
