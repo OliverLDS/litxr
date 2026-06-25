@@ -11,6 +11,82 @@ xml_text_or_na <- function(node, xpath, ns = NULL) {
   if (is.na(x)) NA_character_ else xml2::xml_text(x)
 }
 
+.litxr_parse_arxiv_posixct <- function(text) {
+  if (inherits(text, "Date")) {
+    return(as.POSIXct(text[[1L]], tz = "UTC"))
+  }
+  if (inherits(text, c("POSIXct", "POSIXt"))) {
+    return(as.POSIXct(text[[1L]], tz = "UTC"))
+  }
+  if (is.numeric(text) && length(text) == 1L && is.finite(text[[1L]])) {
+    maybe_date <- suppressWarnings(as.Date(text[[1L]], origin = "1970-01-01"))
+    if (!is.na(maybe_date)) {
+      return(as.POSIXct(maybe_date, tz = "UTC"))
+    }
+  }
+  text <- as.character(text)[[1L]]
+  text <- trimws(text)
+  if (!nzchar(text) || is.na(text)) {
+    return(as.POSIXct(NA, tz = "UTC"))
+  }
+  if (grepl("^[0-9]+$", text) && nchar(text) <= 7L) {
+    maybe_date <- suppressWarnings(as.Date(as.integer(text), origin = "1970-01-01"))
+    if (!is.na(maybe_date)) {
+      return(as.POSIXct(maybe_date, tz = "UTC"))
+    }
+  }
+
+  safe_parse <- function(value, format = NULL) {
+    tryCatch(
+      suppressWarnings(if (is.null(format)) {
+        as.POSIXct(value, tz = "UTC")
+      } else {
+        as.POSIXct(value, format = format, tz = "UTC")
+      }),
+      error = function(e) as.POSIXct(NA, tz = "UTC")
+    )
+  }
+
+  normalized <- text
+  normalized <- sub("([+-][0-9]{2}):([0-9]{2})$", "\\1\\2", normalized)
+  normalized <- sub("\\.([0-9]+)Z$", "+0000", normalized)
+  normalized <- sub("Z$", "+0000", normalized)
+
+  candidates <- c(
+    normalized,
+    text
+  )
+
+  for (candidate in unique(candidates)) {
+    parsed <- safe_parse(candidate, "%Y-%m-%dT%H:%M:%S%z")
+    if (!is.na(parsed)) {
+      return(parsed)
+    }
+
+    parsed <- safe_parse(candidate, "%Y-%m-%dT%H:%M:%OS%z")
+    if (!is.na(parsed)) {
+      return(parsed)
+    }
+
+    parsed <- safe_parse(candidate, "%Y-%m-%dT%H:%M:%S")
+    if (!is.na(parsed)) {
+      return(parsed)
+    }
+  }
+
+  parsed <- safe_parse(text, "%Y-%m-%d")
+  if (!is.na(parsed)) {
+    return(parsed)
+  }
+
+  parsed <- safe_parse(text)
+  if (!is.na(parsed)) {
+    return(parsed)
+  }
+
+  as.POSIXct(NA, tz = "UTC")
+}
+
 #' Parse one arXiv entry into the unified litxr schema
 #'
 #' @param entry One arXiv Atom entry node.
@@ -34,7 +110,7 @@ parse_arxiv_entry_unified <- function(entry) {
   
   # dates
   published <- xml_text_or_na(entry, ".//*[local-name()='published']")
-  pub_date  <- if (is.na(published)) NA else as.POSIXct(published, tz = "UTC")
+  pub_date  <- if (is.na(published)) as.POSIXct(NA, tz = "UTC") else .litxr_parse_arxiv_posixct(published)
   year      <- if (is.na(pub_date)) NA_integer_ else as.integer(format(pub_date, "%Y"))
   month     <- if (is.na(pub_date)) NA_integer_ else as.integer(format(pub_date, "%m"))
   day       <- if (is.na(pub_date)) NA_integer_ else as.integer(format(pub_date, "%d"))

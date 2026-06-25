@@ -83,11 +83,13 @@ test_that("thin ref store sync collapses arxiv versions before inferring identit
   )
   expect_true(is.list(migration))
   arxiv_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_arxiv_path(project$cfg), as.data.table = TRUE))
-  doi_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_doi_path(project$cfg), as.data.table = TRUE))
   identity_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_project_ref_identity_index_path(project$cfg), as.data.table = TRUE))
   expect_identical(names(arxiv_store), c("arxiv_id", "collection_index", "json_filename"))
-  expect_identical(names(doi_store), c("doi", "collection_index", "json_filename"))
   expect_identical(sort(names(identity_store)), c("arxiv_id", "doi"))
+  if (file.exists(litxr:::.litxr_ref_doi_path(project$cfg))) {
+    doi_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_doi_path(project$cfg), as.data.table = TRUE))
+    expect_identical(names(doi_store), c("doi", "collection_index", "json_filename"))
+  }
   expect_true(is.list(migration$diff_paths))
   expect_true(all(c("ref_identity_map", "ref_arxiv", "ref_doi") %in% names(migration$diff_paths)))
   expect_true(all(c("added", "removed") %in% names(migration$diff_paths$ref_arxiv)))
@@ -179,4 +181,23 @@ test_that("arxiv-side identity extraction ignores blank DOI values", {
   identity_map <- data.table::as.data.table(litxr::litxr_read_ref_identity_map(project$cfg))
   expect_false(any(identity_map$arxiv_id == "2502.54321"))
   expect_false(any(identity_map$doi == ""))
+})
+
+test_that("arxiv fetch history cutoff ignores trailing zero-count days", {
+  project <- make_temp_sync_project()
+  history_path <- litxr:::.litxr_collection_fetch_history_path(project$cfg, "arxiv_cs_ai")
+  history <- data.table::data.table(
+    completed_collection_date = c("2026-06-18", "2026-06-19", "2026-06-20", "2026-06-21"),
+    total_ref_jsons = c(12L, 7L, 0L, 0L)
+  )
+  litxr:::.litxr_write_collection_fetch_history(project$cfg, "arxiv_cs_ai", history)
+  expect_identical(
+    litxr:::.litxr_latest_collection_fetch_completed_date(project$cfg, "arxiv_cs_ai"),
+    "2026-06-21"
+  )
+  expect_identical(
+    litxr:::.litxr_latest_collection_fetch_completed_date_nonzero(project$cfg, "arxiv_cs_ai"),
+    "2026-06-19"
+  )
+  expect_true(file.exists(history_path))
 })

@@ -252,7 +252,7 @@ log_line("collection_ref_dir=", collection_ref_dir)
 log_line("history_path=", history_path)
 
 history <- litxr:::.litxr_read_collection_fetch_history(cfg, collection_id)
-latest_done <- litxr:::.litxr_latest_collection_fetch_completed_date(cfg, collection_id)
+latest_done <- litxr:::.litxr_latest_collection_fetch_completed_date_nonzero(cfg, collection_id)
 
 if (has_text(parsed$start)) {
   start_date <- normalize_date_arg(parsed$start, "start")
@@ -260,7 +260,7 @@ if (has_text(parsed$start)) {
   fetch_mode <- "range"
 } else if (has_text(latest_done)) {
   start_date <- as.character(as.Date(latest_done) + 1L)
-  end_date <- format(Sys.Date(), "%Y-%m-%d")
+  end_date <- as.character(Sys.Date())
   fetch_mode <- "since_latest"
 } else {
   start_date <- NA_character_
@@ -321,14 +321,17 @@ if (identical(fetch_mode, "bootstrap")) {
   }
 
   day_seq <- seq(start_day, end_day, by = "day")
+  if (!inherits(day_seq, "Date")) {
+    day_seq <- as.Date(day_seq, origin = "1970-01-01")
+  }
   for (day in day_seq) {
-    day_text <- format(day, "%Y-%m-%d")
+    day_text <- as.character(as.Date(day, origin = "1970-01-01"))
     history_hit <- if (length(history_lookup) && !is.null(names(history_lookup)) && day_text %in% names(history_lookup)) {
       history_lookup[[day_text]]
     } else {
       NULL
     }
-    if (!isTRUE(parsed$force) && !is.null(history_hit) && !is.na(history_hit)) {
+    if (!isTRUE(parsed$force) && !is.null(history_hit) && !is.na(history_hit) && history_hit > 0L) {
       log_line("date=", day_text, " skipped=already_completed")
       days_skipped <- days_skipped + 1L
       next

@@ -2047,7 +2047,7 @@ litxr_add_refs <- function(
     out[["pub_date"]] <- as.POSIXct(rep(NA_character_, nrow(out)), tz = "UTC")
   }
   if (!inherits(out[["pub_date"]], "POSIXct")) {
-    out[["pub_date"]] <- as.POSIXct(out[["pub_date"]], tz = "UTC")
+    out[["pub_date"]] <- .litxr_parse_arxiv_posixct(out[["pub_date"]])
   }
 
   if (!("year" %in% names(out))) out[["year"]] <- rep(NA_integer_, nrow(out))
@@ -2408,7 +2408,26 @@ litxr_add_refs <- function(
 }
 
 .litxr_format_arxiv_datetime <- function(x, end = FALSE) {
-  text <- as.character(x)
+  if (inherits(x, "Date")) {
+    text <- format(x[[1L]], "%Y-%m-%d")
+  } else if (inherits(x, c("POSIXct", "POSIXt"))) {
+    text <- format(as.Date(x[[1L]], tz = "UTC"), "%Y-%m-%d")
+  } else if (is.numeric(x) && length(x) == 1L && is.finite(x[[1L]])) {
+    maybe_date <- suppressWarnings(as.Date(x[[1L]], origin = "1970-01-01"))
+    text <- if (!is.na(maybe_date)) format(maybe_date, "%Y-%m-%d") else as.character(x[[1L]])
+  } else {
+    text <- as.character(x[[1L]])
+  }
+  if (grepl("^[0-9]+$", text) && nchar(text) <= 7L) {
+    maybe_date <- suppressWarnings(as.Date(as.integer(text), origin = "1970-01-01"))
+    if (!is.na(maybe_date)) {
+      return(if (end) {
+        paste0(format(maybe_date, "%Y%m%d"), "2359")
+      } else {
+        paste0(format(maybe_date, "%Y%m%d"), "0000")
+      })
+    }
+  }
   if (grepl("^[0-9]{4}$", text)) {
     return(if (end) paste0(text, "12312359") else paste0(text, "01010000"))
   }
@@ -2423,7 +2442,7 @@ litxr_add_refs <- function(
     return(text)
   }
 
-  parsed <- as.POSIXct(text, tz = "UTC")
+  parsed <- .litxr_parse_arxiv_posixct(text)
   if (is.na(parsed)) {
     stop("Unable to parse arXiv submittedDate value: ", text, call. = FALSE)
   }
@@ -2567,7 +2586,7 @@ litxr_add_refs <- function(
   }
 
   if ("pub_date" %in% names(out)) {
-    out[["pub_date"]] <- as.POSIXct(out[["pub_date"]], tz = "UTC")
+    out[["pub_date"]] <- .litxr_parse_arxiv_posixct(out[["pub_date"]])
   }
 
   out

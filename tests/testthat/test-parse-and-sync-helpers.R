@@ -120,6 +120,22 @@ stopifnot(identical(arxiv_row$doi[[1]], "10.1000/arxiv-example"))
 stopifnot(identical(arxiv_row$entry_type[[1]], "unpublished"))
 stopifnot(identical(arxiv_row$url[[1]], "http://arxiv.org/abs/2501.12345v2"))
 
+arxiv_date_only <- litxr:::.litxr_parse_arxiv_posixct("2026-06-19")
+stopifnot(inherits(arxiv_date_only, "POSIXct"))
+stopifnot(identical(format(arxiv_date_only, "%Y-%m-%d"), "2026-06-19"))
+
+storage_payload_date_only <- tempfile("litxr-storage-date-only-", fileext = ".json")
+jsonlite::write_json(
+  list(pub_date = "2026-06-19"),
+  storage_payload_date_only,
+  auto_unbox = TRUE,
+  pretty = FALSE,
+  null = "null"
+)
+storage_payload_row <- litxr:::.litxr_storage_payload_as_list(storage_payload_date_only)
+stopifnot(inherits(storage_payload_row$pub_date, "POSIXct"))
+stopifnot(identical(format(storage_payload_row$pub_date, "%Y-%m-%d"), "2026-06-19"))
+
 arxiv_row_v1 <- data.table::copy(arxiv_row)
 arxiv_row_v1$raw_entry <- list(NULL)
 arxiv_row_v1$title[[1]] <- "Example arXiv Paper v1"
@@ -277,7 +293,7 @@ journal_arxiv <- list(
   remote_channel = "arxiv"
 )
 litxr:::.litxr_write_journal_records(arxiv_row, td_arxiv, journal_arxiv)
-stopifnot(length(list.files(file.path(td_arxiv, "ref_json"), pattern = "\\.json$")) == 1L)
+stopifnot(length(list.files(td_arxiv, pattern = "\\.json$")) == 1L)
 
 body_text <- paste(deparse(body(get("fetch_arxiv_xml", envir = asNamespace("litxr")))), collapse = "\n")
 stopifnot(grepl("start = as.integer\\(start\\)", body_text))

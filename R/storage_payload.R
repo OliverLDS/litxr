@@ -159,7 +159,7 @@
   } else {
     pub_date <- .litxr_scalar_or_na(pub_date)
     values$pub_date <- if (!is.na(pub_date) && nzchar(pub_date)) {
-      as.POSIXct(pub_date, tz = "UTC")
+      .litxr_parse_arxiv_posixct(pub_date)
     } else {
       defaults$pub_date
     }
@@ -201,7 +201,7 @@
         scalar <- if (is.list(value)) value[[1L]] else value[[1L]]
         scalar <- as.character(scalar)
         values[[name]] <- if (!is.na(scalar) && nzchar(scalar)) {
-          as.POSIXct(scalar, tz = "UTC")
+          .litxr_parse_arxiv_posixct(scalar)
         } else {
           defaults[[name]]
         }

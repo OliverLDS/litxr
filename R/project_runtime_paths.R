@@ -36,6 +36,37 @@
   if (is.null(x)) y else x
 }
 
+.litxr_normalize_calendar_date <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(NA_character_)
+  }
+  if (inherits(x, "Date")) {
+    return(as.character(x[[1L]]))
+  }
+  if (inherits(x, c("POSIXct", "POSIXt"))) {
+    return(as.character(as.Date(x[[1L]], tz = "UTC")))
+  }
+
+  text <- as.character(x[[1L]])
+  text <- trimws(text)
+  if (!nzchar(text) || is.na(text)) {
+    return(NA_character_)
+  }
+  if (grepl("^[0-9]{8}$", text)) {
+    parsed <- suppressWarnings(as.Date(text, format = "%Y%m%d"))
+    if (!is.na(parsed)) return(as.character(parsed))
+  }
+  if (grepl("^[0-9]+$", text) && nchar(text) <= 7L) {
+    parsed <- suppressWarnings(as.Date(as.integer(text), origin = "1970-01-01"))
+    if (!is.na(parsed)) return(as.character(parsed))
+  }
+  parsed <- suppressWarnings(as.Date(text))
+  if (!is.na(parsed)) {
+    return(as.character(parsed))
+  }
+  NA_character_
+}
+
 .litxr_project_index_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "index")
 }
@@ -140,17 +171,17 @@
     error = function(e) .litxr_empty_collection_fetch_history()
   )
   rows <- data.table::as.data.table(rows)
-  if (!nrow(rows)) {
+  required_cols <- c("completed_collection_date", "total_ref_jsons")
+  if (!nrow(rows) || !all(required_cols %in% names(rows))) {
     return(.litxr_empty_collection_fetch_history())
   }
-  if (!("completed_collection_date" %in% names(rows))) rows$completed_collection_date <- character()
-  if (!("total_ref_jsons" %in% names(rows))) rows$total_ref_jsons <- integer()
-  rows <- rows[, c("completed_collection_date", "total_ref_jsons"), with = FALSE]
-  rows$completed_collection_date <- as.character(rows$completed_collection_date)
+  rows <- rows[, required_cols, with = FALSE]
+  rows$completed_collection_date <- vapply(rows$completed_collection_date, .litxr_normalize_calendar_date, character(1))
   rows$total_ref_jsons <- suppressWarnings(as.integer(rows$total_ref_jsons))
-  rows <- rows[!is.na(rows$completed_collection_date) & nzchar(rows$completed_collection_date)]
+  keep <- !is.na(rows[["completed_collection_date"]]) & nzchar(rows[["completed_collection_date"]])
+  rows <- rows[which(keep), , drop = FALSE]
   if (nrow(rows)) {
-    rows <- rows[!duplicated(rows$completed_collection_date, fromLast = TRUE), ]
+    rows <- rows[which(!duplicated(rows[["completed_collection_date"]], fromLast = TRUE)), , drop = FALSE]
     data.table::setorder(rows, completed_collection_date)
   }
   rows
@@ -171,7 +202,7 @@
     stop("Collection fetch history rows require `total_ref_jsons`.", call. = FALSE)
   }
   rows <- data.table::data.table(
-    completed_collection_date = as.character(rows$completed_collection_date),
+    completed_collection_date = vapply(rows$completed_collection_date, .litxr_normalize_calendar_date, character(1)),
     total_ref_jsons = suppressWarnings(as.integer(rows$total_ref_jsons))
   )
   rows <- rows[!is.na(rows$completed_collection_date) & nzchar(rows$completed_collection_date), , drop = FALSE]
@@ -185,7 +216,7 @@
 
 .litxr_append_collection_fetch_history <- function(cfg, collection_id, completed_collection_date, total_ref_jsons) {
   collection_id <- as.character(collection_id)[[1L]]
-  completed_collection_date <- as.character(completed_collection_date)[[1L]]
+  completed_collection_date <- .litxr_normalize_calendar_date(completed_collection_date)
   total_ref_jsons <- suppressWarnings(as.integer(total_ref_jsons))
   if (length(total_ref_jsons) < 1L || is.na(total_ref_jsons[[1L]])) {
     total_ref_jsons <- NA_integer_
@@ -220,7 +251,21 @@
   if (!nrow(rows)) {
     return(NA_character_)
   }
-  as.character(rows$completed_collection_date[[nrow(rows)]])
+  .litxr_normalize_calendar_date(rows$completed_collection_date[[nrow(rows)]])
+}
+
+.litxr_latest_collection_fetch_completed_date_nonzero <- function(cfg, collection_id) {
+  rows <- .litxr_read_collection_fetch_history(cfg, collection_id)
+  if (!nrow(rows)) {
+    return(NA_character_)
+  }
+  rows$total_ref_jsons <- suppressWarnings(as.integer(rows$total_ref_jsons))
+  keep <- !is.na(rows$total_ref_jsons) & rows$total_ref_jsons > 0L
+  if (!any(keep)) {
+    return(NA_character_)
+  }
+  rows <- rows[keep, , drop = FALSE]
+  .litxr_normalize_calendar_date(rows$completed_collection_date[[nrow(rows)]])
 }
 
 .litxr_project_llm_dir <- function(cfg) {
