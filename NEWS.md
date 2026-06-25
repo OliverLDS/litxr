@@ -1,3 +1,11 @@
+# litxr 0.1.7.4
+
+- Fixed the thin-store sync pipeline so incremental refreshes no longer
+  remove rows or emit removal TSVs, and full rebuilds write the exact
+  arXiv/DOI identity shape instead of carrying historical compatibility rows.
+- Narrowed the arXiv identity-map write path to exclude blank DOI links and
+  kept `ref_arxiv.fst` to the single `arxiv_id` column.
+
 # litxr 0.1.7.3
 
 - Removed the merge-on-write bottleneck from the normalized scaffold writer.

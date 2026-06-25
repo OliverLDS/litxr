@@ -120,7 +120,7 @@ test_that("refactor hardening paths work through identity/entity layer", {
   expect_true(file.exists(migration$project_paths$ref_identity_map))
   expect_true("ref_arxiv" %in% names(migration$project_paths))
   expect_true("ref_doi" %in% names(migration$project_paths))
-  expect_true("ref_local_pending" %in% names(migration$project_paths))
+  expect_true("ref_isbn" %in% names(migration$project_paths))
 
   diag_script <- find_script("scripts", "diagnose_refactor_store.R")
   migrate_script <- find_script("scripts", "sync_thin_ref_stores.R")
@@ -206,10 +206,10 @@ test_that("refactor hardening paths work through identity/entity layer", {
     key_cols = "ref_id"
   )
 
-  pending_path <- litxr:::.litxr_ref_local_pending_path(cfg)
+  pending_path <- litxr:::.litxr_ref_isbn_path(cfg)
   pending_row <- data.table::data.table(
     ref_id = "local:pending-note",
-    key_type = "local_pending",
+    key_type = "isbn",
     key_value = "local:pending-note"
   )
   fst::write_fst(as.data.frame(pending_row), pending_path)
@@ -217,6 +217,6 @@ test_that("refactor hardening paths work through identity/entity layer", {
   authoritative_audit <- litxr::litxr_audit_normalized_authoritative_state(cfg)
   expect_true(any(authoritative_audit$orphan_arxiv_payload_rows$ref_id == "arxiv:9999.99999"))
   expect_true(any(authoritative_audit$orphan_doi_payload_rows$ref_id == "doi:10.9999/orphan"))
-  expect_true(any(authoritative_audit$unresolved_local_pending_rows$ref_id == "local:pending-note"))
+  expect_true(any(authoritative_audit$unresolved_isbn_rows$ref_id == "local:pending-note"))
   expect_true(data.table::is.data.table(authoritative_audit$compatibility_runtime_output_stale))
 })

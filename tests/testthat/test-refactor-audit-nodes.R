@@ -158,10 +158,10 @@ test_that("refactor audit node script emits all report sections", {
     tags = "audit"
   ), config = cfg)
 
-  pending_path <- litxr:::.litxr_ref_local_pending_path(cfg)
+  pending_path <- litxr:::.litxr_ref_isbn_path(cfg)
   fst::write_fst(as.data.frame(data.table::data.table(
     ref_id = "local:pending-audit",
-    key_type = "local_pending",
+    key_type = "isbn",
     key_value = "local:pending-audit"
   )), pending_path)
 
@@ -181,7 +181,7 @@ test_that("refactor audit node script emits all report sections", {
   expect_true(refresh_timing$sample_ref_count >= 1L)
   runtime_projection <- source_env$report_runtime_compatibility_projection(cfg, oversized_mb = 0.0001)
   expect_true(is.list(runtime_projection))
-  expect_true(all(c("summary", "duplicate_identity_conflicts", "orphan_arxiv_payload_rows", "orphan_doi_payload_rows", "unresolved_local_pending_rows", "compatibility_runtime_output_stale") %in% names(runtime_projection)))
+  expect_true(all(c("summary", "duplicate_identity_conflicts", "orphan_arxiv_payload_rows", "orphan_doi_payload_rows", "unresolved_isbn_rows", "compatibility_runtime_output_stale") %in% names(runtime_projection)))
   embedding_timing <- source_env$report_embedding_search_shard_timing(cfg)
   expect_true(is.list(embedding_timing))
   expect_true(all(c("collection_id", "field", "model", "manifest_path", "shard_dir", "top_n", "result_n", "elapsed_sec") %in% names(embedding_timing)))
@@ -191,7 +191,7 @@ test_that("refactor audit node script emits all report sections", {
   identity_audit <- source_env$report_identity_conflict_audit(cfg)
   expect_true(is.list(identity_audit))
   expect_true("duplicate_identity_conflicts" %in% names(identity_audit))
-  pending_audit <- source_env$report_unresolved_local_pending_audit(cfg)
+  pending_audit <- source_env$report_unresolved_isbn_audit(cfg)
   expect_true(is.list(pending_audit))
-  expect_true("unresolved_local_pending_rows" %in% names(pending_audit))
+  expect_true("unresolved_isbn_rows" %in% names(pending_audit))
 })

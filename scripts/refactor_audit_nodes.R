@@ -26,7 +26,7 @@ usage <- function() {
       "                     One of: all, derived_append_shard_state, legacy_delta_presence,",
       "                     entity_refresh_timing, runtime_compatibility_projection,",
       "                     embedding_search_shard_timing, projection_size_reduction,",
-      "                     identity_conflict_audit, unresolved_local_pending_audit.",
+      "                     identity_conflict_audit, unresolved_isbn_audit.",
       "  --oversized-mb N   Threshold used by refactor diagnostics. Default: 25.",
       "  --sample-n N       Number of refs to use for entity-refresh timing. Default: 10.",
       "  -h, --help         Show this help message.",
@@ -363,7 +363,7 @@ report_runtime_compatibility_projection <- function(cfg, oversized_mb = 25) {
     duplicate_identity_conflicts = normalized$duplicate_identity_conflicts,
     orphan_arxiv_payload_rows = normalized$orphan_arxiv_payload_rows,
     orphan_doi_payload_rows = normalized$orphan_doi_payload_rows,
-    unresolved_local_pending_rows = normalized$unresolved_local_pending_rows,
+    unresolved_isbn_rows = normalized$unresolved_isbn_rows,
     compatibility_runtime_output_stale = normalized$compatibility_runtime_output_stale
   )
 }
@@ -410,10 +410,10 @@ report_identity_conflict_audit <- function(cfg) {
   )
 }
 
-report_unresolved_local_pending_audit <- function(cfg) {
+report_unresolved_isbn_audit <- function(cfg) {
   normalized <- litxr::litxr_audit_normalized_authoritative_state(cfg)
   list(
-    unresolved_local_pending_rows = normalized$unresolved_local_pending_rows
+    unresolved_isbn_rows = normalized$unresolved_isbn_rows
   )
 }
 
@@ -435,7 +435,7 @@ if (!identical(Sys.getenv("LITXR_REFRACTOR_AUDIT_NODES_SOURCE_ONLY"), "1")) {
     "embedding_search_shard_timing",
     "projection_size_reduction",
     "identity_conflict_audit",
-    "unresolved_local_pending_audit"
+    "unresolved_isbn_audit"
   )
   if (!report_mode %in% valid_reports) {
     stop("Unknown report mode: ", report_mode, call. = FALSE)
@@ -451,7 +451,7 @@ if (!identical(Sys.getenv("LITXR_REFRACTOR_AUDIT_NODES_SOURCE_ONLY"), "1")) {
       embedding_search_shard_timing = report_embedding_search_shard_timing(cfg),
       projection_size_reduction = measure_projection_reduction(cfg),
       identity_conflict_audit = report_identity_conflict_audit(cfg),
-      unresolved_local_pending_audit = report_unresolved_local_pending_audit(cfg)
+      unresolved_isbn_audit = report_unresolved_isbn_audit(cfg)
     ),
     derived_append_shard_state = report_derived_append_shard_state(cfg),
     legacy_delta_presence = report_legacy_delta_presence(cfg),
@@ -460,7 +460,7 @@ if (!identical(Sys.getenv("LITXR_REFRACTOR_AUDIT_NODES_SOURCE_ONLY"), "1")) {
     embedding_search_shard_timing = report_embedding_search_shard_timing(cfg),
     projection_size_reduction = measure_projection_reduction(cfg),
     identity_conflict_audit = report_identity_conflict_audit(cfg),
-    unresolved_local_pending_audit = report_unresolved_local_pending_audit(cfg)
+    unresolved_isbn_audit = report_unresolved_isbn_audit(cfg)
   )
 
   emit_json(c(list(status = "ok", report_mode = report_mode), if (identical(report_mode, "all")) list(reports = result) else list(report = result)))

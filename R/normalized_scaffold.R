@@ -6,6 +6,10 @@
   file.path(.litxr_project_index_dir(cfg), "ref_doi.fst")
 }
 
+.litxr_ref_isbn_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "ref_isbn.fst")
+}
+
 .litxr_ref_local_pending_path <- function(cfg) {
   file.path(.litxr_project_index_dir(cfg), "ref_local_pending.fst")
 }
@@ -446,7 +450,7 @@
     duplicate_identity_conflicts = .litxr_normalized_duplicate_identity_conflicts(identity_map),
     orphan_arxiv_payload_rows = .litxr_normalized_orphan_payload_rows(arxiv_payload, entity_ref_ids, id_type = "arxiv"),
     orphan_doi_payload_rows = .litxr_normalized_orphan_payload_rows(doi_payload, entity_ref_ids, id_type = "doi"),
-    unresolved_local_pending_rows = pending_payload,
+    unresolved_isbn_rows = pending_payload,
     compatibility_runtime_output_stale = compatibility_state$project_reference_cache
   )
 }

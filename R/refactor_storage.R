@@ -159,7 +159,7 @@
 }
 
 .litxr_sync_thin_rows_from_payload <- function(payload, branch = c("arxiv", "doi")) {
-  branch <- match.arg(branch)
+  branch <- match.arg(branch, c("arxiv", "doi", "isbn"))
   ref_id <- .litxr_sync_scalar_chr(payload$ref_id)
   source_id <- .litxr_sync_scalar_chr(payload$source_id)
   arxiv_versioned <- .litxr_sync_scalar_chr(payload$arxiv_id_versioned)
@@ -169,9 +169,14 @@
     if (is.na(arxiv_value) || !nzchar(arxiv_value)) {
       return(NULL)
     }
-    doi_value <- .litxr_sync_scalar_chr(payload$doi)
-    if (is.na(doi_value) || !nzchar(doi_value)) {
+    doi_raw <- payload[["doi"]]
+    if (is.null(doi_raw) || !length(doi_raw)) {
       doi_value <- NA_character_
+    } else {
+      doi_value <- trimws(as.character(doi_raw)[[1L]])
+      if (!nzchar(doi_value)) {
+        doi_value <- NA_character_
+      }
     }
     return(list(
       arxiv_id = arxiv_value,
@@ -187,7 +192,22 @@
 
   doi_value <- .litxr_bare_doi(doi = payload$doi)
   if (is.na(doi_value) || !nzchar(doi_value)) {
+    if (identical(branch, "isbn")) {
+      isbn_value <- .litxr_sync_scalar_chr(payload$isbn)
+      if (is.na(isbn_value) || !nzchar(isbn_value)) {
+        return(NULL)
+      }
+      return(list(isbn = isbn_value))
+    }
     return(NULL)
+  }
+
+  if (identical(branch, "isbn")) {
+    isbn_value <- .litxr_sync_scalar_chr(payload$isbn)
+    if (is.na(isbn_value) || !nzchar(isbn_value)) {
+      return(NULL)
+    }
+    return(list(isbn = isbn_value))
   }
 
   list(
@@ -248,43 +268,12 @@
   list(refs = refs, links = links)
 }
 
-.litxr_upsert_project_ref_identity_map <- function(cfg, identities, diff_dir = NULL) {
+.litxr_upsert_project_ref_identity_map <- function(cfg, identities, diff_dir = NULL, remove_missing = FALSE) {
   identities <- data.table::as.data.table(identities)
+  remove_missing <- isTRUE(remove_missing)
   existing <- .litxr_read_project_ref_identity_index(cfg)
   identity_keys <- if (nrow(identities)) paste(identities$arxiv_id, identities$doi, sep = "\r") else character()
   existing_keys <- if (nrow(existing)) paste(existing$arxiv_id, existing$doi, sep = "\r") else character()
-  if (!nrow(existing)) {
-    .litxr_write_project_ref_identity_index(cfg, identities)
-    added <- if (nrow(identities)) unique(identity_keys) else character()
-    removed <- character()
-    added_path <- removed_path <- NA_character_
-    if (!is.null(diff_dir) && length(added)) {
-      added_path <- file.path(diff_dir, "ref_identity_map_added.tsv")
-      utils::write.table(identities, file = added_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
-    }
-    if (!is.null(diff_dir) && length(removed)) {
-      removed_path <- file.path(diff_dir, "ref_identity_map_removed.tsv")
-      utils::write.table(data.table::data.table(arxiv_id = character(), doi = character()), file = removed_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
-    }
-    return(list(
-      rows = identities,
-      added = added,
-      removed = removed,
-      added_path = added_path,
-      removed_path = removed_path
-    ))
-  }
-  if (!nrow(identities)) {
-    .litxr_write_project_ref_identity_index(cfg, existing[0, ])
-    removed <- unique(paste(existing$arxiv_id, existing$doi, sep = "\r"))
-    removed_path <- NA_character_
-    if (!is.null(diff_dir) && length(removed)) {
-      removed_path <- file.path(diff_dir, "ref_identity_map_removed.tsv")
-      utils::write.table(data.table::data.table(arxiv_id = existing$arxiv_id, doi = existing$doi), file = removed_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
-    }
-    return(list(rows = existing[0, ], added = character(), removed = removed, added_path = NA_character_, removed_path = removed_path))
-  }
-
   if (!("arxiv_id" %in% names(existing))) existing[["arxiv_id"]] <- rep(NA_character_, nrow(existing))
   if (!("doi" %in% names(existing))) existing[["doi"]] <- rep(NA_character_, nrow(existing))
   if (!("arxiv_id" %in% names(identities))) identities[["arxiv_id"]] <- rep(NA_character_, nrow(identities))
@@ -295,28 +284,48 @@
   identities$arxiv_id <- as.character(identities$arxiv_id)
   identities$doi <- as.character(identities$doi)
 
-  updated_arxiv <- unique(identities$arxiv_id)
-  updated_doi <- unique(identities$doi)
-  updated_arxiv <- updated_arxiv[!is.na(updated_arxiv) & nzchar(updated_arxiv)]
-  updated_doi <- updated_doi[!is.na(updated_doi) & nzchar(updated_doi)]
+  if (remove_missing) {
+    if (nrow(identities)) {
+      identity_keys <- identity_keys[!is.na(identity_keys) & nzchar(identity_keys)]
+      identities <- identities[!duplicated(identity_keys), , drop = FALSE]
+    }
+    out <- identities
+    if (!nrow(out)) {
+      out <- existing[0, c("arxiv_id", "doi"), drop = FALSE]
+    }
+    .litxr_write_project_ref_identity_index(cfg, out)
+    added <- if (nrow(out)) setdiff(unique(paste(out$arxiv_id, out$doi, sep = "\r")), existing_keys) else character()
+    removed <- if (nrow(existing)) setdiff(existing_keys, unique(paste(out$arxiv_id, out$doi, sep = "\r"))) else character()
+    added_rows <- if (length(added)) out[paste(out$arxiv_id, out$doi, sep = "\r") %in% added, , drop = FALSE] else out[0, ]
+    removed_rows <- if (length(removed)) existing[existing_keys %in% removed, , drop = FALSE] else existing[0, ]
+    added_path <- removed_path <- NA_character_
+    if (!is.null(diff_dir) && length(added_rows)) {
+      added_path <- file.path(diff_dir, "ref_identity_map_added.tsv")
+      utils::write.table(added_rows, file = added_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    }
+    if (!is.null(diff_dir) && length(removed_rows)) {
+      removed_path <- file.path(diff_dir, "ref_identity_map_removed.tsv")
+      utils::write.table(removed_rows, file = removed_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    }
+    return(list(rows = out, added = added, removed = removed, added_path = added_path, removed_path = removed_path))
+  }
 
-  keep_existing <- !(existing$arxiv_id %in% updated_arxiv | existing$doi %in% updated_doi)
-  out <- data.table::rbindlist(list(existing[keep_existing, ], identities), fill = TRUE)
-  out <- out[!duplicated(paste(out$arxiv_id, out$doi, sep = "\r")), ]
+  if (!nrow(existing)) {
+    out <- identities[!duplicated(identity_keys), , drop = FALSE]
+  } else {
+    keep_existing <- !(existing$arxiv_id %in% identities$arxiv_id | existing$doi %in% identities$doi)
+    out <- data.table::rbindlist(list(existing[keep_existing, ], identities), fill = TRUE)
+    out <- out[!duplicated(paste(out$arxiv_id, out$doi, sep = "\r")), ]
+  }
   .litxr_write_project_ref_identity_index(cfg, out)
   added_rows <- if (nrow(identities)) identities[!(identity_keys %in% existing_keys), , drop = FALSE] else identities
-  removed_rows <- if (nrow(existing)) existing[existing_keys %in% setdiff(existing_keys, identity_keys), , drop = FALSE] else existing
   added <- if (nrow(added_rows)) unique(paste(added_rows$arxiv_id, added_rows$doi, sep = "\r")) else character()
-  removed <- if (nrow(removed_rows)) unique(paste(removed_rows$arxiv_id, removed_rows$doi, sep = "\r")) else character()
   added_path <- removed_path <- NA_character_
   if (!is.null(diff_dir) && length(added)) {
     added_path <- file.path(diff_dir, "ref_identity_map_added.tsv")
     utils::write.table(added_rows, file = added_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
   }
-  if (!is.null(diff_dir) && length(removed)) {
-    removed_path <- file.path(diff_dir, "ref_identity_map_removed.tsv")
-    utils::write.table(removed_rows, file = removed_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
-  }
+  removed <- character()
   list(
     rows = out,
     added = added,
@@ -331,12 +340,17 @@
   folders <- .litxr_sync_collection_folder_names(cfg, collection_ids = collection_ids)
   arxiv_branch_folders <- intersect(folders, c("arxiv_cs_ai", "manual_arxiv_refs"))
   doi_branch_folders <- setdiff(folders, arxiv_branch_folders)
+  collections <- .litxr_config_collections(cfg)
+  isbn_branch_ids <- vapply(collections, function(collection) identical(collection$remote_channel, "isbn"), logical(1))
+  isbn_branch_folders <- intersect(folders, vapply(collections[isbn_branch_ids], `[[`, character(1), "collection_id"))
 
   arxiv_rows_list <- list()
   doi_rows_list <- list()
+  isbn_rows_list <- list()
 
   arxiv_count <- 0L
   doi_count <- 0L
+  isbn_count <- 0L
 
   for (folder in arxiv_branch_folders) {
     files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
@@ -360,8 +374,20 @@
     }
   }
 
+  for (folder in isbn_branch_folders) {
+    files <- .litxr_sync_json_files_after(file.path(root, folder, "ref_json"), json_mtime_after = json_mtime_after)
+    for (path in files) {
+      rows <- .litxr_sync_thin_rows_from_payload(jsonlite::fromJSON(path, simplifyVector = FALSE), branch = "isbn")
+      if (!is.null(rows)) {
+        isbn_count <- isbn_count + 1L
+        isbn_rows_list[[isbn_count]] <- rows
+      }
+    }
+  }
+
   arxiv_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), doi = character())
   doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), year = integer())
+  isbn_rows <- if (length(isbn_rows_list)) data.table::rbindlist(isbn_rows_list, fill = TRUE) else data.table::data.table(isbn = character())
 
   if (nrow(arxiv_rows)) {
     arxiv_rows$arxiv_version <- suppressWarnings(as.integer(arxiv_rows$arxiv_version))
@@ -379,12 +405,24 @@
       )
     }
   }
+  if (nrow(isbn_rows)) {
+    dup_isbn <- duplicated(isbn_rows$isbn)
+    if (any(dup_isbn)) {
+      stop(
+        "Duplicate ISBN id(s) found while rebuilding thin ISBN store: ",
+        paste(unique(isbn_rows$isbn[dup_isbn]), collapse = ", "),
+        call. = FALSE
+      )
+    }
+  }
   list(
     selected_collection_ids = folders,
     arxiv_folders = arxiv_branch_folders,
     doi_folders = doi_branch_folders,
+    isbn_folders = isbn_branch_folders,
     arxiv_rows = arxiv_rows,
-    doi_rows = doi_rows
+    doi_rows = doi_rows,
+    isbn_rows = isbn_rows
   )
 }
 
@@ -448,23 +486,46 @@
   )
 }
 
-.litxr_upsert_scaffold_rows <- function(path, rows, key_cols) {
+.litxr_upsert_scaffold_rows <- function(path, rows, key_cols, remove_missing = FALSE) {
   rows <- data.table::as.data.table(rows)
   key_cols <- as.character(key_cols)
+  remove_missing <- isTRUE(remove_missing)
   if (!length(key_cols)) {
     stop("`key_cols` must be supplied for scaffold upsert.", call. = FALSE)
-  }
-  if (!nrow(rows)) {
-    return(list(
-      written = FALSE,
-      added = character(),
-      removed = character(),
-      rows = .litxr_read_scaffold_table_safe(path)
-    ))
   }
 
   existing <- .litxr_read_scaffold_table_safe(path)
   new_keys <- .litxr_scaffold_row_keys(rows, key_cols)
+  if (!nrow(rows)) {
+    if (remove_missing) {
+      empty_rows <- if (nrow(existing)) existing[0, , drop = FALSE] else rows
+      fst::write_fst(as.data.frame(empty_rows), path)
+      return(list(
+        written = TRUE,
+        added = character(),
+        removed = if (nrow(existing)) unique(.litxr_scaffold_row_keys(existing, key_cols)) else character(),
+        rows = empty_rows
+      ))
+    }
+    return(list(
+      written = FALSE,
+      added = character(),
+      removed = character(),
+      rows = existing
+    ))
+  }
+
+  if (remove_missing) {
+    rows <- rows[!duplicated(new_keys), , drop = FALSE]
+    fst::write_fst(as.data.frame(rows), path)
+    return(list(
+      written = TRUE,
+      added = unique(new_keys),
+      removed = if (nrow(existing)) setdiff(unique(.litxr_scaffold_row_keys(existing, key_cols)), unique(new_keys)) else character(),
+      rows = rows
+    ))
+  }
+
   if (!nrow(existing)) {
     rows <- rows[!duplicated(new_keys), ]
     fst::write_fst(as.data.frame(rows), path)
@@ -482,14 +543,14 @@
   out <- data.table::rbindlist(list(kept, rows), fill = TRUE)
   out_keys <- .litxr_scaffold_row_keys(out, key_cols)
   if (length(out_keys)) {
-    out <- out[!duplicated(out_keys), ]
+    out <- out[!duplicated(out_keys), , drop = FALSE]
   }
   fst::write_fst(as.data.frame(out), path)
 
   list(
     written = TRUE,
     added = setdiff(unique(new_keys), unique(existing_keys)),
-    removed = setdiff(unique(existing_keys), unique(new_keys)),
+    removed = character(),
     rows = out
   )
 }
@@ -515,40 +576,55 @@
   selected_ids <- inputs$selected_collection_ids
   arxiv_rows <- inputs$arxiv_rows
   doi_rows <- inputs$doi_rows
+  isbn_rows <- inputs$isbn_rows
   current_mode <- if (is.null(json_mtime_after)) "full" else "incremental"
+  remove_missing <- is.null(json_mtime_after)
   diff_dir <- .litxr_project_index_dir(cfg)
-  identities <- if (nrow(arxiv_rows)) {
-    keep <- !is.na(arxiv_rows$doi) & nzchar(arxiv_rows$doi)
-    arxiv_rows[keep, c("arxiv_id", "doi"), with = FALSE]
+  if (nrow(arxiv_rows)) {
+    data.table::set(arxiv_rows, j = "arxiv_version", value = NULL)
+  }
+  identities <- if (nrow(arxiv_rows) && "doi" %in% names(arxiv_rows)) {
+    doi_values <- trimws(as.character(arxiv_rows$doi))
+    keep <- !is.na(doi_values) & nzchar(doi_values)
+    if (any(keep)) {
+      data.table::data.table(arxiv_id = arxiv_rows$arxiv_id[keep], doi = arxiv_rows$doi[keep])
+    } else {
+      data.table::data.table(arxiv_id = character(), doi = character())
+    }
   } else {
     data.table::data.table(arxiv_id = character(), doi = character())
   }
-  if (is.null(json_mtime_after)) {
-    arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows, "arxiv_id")
-    doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows, "doi")
-    identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir)
-  } else {
-    arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows, "arxiv_id")
-    doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows, "doi")
-    identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir)
+  if (nrow(arxiv_rows) && "doi" %in% names(arxiv_rows)) {
+    data.table::set(arxiv_rows, j = "doi", value = NULL)
   }
+  arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows, "arxiv_id", remove_missing = remove_missing)
+  doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows, "doi", remove_missing = remove_missing)
+  isbn_store <- .litxr_upsert_scaffold_rows(.litxr_ref_isbn_path(cfg), isbn_rows, "isbn", remove_missing = remove_missing)
+  identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir, remove_missing = remove_missing)
 
-  if (length(arxiv_store$removed)) {
+  if (remove_missing && length(arxiv_store$removed)) {
     warning(
       "ref_arxiv.fst will drop arXiv id(s) missing from current local JSON: ",
       paste(arxiv_store$removed, collapse = ", "),
       call. = FALSE
     )
   }
-  if (length(doi_store$removed)) {
+  if (remove_missing && length(doi_store$removed)) {
     warning(
       "ref_doi.fst will drop DOI id(s) missing from current local JSON: ",
       paste(doi_store$removed, collapse = ", "),
       call. = FALSE
     )
   }
+  if (remove_missing && length(isbn_store$removed)) {
+    warning(
+      "ref_isbn.fst will drop ISBN id(s) missing from current local JSON: ",
+      paste(isbn_store$removed, collapse = ", "),
+      call. = FALSE
+    )
+  }
 
-  arxiv_removed_path <- if (length(arxiv_store$removed)) {
+  arxiv_removed_path <- if (remove_missing && length(arxiv_store$removed)) {
     path <- file.path(diff_dir, "ref_arxiv_removed.tsv")
     utils::write.table(data.table::data.table(arxiv_id = arxiv_store$removed), file = path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
     path
@@ -562,7 +638,7 @@
   } else {
     NA_character_
   }
-  doi_removed_path <- if (length(doi_store$removed)) {
+  doi_removed_path <- if (remove_missing && length(doi_store$removed)) {
     path <- file.path(diff_dir, "ref_doi_removed.tsv")
     utils::write.table(data.table::data.table(doi = doi_store$removed), file = path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
     path
@@ -576,7 +652,21 @@
   } else {
     NA_character_
   }
-  identity_removed_path <- if (length(identity_store$removed)) {
+  isbn_removed_path <- if (remove_missing && length(isbn_store$removed)) {
+    path <- file.path(diff_dir, "ref_isbn_removed.tsv")
+    utils::write.table(data.table::data.table(isbn = isbn_store$removed), file = path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    path
+  } else {
+    NA_character_
+  }
+  isbn_added_path <- if (length(isbn_store$added)) {
+    path <- file.path(diff_dir, "ref_isbn_added.tsv")
+    utils::write.table(data.table::data.table(isbn = isbn_store$added), file = path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    path
+  } else {
+    NA_character_
+  }
+  identity_removed_path <- if (remove_missing && length(identity_store$removed)) {
     path <- file.path(diff_dir, "ref_identity_map_removed.tsv")
     path
   } else {
@@ -593,7 +683,7 @@
     selected_collection_ids = selected_ids,
     mode = current_mode,
     collection_results = list(
-      list(collection_id = NA_character_, rebuilt_collection_index = FALSE, collection_local_path = NA_character_, refs_written = nrow(arxiv_rows) + nrow(doi_rows), links_written = nrow(identities), refs_removed = length(arxiv_store$removed) + length(doi_store$removed))
+      list(collection_id = NA_character_, rebuilt_collection_index = FALSE, collection_local_path = NA_character_, refs_written = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows), links_written = nrow(identities), refs_removed = length(arxiv_store$removed) + length(doi_store$removed) + length(isbn_store$removed))
     ),
     diff_paths = list(
       ref_identity_map = list(
@@ -607,29 +697,38 @@
       ref_doi = list(
         added = doi_added_path,
         removed = doi_removed_path
+      ),
+      ref_isbn = list(
+        added = isbn_added_path,
+        removed = isbn_removed_path
       )
     ),
     project_paths = list(
       ref_identity_map = .litxr_project_ref_identity_index_path(cfg),
       ref_arxiv = .litxr_ref_arxiv_path(cfg),
       ref_doi = .litxr_ref_doi_path(cfg),
+      ref_isbn = .litxr_ref_isbn_path(cfg),
       ref_arxiv_removed = arxiv_removed_path,
       ref_arxiv_added = arxiv_added_path,
       ref_doi_removed = doi_removed_path,
       ref_doi_added = doi_added_path,
+      ref_isbn_removed = isbn_removed_path,
+      ref_isbn_added = isbn_added_path,
       ref_identity_map_removed = identity_removed_path,
       ref_identity_map_added = identity_added_path
     ),
     row_counts = list(
-      project_references = nrow(arxiv_rows) + nrow(doi_rows),
+      project_references = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows),
       project_reference_collections = nrow(identities),
       identities = nrow(identity_store$rows),
       ref_arxiv = nrow(arxiv_store$rows),
-      ref_doi = nrow(doi_store$rows)
+      ref_doi = nrow(doi_store$rows),
+      ref_isbn = nrow(isbn_store$rows)
     ),
     diffs = list(
       ref_arxiv = list(added = length(arxiv_store$added), removed = length(arxiv_store$removed)),
-      ref_doi = list(added = length(doi_store$added), removed = length(doi_store$removed))
+      ref_doi = list(added = length(doi_store$added), removed = length(doi_store$removed)),
+      ref_isbn = list(added = length(isbn_store$added), removed = length(isbn_store$removed))
     )
   )
 }

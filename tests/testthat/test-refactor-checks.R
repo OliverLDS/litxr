@@ -176,10 +176,10 @@ make_temp_refactor_project <- function() {
       limit = 1L
     )
 
-    pending_path <- litxr:::.litxr_ref_local_pending_path(cfg)
+    pending_path <- litxr:::.litxr_ref_isbn_path(cfg)
     pending_row <- data.table::data.table(
       ref_id = "local:pending-note",
-      key_type = "local_pending",
+      key_type = "isbn",
       key_value = "local:pending-note"
     )
     fst::write_fst(as.data.frame(pending_row), pending_path)
