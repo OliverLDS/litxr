@@ -1088,10 +1088,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   }
 
   if (.litxr_embedding_has_shards(paths)) {
-    records <- data.table::as.data.table(litxr_read_collection(collection_id, cfg))
-    shard_keys <- unique(.litxr_embedding_shard_key(
-      records$year[match(target_ref_ids, records$ref_id)]
-    ))
+    shard_keys <- unique(.litxr_embedding_shard_key(target_ref_ids))
     shard_keys <- shard_keys[nzchar(shard_keys)]
     shard_keys <- intersect(shard_keys, .litxr_embedding_shard_keys(paths))
     for (key in shard_keys) {

@@ -133,7 +133,7 @@
   }
 
   records <- tryCatch(
-    .litxr_read_journal_records_from_json(dir_path),
+    .litxr_read_collection_records_from_json(dir_path),
     error = function(e) data.table::data.table()
   )
   if (!nrow(records) || !("pub_date" %in% names(records))) {

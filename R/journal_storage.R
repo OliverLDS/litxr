@@ -559,10 +559,6 @@
   )
 }
 
-.litxr_read_journal_records_authoritative <- function(local_path) {
-  .litxr_read_journal_records_from_json(local_path)
-}
-
 .litxr_write_journal_upserted_records <- function(
   existing,
   incoming,
@@ -642,10 +638,10 @@
 }
 
 .litxr_read_journal_records <- function(local_path) {
-  .litxr_read_journal_records_from_json(local_path)
+  .litxr_read_collection_records_from_json(local_path)
 }
 
-.litxr_read_journal_records_from_json <- function(
+.litxr_read_collection_records_from_json <- function(
   local_path,
   json_files = NULL,
   modified_after = NULL,

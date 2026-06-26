@@ -91,7 +91,7 @@ parse_args <- function(args) {
 
 infer_cutoff_timestamp <- function(local_path) {
   records <- tryCatch(
-    litxr:::.litxr_read_journal_records_from_json(local_path),
+    litxr:::.litxr_read_collection_records_from_json(local_path),
     error = function(e) data.table::data.table()
   )
   if (!nrow(records) || !("pub_date" %in% names(records))) {

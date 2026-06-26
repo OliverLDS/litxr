@@ -50,7 +50,7 @@
 
   refs_list <- lapply(collections, function(collection) {
     local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_journal_records_authoritative(local_path)
+    records <- .litxr_read_collection_records_from_json(local_path)
     .litxr_project_references_from_collection_records(records)
   })
   refs_list <- refs_list[vapply(refs_list, nrow, integer(1)) > 0L]
@@ -80,7 +80,7 @@
 
   links_list <- lapply(collections, function(collection) {
     local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_journal_records_authoritative(local_path)
+    records <- .litxr_read_collection_records_from_json(local_path)
     .litxr_project_reference_links_from_collection_records(records, collection)
   })
   links_list <- links_list[vapply(links_list, nrow, integer(1)) > 0L]
@@ -251,7 +251,7 @@
   links_count <- 0L
   for (collection in collections) {
     local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_journal_records_from_json(local_path, modified_after = json_mtime_after)
+    records <- .litxr_read_collection_records_from_json(local_path, modified_after = json_mtime_after)
     if (nrow(records)) {
       records[["collection_id"]] <- rep(as.character(collection$collection_id), nrow(records))
       records[["collection_title"]] <- rep(as.character(collection$title), nrow(records))
@@ -467,7 +467,7 @@
 
   for (collection in collections) {
     local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_journal_records_authoritative(local_path)
+    records <- .litxr_read_collection_records_from_json(local_path)
     projection <- .litxr_project_references_from_collection_records(records)
     if (nrow(projection)) {
       refs_list[[length(refs_list) + 1L]] <- projection

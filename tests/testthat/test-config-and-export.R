@@ -728,13 +728,22 @@ jsonlite::write_json(
   null = "null"
 )
 saveRDS(matrix(c(1, 0, 0.1, 0, 1, 0.2), nrow = 2L, byrow = TRUE), embed_legacy_paths$matrix)
+rewritten_legacy_metadata <- litxr::litxr_migrate_embedding_metadata_files(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  model = "mock-embedding-legacy-v1"
+)
+stopifnot(length(rewritten_legacy_metadata) >= 1L)
+legacy_metadata_cols_after_rewrite <- fst::metadata_fst(embed_legacy_paths$metadata)$columnNames
+stopifnot(identical(legacy_metadata_cols_after_rewrite, c("ref_id", "abstract")))
 embed_legacy_index <- litxr::litxr_read_embedding_index(
   arxiv_collection$collection_id,
   cfg_export,
   field = "abstract",
   model = "mock-embedding-legacy-v1"
 )
-stopifnot(identical(names(embed_legacy_index$metadata), c("ref_id", "title", "year")))
+stopifnot(identical(names(embed_legacy_index$metadata), c("ref_id", "abstract")))
 stopifnot(nrow(embed_legacy_index$metadata) == 2L)
 stopifnot(nrow(embed_legacy_index$matrix) == 2L)
 

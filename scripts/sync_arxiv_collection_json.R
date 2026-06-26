@@ -282,7 +282,7 @@ overall_fetched_to <- NA_character_
 if (identical(fetch_mode, "bootstrap")) {
   total_written <- sync_records_by_query(journal, collection_ref_dir, base_query, page_size, sleep_seconds)
   incoming <- tryCatch(
-    litxr:::.litxr_read_journal_records_from_json(collection_ref_dir),
+    litxr:::.litxr_read_collection_records_from_json(collection_ref_dir),
     error = function(e) data.table::data.table()
   )
   history_rows <- write_history_if_needed(cfg, collection_id, incoming)
