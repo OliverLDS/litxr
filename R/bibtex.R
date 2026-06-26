@@ -186,6 +186,10 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     return(NA_character_)
   }
 
+  if (grepl("^https?://(arxiv\\.org/(abs|pdf)/|export\\.arxiv\\.org/abs/)", x, ignore.case = TRUE)) {
+    return(NA_character_)
+  }
+
   if (grepl("^https?://(dx\\.)?doi\\.org/", x, ignore.case = TRUE)) {
     x <- sub("^https?://(dx\\.)?doi\\.org/", "", x, ignore.case = TRUE)
   }
@@ -304,6 +308,14 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   arxiv_fields <- c("eprint", "arxiv", "arxiv_id", "arxivid", "eprintid", "doi")
   for (field in arxiv_fields) {
     ref_id <- .litxr_bibtex_arxiv_candidate(.litxr_bibtex_entry_field(entry, field))
+    if (!is.na(ref_id) && nzchar(ref_id)) {
+      return(ref_id)
+    }
+  }
+
+  url_candidate <- .litxr_bibtex_entry_field(entry, "url")
+  if (!is.na(url_candidate) && nzchar(url_candidate)) {
+    ref_id <- .litxr_bibtex_arxiv_candidate(url_candidate)
     if (!is.na(ref_id) && nzchar(ref_id)) {
       return(ref_id)
     }
@@ -485,7 +497,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (!data.table::haskey(cache_table) || !identical(data.table::key(cache_table), key_col)) {
     data.table::setkeyv(cache_table, key_col)
   }
-  hit <- cache_table[data.table::J(as.character(key)), nomatch = 0L]
+  hit <- cache_table[cache_table[[key_col]] == as.character(key), ]
   if (!nrow(hit)) {
     return(NULL)
   }

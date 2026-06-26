@@ -54,6 +54,24 @@ test_that("read_bibtex_entries recognizes arXiv DOI references as arXiv ids", {
   )
 })
 
+test_that("read_bibtex_entries recognizes arXiv URLs in url fields as arXiv ids", {
+  bib_path <- tempfile(fileext = ".bib")
+  writeLines(
+    c(
+      "@article{arxiv_url_entry,",
+      "  title = {ArXiv URL},",
+      "  url = {https://arxiv.org/abs/2507.22064v1}",
+      "}"
+    ),
+    bib_path
+  )
+
+  expect_identical(
+    litxr::read_bibtex_entries(bib_path),
+    "arxiv:2507.22064"
+  )
+})
+
 test_that("read_bibtex_entries prefers linked arXiv ids for DOI entries by default", {
   cfg <- litxr::litxr_read_config()
   imap <- data.table::as.data.table(litxr::litxr_read_ref_identity_map(cfg))
