@@ -247,27 +247,27 @@ if ((nzchar(primary_category) && identical(primary_category, "cs.AI")) ||
   )
 }
 
-record$collection_id <- "manual_arxiv_refs"
-record$collection_title <- "Manual arXiv References"
+record$collection_id <- "manual_batch"
+record$collection_title <- "Manual Batch"
 
 added <- litxr::litxr_add_refs(
   record,
-  collection_id = "manual_arxiv_refs",
+  collection_id = "manual_batch",
   config = cfg,
   auto_register = TRUE,
-  collection_title = "Manual arXiv References"
+  collection_title = "Manual Batch"
 )
 diag_state <- litxr_diag_step(
   diag_state,
   "add_ref_record",
   Sys.time(),
-  inputs = list(list(ref_id = arxiv_id, collection_id = "manual_arxiv_refs")),
+  inputs = list(list(ref_id = arxiv_id, collection_id = "manual_batch")),
   outputs = list(list(ref_id = if (nrow(added) && "ref_id" %in% names(added)) as.character(added$ref_id[[1]]) else ref_id))
 )
 
 added_ref_id <- if (nrow(added) && "ref_id" %in% names(added)) as.character(added$ref_id[[1]]) else ref_id
 added_title <- if (nrow(added) && "title" %in% names(added)) as.character(added$title[[1]]) else added_ref_id
-added_collection <- if (nrow(added) && "collection_id" %in% names(added)) as.character(added$collection_id[[1]]) else "manual_arxiv_refs"
+added_collection <- if (nrow(added) && "collection_id" %in% names(added)) as.character(added$collection_id[[1]]) else "manual_batch"
 
 cat("status: ok\n")
 cat(sprintf("ref_id: %s\n", added_ref_id))

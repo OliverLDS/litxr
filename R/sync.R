@@ -1204,6 +1204,63 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
   data.table::rbindlist(out, fill = TRUE)
 }
 
+#' Add a strict arXiv/DOI identity pair
+#'
+#' Append one canonical arXiv/DOI pair directly to the project identity map.
+#' The pair is rejected if either surface id already exists anywhere in the
+#' current identity map.
+#'
+#' @param arxiv_ref_id Bare arXiv id or canonical `arxiv:` ref id.
+#' @param doi Bare DOI, `doi:` ref id, or DOI URL.
+#' @param config Optional parsed config list or a direct config path. When
+#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
+#'
+#' @return Named list describing the appended pair.
+#' @export
+litxr_add_ref_identity_pair <- function(arxiv_ref_id, doi, config = NULL) {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+
+  arxiv_ref_id <- .litxr_normalize_arxiv_ref_id(arxiv_ref_id)
+  doi_ref_id <- .litxr_normalize_doi_ref_id(doi)
+  if (is.na(arxiv_ref_id) || !nzchar(arxiv_ref_id)) {
+    stop("`arxiv_ref_id` must be a non-empty arXiv id.", call. = FALSE)
+  }
+  if (is.na(doi_ref_id) || !nzchar(doi_ref_id)) {
+    stop("`doi` must be a non-empty DOI.", call. = FALSE)
+  }
+
+  existing <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  if (nrow(existing)) {
+    existing_arxiv <- if ("arxiv_id" %in% names(existing)) as.character(existing$arxiv_id) else character()
+    existing_doi <- if ("doi" %in% names(existing)) as.character(existing$doi) else character()
+    if (any(existing_arxiv == sub("^arxiv:", "", arxiv_ref_id), na.rm = TRUE)) {
+      stop("arXiv id already exists in ref_identity_map: ", arxiv_ref_id, call. = FALSE)
+    }
+    if (any(existing_doi == sub("^doi:", "", doi_ref_id), na.rm = TRUE)) {
+      stop("DOI already exists in ref_identity_map: ", doi_ref_id, call. = FALSE)
+    }
+  }
+
+  new_row <- data.table::data.table(
+    arxiv_id = sub("^arxiv:", "", arxiv_ref_id),
+    doi = sub("^doi:", "", doi_ref_id)
+  )
+  out <- if (nrow(existing)) {
+    existing <- existing[, intersect(c("arxiv_id", "doi"), names(existing)), with = FALSE]
+    data.table::rbindlist(list(existing, new_row), fill = TRUE)
+  } else {
+    new_row
+  }
+  .litxr_write_project_ref_identity_index(cfg, out)
+  invisible(list(
+    status = "ok",
+    arxiv_ref_id = arxiv_ref_id,
+    doi_ref_id = doi_ref_id,
+    ref_identity_map_path = .litxr_project_ref_identity_index_path(cfg)
+  ))
+}
+
 .litxr_normalize_arxiv_ref_id <- function(ref_id) {
   ref_id <- as.character(ref_id)
   if (!length(ref_id) || is.na(ref_id[[1]])) {
@@ -1758,191 +1815,6 @@ litxr_add_refs <- function(
 
   slug <- gsub("[^A-Za-z0-9]+", "", substr(ifelse(is.na(title), "ref", title), 1, 24))
   paste0("manual_", ifelse(is.na(year), "na", year), "_", slug)
-}
-
-.litxr_manual_ref_id <- function(row) {
-  doi <- row[["doi"]]
-  isbn <- row[["isbn"]]
-  url <- row[["url"]]
-  source <- row[["source"]]
-  source_id <- row[["source_id"]]
-
-  if (!is.na(doi) && nzchar(doi)) return(paste0("doi:", doi))
-  if (!is.na(isbn) && nzchar(isbn)) return(paste0("isbn:", isbn))
-  if (!is.na(url) && nzchar(url)) return(paste0("url:", url))
-  paste0(source, ":", source_id)
-}
-
-.litxr_register_manual_collection <- function(cfg, collection_id, collection_title = NULL) {
-  title <- if (is.null(collection_title) || !nzchar(collection_title)) collection_id else collection_title
-  collection <- list(
-    collection_id = collection_id,
-    collection_type = "manual_batch",
-    title = title,
-    remote_channel = "manual",
-    local_path = file.path(cfg$project$data_root, collection_id),
-    metadata = list(),
-    sync = list()
-  )
-
-  collections <- .litxr_config_collections(cfg)
-  collections[[length(collections) + 1L]] <- collection
-  cfg$collections <- collections
-  cfg <- .litxr_normalize_config_schema(cfg)
-  .litxr_write_config(cfg)
-  list(cfg = cfg, collection = collection)
-}
-
-.litxr_assign_crossref_journals <- function(cfg, records, messages, auto_register = TRUE) {
-  out_cfg <- cfg
-  out_records <- data.table::copy(records)
-  if (!("collection_id" %in% names(out_records))) {
-    out_records[["collection_id"]] <- rep(NA_character_, nrow(out_records))
-  }
-  if (!("collection_title" %in% names(out_records))) {
-    out_records[["collection_title"]] <- rep(NA_character_, nrow(out_records))
-  }
-
-  for (i in seq_len(nrow(out_records))) {
-    message <- messages[[i]]
-    journal <- .litxr_match_crossref_journal(out_cfg, message)
-
-    if (is.null(journal)) {
-      if (!isTRUE(auto_register)) {
-        stop(
-          "Crossref journal is not registered in config.yaml for DOI ",
-          out_records$doi[[i]],
-          ". Set `auto_register = TRUE` to add it automatically.",
-          call. = FALSE
-        )
-      }
-      registered <- .litxr_register_crossref_journal(out_cfg, message)
-      out_cfg <- registered$cfg
-      journal <- registered$journal
-    }
-
-    data.table::set(out_records, i = i, j = "collection_id", value = as.character(journal$collection_id))
-    data.table::set(out_records, i = i, j = "collection_title", value = as.character(journal$title))
-  }
-
-  list(cfg = out_cfg, records = out_records)
-}
-
-.litxr_match_crossref_journal <- function(cfg, cr_message) {
-  journal_title <- .litxr_crossref_journal_title(cr_message)
-  issns <- .litxr_crossref_issns(cr_message)
-
-  for (journal in .litxr_config_collections(cfg)) {
-    if (!identical(journal$remote_channel, "crossref")) next
-    title_match <- !is.na(journal_title) && identical(journal$title, journal_title)
-    issn_match <- length(intersect(.litxr_journal_issns(journal), issns)) > 0
-    if (title_match || issn_match) {
-      return(journal)
-    }
-  }
-
-  NULL
-}
-
-.litxr_register_crossref_journal <- function(cfg, cr_message) {
-  journal_title <- .litxr_crossref_journal_title(cr_message)
-  if (is.na(journal_title) || !nzchar(journal_title)) {
-    journal_title <- "Crossref Unclassified"
-  }
-
-  base_id <- .litxr_make_journal_id(journal_title)
-  journal_id <- .litxr_unique_journal_id(cfg, base_id)
-  metadata <- .litxr_crossref_journal_metadata(cr_message)
-  local_path <- file.path(cfg$project$data_root, journal_id)
-  sync_issn <- metadata$issn_print
-  if (is.null(sync_issn) || is.na(sync_issn) || !nzchar(sync_issn)) {
-    sync_issn <- metadata$issn_electronic
-  }
-
-  journal <- list(
-    collection_id = journal_id,
-    collection_type = "journal",
-    title = journal_title,
-    remote_channel = "crossref",
-    local_path = local_path,
-    metadata = metadata,
-    sync = list(
-      filters = list(
-        issn = if (!is.null(sync_issn) && nzchar(sync_issn)) sync_issn else NA_character_
-      )
-    )
-  )
-
-  collections <- .litxr_config_collections(cfg)
-  collections[[length(collections) + 1L]] <- journal
-  cfg$collections <- collections
-  cfg <- .litxr_normalize_config_schema(cfg)
-  .litxr_write_config(cfg)
-  list(cfg = cfg, journal = journal)
-}
-
-.litxr_crossref_journal_title <- function(cr_message) {
-  title <- cr_message$`container-title`
-  if (is.null(title) || length(title) == 0) return(NA_character_)
-  title <- as.character(title[[1]])
-  if (!nzchar(title)) NA_character_ else title
-}
-
-.litxr_crossref_issns <- function(cr_message) {
-  issn <- cr_message$ISSN
-  if (is.null(issn) || !length(issn)) return(character())
-  unique(stats::na.omit(as.character(unlist(issn, use.names = FALSE))))
-}
-
-.litxr_crossref_journal_metadata <- function(cr_message) {
-  issn_print <- NA_character_
-  issn_electronic <- NA_character_
-
-  if (!is.null(cr_message$`issn-type`) && length(cr_message$`issn-type`)) {
-    for (entry in cr_message$`issn-type`) {
-      if (is.null(entry$type) || is.null(entry$value)) next
-      if (identical(entry$type, "print")) issn_print <- as.character(entry$value)
-      if (identical(entry$type, "electronic")) issn_electronic <- as.character(entry$value)
-    }
-  }
-
-  issn_all <- .litxr_crossref_issns(cr_message)
-  if ((is.na(issn_print) || !nzchar(issn_print)) && length(issn_all)) {
-    issn_print <- issn_all[[1]]
-  }
-  if ((is.na(issn_electronic) || !nzchar(issn_electronic)) && length(issn_all) >= 2L) {
-    issn_electronic <- issn_all[[2]]
-  }
-
-  list(
-    publisher = if (is.null(cr_message$publisher)) NA_character_ else as.character(cr_message$publisher[[1]]),
-    issn_print = issn_print,
-    issn_electronic = issn_electronic
-  )
-}
-
-.litxr_make_journal_id <- function(x) {
-  id <- tolower(as.character(x[[1]]))
-  id <- gsub("[^a-z0-9]+", "_", id)
-  id <- gsub("^_+|_+$", "", id)
-  if (!nzchar(id)) id <- "crossref_journal"
-  id
-}
-
-.litxr_unique_journal_id <- function(cfg, base_id) {
-  existing_ids <- vapply(.litxr_config_collections(cfg), `[[`, character(1), "collection_id")
-  if (!(base_id %in% existing_ids)) {
-    return(base_id)
-  }
-
-  i <- 2L
-  repeat {
-    candidate <- paste0(base_id, "_", i)
-    if (!(candidate %in% existing_ids)) {
-      return(candidate)
-    }
-    i <- i + 1L
-  }
 }
 
 .litxr_get_journal <- function(cfg, journal_id) {
@@ -3179,7 +3051,10 @@ litxr_add_refs <- function(
   .litxr_ensure_project_index_dir(cfg)
   incoming_refs <- .litxr_project_references_from_collection_records(records)
   if (nrow(incoming_refs)) {
-    .litxr_refresh_normalized_reference_scaffold(cfg, records = incoming_refs, refresh_entity_indexes = FALSE)
+    # Keep the original collection-scoped rows for scaffold refresh so the
+    # arXiv-side collection filter can exclude DOI-bearing arXiv rows from the
+    # DOI thin store while still keeping the arXiv identity link.
+    .litxr_refresh_normalized_reference_scaffold(cfg, records = records, refresh_entity_indexes = FALSE)
   }
   if (isTRUE(refresh_ref_identity_map)) {
     if (is.null(identities)) {

@@ -155,7 +155,7 @@
   )
 }
 
-.litxr_normalized_payload_projection <- function(records, key_type = c("arxiv_id", "doi", "local_pending")) {
+.litxr_normalized_payload_projection <- function(records, key_type = c("arxiv_id", "doi", "local_pending"), arxiv_collection_ids = NULL) {
   key_type <- match.arg(key_type)
   records <- data.table::as.data.table(records)
   if (!nrow(records)) {
@@ -170,8 +170,8 @@
 
   if (identical(key_type, "arxiv_id")) {
     arxiv_rows <- grepl("^arxiv:", as.character(records$ref_id))
-    if ("collection_id" %in% names(records)) {
-      arxiv_rows <- arxiv_rows & as.character(records$collection_id) %in% c("arxiv_cs_ai", "manual_arxiv_refs")
+    if (!is.null(arxiv_collection_ids) && length(arxiv_collection_ids) && "collection_id" %in% names(records)) {
+      arxiv_rows <- arxiv_rows & as.character(records$collection_id) %in% arxiv_collection_ids
     } else if ("collection_type" %in% names(records)) {
       arxiv_rows <- arxiv_rows & as.character(records$collection_type) == "arxiv_category"
     }
@@ -203,13 +203,13 @@
     data.table::setorder(arxiv_rows_dt, arxiv_id, -arxiv_version)
     arxiv_rows_dt <- arxiv_rows_dt[!duplicated(arxiv_rows_dt$arxiv_id), ]
     arxiv_rows_dt$arxiv_version <- NULL
-    return(arxiv_rows_dt[, c("arxiv_id"), with = FALSE])
+    return(data.table::data.table(arxiv_id = arxiv_rows_dt$arxiv_id))
   }
 
   if (identical(key_type, "doi")) {
     doi_rows <- if ("doi" %in% names(records)) !is.na(records$doi) & nzchar(records$doi) else grepl("^doi:", as.character(records$ref_id))
-    if ("collection_id" %in% names(records)) {
-      doi_rows <- doi_rows & !(as.character(records$collection_id) %in% c("arxiv_cs_ai", "manual_arxiv_refs"))
+    if (!is.null(arxiv_collection_ids) && length(arxiv_collection_ids) && "collection_id" %in% names(records)) {
+      doi_rows <- doi_rows & !(as.character(records$collection_id) %in% arxiv_collection_ids)
     }
     idx <- which(doi_rows)
     if (!length(idx)) {
@@ -309,7 +309,7 @@
   }
   records <- data.table::as.data.table(records)
 
-  arxiv_collection_ids <- c("arxiv_cs_ai", "manual_arxiv_refs")
+  arxiv_collection_ids <- .litxr_collection_ids_by_remote_channel(cfg, "arxiv")
   arxiv_records <- if (nrow(records) && "collection_id" %in% names(records)) {
     records[grepl("^arxiv:", as.character(records$ref_id)) & as.character(records$collection_id) %in% arxiv_collection_ids, ]
   } else if (nrow(records) && "collection_type" %in% names(records)) {
@@ -317,13 +317,13 @@
   } else {
     records[grepl("^arxiv:", as.character(records$ref_id)), ]
   }
-  arxiv_rows <- .litxr_normalized_payload_projection(arxiv_records, key_type = "arxiv_id")
+  arxiv_rows <- .litxr_normalized_payload_projection(arxiv_records, key_type = "arxiv_id", arxiv_collection_ids = arxiv_collection_ids)
   doi_records <- if (nrow(records) && "collection_id" %in% names(records)) {
     records[!(as.character(records$collection_id) %in% arxiv_collection_ids), ]
   } else {
     records
   }
-  doi_rows <- .litxr_normalized_payload_projection(doi_records, key_type = "doi")
+  doi_rows <- .litxr_normalized_payload_projection(doi_records, key_type = "doi", arxiv_collection_ids = arxiv_collection_ids)
   pending_rows <- .litxr_normalized_payload_projection(records, key_type = "local_pending")
 
   .litxr_write_scaffold_table(.litxr_ref_arxiv_path(cfg), arxiv_rows, key_cols = "arxiv_id")
@@ -441,7 +441,7 @@
 
   arxiv_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_arxiv_path(cfg))
   doi_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_doi_path(cfg))
-  pending_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_local_pending_path(cfg))
+  pending_payload <- .litxr_read_scaffold_table_safe(.litxr_ref_isbn_path(cfg))
   compatibility_state <- .litxr_audit_reference_cache_state(cfg)
 
   list(

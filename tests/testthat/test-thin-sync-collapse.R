@@ -84,11 +84,11 @@ test_that("thin ref store sync collapses arxiv versions before inferring identit
   expect_true(is.list(migration))
   arxiv_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_arxiv_path(project$cfg), as.data.table = TRUE))
   identity_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_project_ref_identity_index_path(project$cfg), as.data.table = TRUE))
-  expect_identical(names(arxiv_store), c("arxiv_id", "collection_index", "json_filename"))
+  expect_identical(names(arxiv_store), c("arxiv_id"))
   expect_identical(sort(names(identity_store)), c("arxiv_id", "doi"))
   if (file.exists(litxr:::.litxr_ref_doi_path(project$cfg))) {
     doi_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_doi_path(project$cfg), as.data.table = TRUE))
-    expect_identical(names(doi_store), c("doi", "collection_index", "json_filename"))
+    expect_identical(names(doi_store), c("doi"))
   }
   expect_true(is.list(migration$diff_paths))
   expect_true(all(c("ref_identity_map", "ref_arxiv", "ref_doi") %in% names(migration$diff_paths)))

@@ -30,13 +30,13 @@ The canonical top-level schema is:
 version: 1
 project:
   name: my_project_name
-  data_root: data/literature
+  data_root: .
 collections:
   - collection_id: journal_of_finance
     collection_type: journal
     title: Journal of Finance
     remote_channel: crossref
-    local_path: data/literature/journal_of_finance
+    local_path: ref/journal_of_finance
     metadata:
       publisher: Wiley
       issn_print: 0022-1082
@@ -48,7 +48,7 @@ collections:
     collection_type: arxiv_category
     title: arXiv cs.AI
     remote_channel: arxiv
-    local_path: data/literature/arxiv_cs_ai
+    local_path: ref/arxiv_cs_ai
     metadata:
       archive: arXiv
       category: cs.AI
@@ -60,8 +60,8 @@ collections:
 
 ## Path Semantics
 
-- `project.data_root` is the project-level data root.
-- `collection.local_path` is the collection-local storage root.
+- `project.data_root` is the shared data root that contains `config.yaml`.
+- `collection.local_path` is the collection-local storage root beneath that shared data root.
 - Relative paths are resolved relative to the folder containing `config.yaml`.
 - `project.data_root: .` means “use the folder containing `config.yaml`”.
 - `project.data_root: ~` means “use the home directory”.

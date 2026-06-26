@@ -30,15 +30,11 @@ test_that("normalized payload projection strips collection metadata and keeps on
   )
 
   arxiv_rows <- litxr:::.litxr_normalized_payload_projection(records, key_type = "arxiv_id")
-  expect_true("ref_id" %in% names(arxiv_rows))
-  expect_true("key_type" %in% names(arxiv_rows))
-  expect_true("key_value" %in% names(arxiv_rows))
+  expect_true("arxiv_id" %in% names(arxiv_rows))
   expect_false("collection_id" %in% names(arxiv_rows))
   expect_false("collection_title" %in% names(arxiv_rows))
-  expect_identical(arxiv_rows$ref_id, "arxiv:2505.07087")
-  expect_identical(arxiv_rows$key_type, "arxiv_id")
+  expect_identical(arxiv_rows$arxiv_id, "2505.07087")
 
   doi_rows <- litxr:::.litxr_normalized_payload_projection(records, key_type = "doi")
-  expect_identical(doi_rows$ref_id, "doi:10.1016/j.inffus.2025.103599")
-  expect_identical(doi_rows$key_type, "doi")
+  expect_identical(doi_rows$doi, "10.1016/j.inffus.2025.103599")
 })

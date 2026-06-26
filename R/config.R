@@ -146,7 +146,7 @@ litxr_list_journals <- function(config = NULL) {
     version = 1L,
     project = list(
       name = basename(normalizePath(root, winslash = "/", mustWork = FALSE)),
-      data_root = "data/literature"
+      data_root = "."
     ),
     collections = list(
       list(
@@ -154,7 +154,7 @@ litxr_list_journals <- function(config = NULL) {
         collection_type = "journal",
         title = "Journal of Finance",
         remote_channel = "crossref",
-        local_path = "data/literature/ref/journal_of_finance",
+        local_path = "ref/journal_of_finance",
         metadata = list(
           publisher = "Wiley",
           issn_print = "0022-1082",
@@ -171,7 +171,7 @@ litxr_list_journals <- function(config = NULL) {
         collection_type = "journal",
         title = "Journal of Financial Economics",
         remote_channel = "crossref",
-        local_path = "data/literature/ref/journal_of_financial_economics",
+        local_path = "ref/journal_of_financial_economics",
         metadata = list(
           publisher = "Elsevier",
           issn_print = "0304-405X"
@@ -187,7 +187,7 @@ litxr_list_journals <- function(config = NULL) {
         collection_type = "arxiv_category",
         title = "arXiv cs.AI",
         remote_channel = "arxiv",
-        local_path = "data/literature/ref/arxiv_cs_ai",
+        local_path = "ref/arxiv_cs_ai",
         metadata = list(
           archive = "arXiv",
           category = "cs.AI"
@@ -269,6 +269,36 @@ litxr_list_journals <- function(config = NULL) {
     return(cfg$collections)
   }
   cfg$journals
+}
+
+.litxr_collection_ids_by_remote_channel <- function(cfg, remote_channel) {
+  remote_channel <- as.character(remote_channel)[[1L]]
+  if (is.na(remote_channel) || !nzchar(remote_channel)) {
+    return(character())
+  }
+
+  collections <- .litxr_config_collections(cfg)
+  if (!length(collections)) {
+    return(character())
+  }
+
+  ids <- vapply(collections, function(collection) {
+    if (identical(as.character(collection$remote_channel), remote_channel)) {
+      collection_id <- collection$collection_id
+      if (is.null(collection_id) || !length(collection_id) || is.na(collection_id[[1L]]) || !nzchar(as.character(collection_id[[1L]]))) {
+        collection_id <- collection$journal_id
+      }
+      if (is.null(collection_id) || !length(collection_id) || is.na(collection_id[[1L]]) || !nzchar(as.character(collection_id[[1L]]))) {
+        NA_character_
+      } else {
+        as.character(collection_id[[1L]])
+      }
+    } else {
+      NA_character_
+    }
+  }, character(1))
+  ids <- ids[!is.na(ids) & nzchar(ids)]
+  unique(ids)
 }
 
 .litxr_normalize_config_schema <- function(cfg) {

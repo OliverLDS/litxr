@@ -349,12 +349,11 @@
 .litxr_sync_thin_ref_store_inputs <- function(cfg, collection_ids = NULL, json_mtime_after = NULL) {
   root <- file.path(.litxr_project_root(cfg), "ref")
   folders <- .litxr_sync_collection_folder_names(cfg, collection_ids = collection_ids)
-  arxiv_branch_folders <- intersect(folders, c("arxiv_cs_ai", "manual_arxiv_refs"))
-  doi_branch_folders <- setdiff(folders, arxiv_branch_folders)
+  arxiv_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "arxiv"))
+  doi_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "crossref"))
+  isbn_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "isbn"))
   collections <- .litxr_config_collections(cfg)
   collection_ids_cfg <- vapply(collections, function(collection) as.character(collection$collection_id %||% collection$journal_id %||% NA_character_), character(1))
-  isbn_branch_ids <- vapply(collections, function(collection) identical(collection$remote_channel, "isbn"), logical(1))
-  isbn_branch_folders <- intersect(folders, vapply(collections[isbn_branch_ids], `[[`, character(1), "collection_id"))
 
   arxiv_rows_list <- list()
   doi_rows_list <- list()
@@ -445,6 +444,7 @@
       )
     }
   }
+
   list(
     selected_collection_ids = folders,
     arxiv_folders = arxiv_branch_folders,
@@ -524,6 +524,8 @@
     stop("`key_cols` must be supplied for scaffold upsert.", call. = FALSE)
   }
 
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+
   existing <- .litxr_read_scaffold_table_safe(path)
   new_keys <- .litxr_scaffold_row_keys(rows, key_cols)
   if (!nrow(rows)) {
@@ -557,7 +559,7 @@
   }
 
   if (!nrow(existing)) {
-    rows <- rows[!duplicated(new_keys), ]
+    rows <- rows[!duplicated(new_keys), , drop = FALSE]
     fst::write_fst(as.data.frame(rows), path)
     return(list(
       written = TRUE,
@@ -611,31 +613,36 @@
   remove_missing <- is.null(json_mtime_after) && is.null(collection_ids)
   diff_dir <- .litxr_ensure_project_log_dir(cfg)
   if (nrow(arxiv_rows)) {
-    data.table::set(arxiv_rows, j = "arxiv_version", value = NULL)
-  }
-  identities <- if (nrow(arxiv_rows) && "doi" %in% names(arxiv_rows)) {
     identities <- data.table::data.table(
       arxiv_id = arxiv_rows$arxiv_id,
-      doi = arxiv_rows$doi
+      doi = if ("doi" %in% names(arxiv_rows)) trimws(arxiv_rows$doi) else rep(NA_character_, nrow(arxiv_rows))
     )
-    identities$doi <- trimws(as.character(identities$doi))
     identities <- identities[!is.na(identities$doi) & nzchar(identities$doi), ]
     if (nrow(identities)) {
       identities <- identities[!duplicated(paste(identities$arxiv_id, identities$doi, sep = "\r")), ]
     }
-    identities
   } else {
-    data.table::data.table(arxiv_id = character(), doi = character())
+    identities <- data.table::data.table(arxiv_id = character(), doi = character())
   }
-  if (nrow(arxiv_rows) && "doi" %in% names(arxiv_rows)) {
-    data.table::set(arxiv_rows, j = "doi", value = NULL)
+  arxiv_rows_write <- if (nrow(arxiv_rows)) {
+    data.table::data.table(arxiv_id = as.character(arxiv_rows$arxiv_id))
+  } else {
+    data.table::data.table(arxiv_id = character())
   }
-  if (nrow(arxiv_rows) && "arxiv_version" %in% names(arxiv_rows)) {
-    data.table::set(arxiv_rows, j = "arxiv_version", value = NULL)
+  doi_rows_write <- if (nrow(doi_rows)) {
+    data.table::data.table(doi = as.character(doi_rows$doi))
+  } else {
+    data.table::data.table(doi = character())
   }
-  arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows, "arxiv_id", remove_missing = remove_missing)
-  doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows, "doi", remove_missing = remove_missing)
-  isbn_store <- .litxr_upsert_scaffold_rows(.litxr_ref_isbn_path(cfg), isbn_rows, "isbn", remove_missing = remove_missing)
+  isbn_rows_write <- if (nrow(isbn_rows)) {
+    data.table::data.table(isbn = as.character(isbn_rows$isbn))
+  } else {
+    data.table::data.table(isbn = character())
+  }
+
+  arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows_write, "arxiv_id", remove_missing = remove_missing)
+  doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows_write, "doi", remove_missing = remove_missing)
+  isbn_store <- .litxr_upsert_scaffold_rows(.litxr_ref_isbn_path(cfg), isbn_rows_write, "isbn", remove_missing = remove_missing)
   identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir, remove_missing = remove_missing)
 
   if (remove_missing && length(arxiv_store$removed)) {

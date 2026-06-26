@@ -1,4 +1,4 @@
-# litxr 0.1.7.8
+# litxr 0.1.7.9
 
 - Reused a single preloaded BibTeX scaffold cache across each export batch so
   DOI and ISBN resolution no longer reopens scaffold tables per entry.

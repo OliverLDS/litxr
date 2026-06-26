@@ -36,18 +36,18 @@ Practical effect:
 
 ### arXiv and DOI linking
 
-For linking flows such as `litxr_enrich_arxiv_with_doi()` and
-`scripts/human/enrich_arxiv_with_doi.R`:
+For linking flows such as `litxr_add_ref_identity_pair()` and
+`scripts/human/enrich_arxiv_with_doi.sh`:
 
 - do not rewrite canonical surface `ref_id` values
-- write `linked_doi_ref_id` onto the arXiv row
-- write `linked_arxiv_ref_id` onto the DOI row
-- let entity indexes express equivalence and task preference
+- append only the arXiv/DOI pair to `ref_identity_map.fst`
+- reject any pair whose arXiv id or DOI already exists in the identity map
+- keep the script node strict and human-facing
 
 Practical effect:
 
-- old scripts can keep using the same `ref_id`
-- citation tasks can still prefer the published identity
+- identity linking stays a narrow surface action
+- downstream tasks can resolve the published identity from the identity map
 
 ### Collection membership
 

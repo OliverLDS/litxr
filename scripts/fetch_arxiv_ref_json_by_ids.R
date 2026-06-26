@@ -1,64 +1,62 @@
 #!/usr/bin/env Rscript
 
-emit_json <- function(x) {
-  writeLines(
-    jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE),
-    con = stdout()
-  )
-}
-
 log_line <- function(...) {
   cat(..., "\n", file = stderr(), sep = "")
+}
+
+emit_json <- function(x) {
+  writeLines(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE), con = stdout())
 }
 
 has_text <- function(x) {
   isTRUE(length(x) == 1L && !is.na(x[[1L]]) && nzchar(trimws(as.character(x[[1L]]))))
 }
 
-parse_args <- function(args) {
-  out <- list(
-    help = FALSE,
-    collection = "arxiv_cs_ai",
-    arxiv_ids = character(),
-    batch_size = 50L,
-    force = FALSE
-  )
+parse_ids <- function(x) {
+  x <- as.character(x)
+  x <- x[!is.na(x) & nzchar(x)]
+  if (!length(x)) {
+    return(character())
+  }
+  ids <- unique(trimws(unlist(strsplit(x, ",", fixed = TRUE), use.names = FALSE)))
+  ids <- ids[nzchar(ids)]
+  ids <- vapply(ids, function(id) {
+    .litxr <- litxr:::.litxr_bare_arxiv_id(ref_id = id)
+    .litxr
+  }, character(1))
+  ids <- ids[!is.na(ids) & nzchar(ids)]
+  unique(ids)
+}
 
+parse_args <- function(args) {
+  out <- list(help = FALSE, arxiv_ids = character(), batch_size = 50L, force = FALSE)
   i <- 1L
   while (i <= length(args)) {
-    key <- args[[i]]
-    if (!startsWith(key, "--") && !identical(key, "-h")) {
-      stop("Unexpected positional argument: ", key, call. = FALSE)
-    }
-    if (identical(key, "-h") || identical(key, "--help")) {
+    arg <- args[[i]]
+    if (identical(arg, "-h") || identical(arg, "--help")) {
       out$help <- TRUE
       i <- i + 1L
       next
     }
-    if (identical(key, "--force")) {
+    if (identical(arg, "--arxiv-id") || identical(arg, "--arxiv-ids")) {
+      if (i == length(args)) stop("Missing value for --arxiv-id", call. = FALSE)
+      out$arxiv_ids <- c(out$arxiv_ids, args[[i + 1L]])
+      i <- i + 2L
+      next
+    }
+    if (identical(arg, "--batch-size")) {
+      if (i == length(args)) stop("Missing value for --batch-size", call. = FALSE)
+      out$batch_size <- suppressWarnings(as.integer(args[[i + 1L]]))
+      i <- i + 2L
+      next
+    }
+    if (identical(arg, "--force")) {
       out$force <- TRUE
       i <- i + 1L
       next
     }
-    if (!(key %in% c("--collection", "--arxiv-id", "--arxiv-ids", "--batch-size"))) {
-      stop("Unknown argument: ", key, call. = FALSE)
-    }
-    if (i == length(args)) {
-      stop("Missing value for ", key, call. = FALSE)
-    }
-    value <- args[[i + 1L]]
-    if (identical(key, "--collection")) {
-      out$collection <- value
-    } else if (identical(key, "--batch-size")) {
-      out$batch_size <- value
-    } else {
-      ids <- trimws(strsplit(value, ",", fixed = TRUE)[[1L]])
-      ids <- ids[nzchar(ids)]
-      out$arxiv_ids <- unique(c(out$arxiv_ids, ids))
-    }
-    i <- i + 2L
+    stop("Unknown argument: ", arg, call. = FALSE)
   }
-
   out
 }
 
@@ -66,20 +64,22 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/fetch_arxiv_ref_json_by_ids.R --arxiv-id ID[,ID2,...] [--collection COLLECTION_ID]",
+      "  Rscript scripts/fetch_arxiv_ref_json_by_ids.R --arxiv-id ID1,ID2 [... ]",
       "",
       "Options:",
-      "  --arxiv-id IDS     One or more arXiv ids, comma-separated.",
-      "  --collection ID    arXiv-backed collection id. Default: arxiv_cs_ai.",
-      "  --batch-size N     Number of arXiv ids per API request. Default: 50.",
-      "  --force            Overwrite existing JSON files if they already exist.",
-      "  -h, --help         Show this help message.",
+      "  --arxiv-id IDS    Comma-separated arXiv ids or canonical arXiv ref_ids.",
+      "  --arxiv-ids IDS   Alias for --arxiv-id.",
+      "  --batch-size N    Number of arXiv ids per API request. Default: 50.",
+      "  --force           Overwrite existing JSON files.",
+      "  -h, --help        Show this help message.",
       "",
       "Behavior:",
-      "  - Fetches arXiv XML by id list and writes JSON files directly under",
-      "    ref/COLLECTION_ID.",
-      "  - Existing files are skipped unless --force is supplied.",
-      "  - Progress logs are written to stderr; compact JSON is written to stdout.",
+      "  - Fetches each arXiv id from the arXiv API.",
+      "  - Routes each record by its primary subject.",
+      "  - Reuses an existing arXiv collection if it is already registered.",
+      "  - Auto-registers a new arXiv collection and folder when needed.",
+      "  - Writes JSON files directly under ref/<collection_id>.",
+      "  - Progress logs go to stderr; compact JSON goes to stdout.",
       sep = "\n"
     )
   )
@@ -98,138 +98,124 @@ if (isTRUE(parsed$help)) {
   quit(save = "no", status = 0L)
 }
 
-if (!has_text(parsed$collection)) {
-  stop("`--collection` is required.", call. = FALSE)
+arxiv_ids <- parse_ids(parsed$arxiv_ids)
+if (!length(arxiv_ids)) {
+  stop("At least one arXiv id is required.", call. = FALSE)
 }
-if (!length(parsed$arxiv_ids)) {
-  stop("At least one arXiv id must be supplied via `--arxiv-id`.", call. = FALSE)
+
+cfg <- litxr::litxr_read_config()
+existing_arxiv <- litxr:::.litxr_read_scaffold_table_safe(litxr:::.litxr_ref_arxiv_path(cfg))
+existing_ids <- if (nrow(existing_arxiv) && "arxiv_id" %in% names(existing_arxiv)) unique(trimws(as.character(existing_arxiv$arxiv_id))) else character()
+existing_ids <- existing_ids[nzchar(existing_ids)]
+
+requested_ids <- unique(arxiv_ids)
+fetch_ids <- setdiff(requested_ids, existing_ids)
+skipped_existing <- setdiff(requested_ids, fetch_ids)
+
+log_line("fetching arXiv ref JSON by id")
+log_line("requested=", length(requested_ids))
+log_line("skipped_existing=", length(skipped_existing))
+log_line("fetch_ids=", length(fetch_ids))
+
+if (!length(fetch_ids)) {
+  emit_json(list(
+    status = "ok",
+    requested = requested_ids,
+    fetched = 0L,
+    written = 0L,
+    skipped_existing = skipped_existing,
+    created_collection_ids = character(),
+    written_paths = character()
+  ))
+  quit(save = "no", status = 0L)
 }
 
 batch_size <- suppressWarnings(as.integer(parsed$batch_size[[1L]]))
 if (is.na(batch_size) || batch_size < 1L) {
-  stop("`--batch-size` must be a positive integer.", call. = FALSE)
+  batch_size <- length(fetch_ids)
 }
 
-script_arg <- commandArgs(trailingOnly = FALSE)
-script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1L])
-repo_root <- normalizePath(file.path(dirname(script_file), ".."), winslash = "/", mustWork = TRUE)
+written_paths <- character()
+created_collection_ids <- character()
+fetched_rows <- list()
 
-if (requireNamespace("pkgload", quietly = TRUE)) {
-  pkgload::load_all(repo_root, quiet = TRUE, export_all = FALSE, helpers = FALSE)
-} else {
-  suppressPackageStartupMessages(library(litxr))
-}
-
-cfg <- litxr::litxr_read_config()
-journal <- litxr:::.litxr_get_journal(cfg, parsed$collection)
-if (!identical(journal$remote_channel, "arxiv")) {
-  stop("Collection is not arXiv-backed: ", parsed$collection, call. = FALSE)
-}
-
-collection_ref_dir <- litxr:::.litxr_ensure_collection_ref_dir(cfg, parsed$collection)
-log_line("fetching arxiv ref json by id")
-log_line("collection_id=", parsed$collection)
-log_line("collection_ref_dir=", collection_ref_dir)
-log_line("requested_ids=", paste(parsed$arxiv_ids, collapse = ","))
-
-requested_ids <- unique(parsed$arxiv_ids)
-requested_ids <- gsub("^arxiv:", "", requested_ids, ignore.case = TRUE)
-requested_ids <- sub("v[0-9]+$", "", requested_ids, ignore.case = TRUE)
-requested_ids <- requested_ids[nzchar(requested_ids)]
-
-existing <- litxr:::.litxr_read_collection_records_from_json(collection_ref_dir)
-existing_ids <- if (nrow(existing) && "ref_id" %in% names(existing)) {
-  sub("^arxiv:", "", as.character(existing$ref_id), ignore.case = TRUE)
-} else {
-  character()
-}
-requested_ids <- setdiff(requested_ids, existing_ids)
-
-if (!length(requested_ids)) {
-  emit_json(list(
-    status = "ok",
-    collection_id = parsed$collection,
-    collection_ref_dir = collection_ref_dir,
-    requested = 0L,
-    fetched = 0L,
-    written = 0L,
-    skipped_existing = length(parsed$arxiv_ids)
-  ))
-  quit(save = "no", status = 0L)
-}
-
-fetch_batches <- split(requested_ids, ceiling(seq_along(requested_ids) / batch_size))
-records_list <- list()
-found_ids <- character()
-for (batch in fetch_batches) {
-  feed <- litxr::fetch_arxiv_xml(id_vec = batch)
+for (start in seq.int(1L, length(fetch_ids), by = batch_size)) {
+  batch_ids <- fetch_ids[start:min(start + batch_size - 1L, length(fetch_ids))]
+  feed <- litxr::fetch_arxiv_xml(id_vec = batch_ids)
   entries <- xml2::xml_find_all(feed, ".//*[local-name()='entry']")
   if (!length(entries)) {
     next
   }
-  for (entry in entries) {
-    record <- litxr::parse_arxiv_entry_unified(entry)
-    record$collection_id <- parsed$collection
-    record$collection_title <- journal$title
-    if (!nrow(record)) {
+
+  batch_rows <- vector("list", length(entries))
+  for (entry_idx in seq_along(entries)) {
+    entry <- entries[[entry_idx]]
+    row <- litxr::parse_arxiv_entry_unified(entry)
+    subject <- if (has_text(row$subject_primary)) {
+      as.character(row$subject_primary[[1L]])
+    } else if (has_text(row$arxiv_primary_category)) {
+      as.character(row$arxiv_primary_category[[1L]])
+    } else {
+      NA_character_
+    }
+    if (is.na(subject) || !nzchar(subject)) {
+      stop("Unable to determine primary subject for arXiv record: ", as.character(row$ref_id[[1L]]), call. = FALSE)
+    }
+
+    collection <- litxr:::.litxr_find_arxiv_collection(cfg, subject)
+    if (is.null(collection)) {
+      registered <- litxr:::.litxr_register_arxiv_collection(cfg, subject)
+      cfg <- registered$cfg
+      collection <- registered$collection
+      created_collection_ids <- unique(c(created_collection_ids, as.character(collection$collection_id)))
+    }
+
+    litxr:::.litxr_ensure_collection_ref_dir(cfg, collection$collection_id)
+
+    row$collection_id <- collection$collection_id
+    row$collection_title <- collection$title
+    batch_rows[[entry_idx]] <- row
+  }
+
+  batch_rows <- data.table::rbindlist(batch_rows, fill = TRUE)
+  if (!nrow(batch_rows)) {
+    next
+  }
+
+  if (nrow(batch_rows)) {
+    batch_rows <- batch_rows[!duplicated(batch_rows$ref_id), ]
+  }
+
+  for (i in seq_len(nrow(batch_rows))) {
+    row <- batch_rows[i, ]
+    collection <- litxr:::.litxr_find_arxiv_collection(cfg, row$subject_primary[[1L]])
+    if (is.null(collection)) {
+      collection <- litxr:::.litxr_find_arxiv_collection(cfg, row$arxiv_primary_category[[1L]])
+    }
+    if (is.null(collection)) {
+      stop("Unable to resolve arXiv collection for: ", as.character(row$ref_id[[1L]]), call. = FALSE)
+    }
+
+    collection_dir <- litxr:::.litxr_resolve_local_path(cfg, collection$local_path)
+    litxr:::.litxr_ensure_collection_ref_dir(cfg, collection$collection_id)
+    json_path <- file.path(collection_dir, paste0(litxr:::.litxr_record_slug(data.table::data.table(ref_id = row$ref_id[[1L]], doi = NA_character_)), ".json"))
+    if (!isTRUE(parsed$force) && file.exists(json_path)) {
       next
     }
-    records_list[[length(records_list) + 1L]] <- record
-    found_ids <- c(found_ids, sub("^arxiv:", "", as.character(record$ref_id[[1L]]), ignore.case = TRUE))
+
+    payload <- litxr:::.litxr_row_to_storage_payload(row, collection)
+    jsonlite::write_json(payload, json_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+    written_paths <- c(written_paths, json_path)
+    fetched_rows[[length(fetched_rows) + 1L]] <- row
   }
-}
-
-if (!length(records_list)) {
-  emit_json(list(
-    status = "ok",
-    collection_id = parsed$collection,
-    collection_ref_dir = collection_ref_dir,
-    requested = length(parsed$arxiv_ids),
-    fetched = 0L,
-    written = 0L,
-    skipped_existing = length(parsed$arxiv_ids),
-    missing = requested_ids
-  ))
-  quit(save = "no", status = 0L)
-}
-
-records <- data.table::rbindlist(records_list, fill = TRUE)
-records <- records[!duplicated(records$ref_id), ]
-
-if (!isTRUE(parsed$force)) {
-  existing_ref_ids <- if (nrow(existing) && "ref_id" %in% names(existing)) as.character(existing$ref_id) else character()
-  records <- records[!(records$ref_id %in% existing_ref_ids), ]
-}
-
-if (!nrow(records)) {
-  emit_json(list(
-    status = "ok",
-    collection_id = parsed$collection,
-    collection_ref_dir = collection_ref_dir,
-    requested = length(parsed$arxiv_ids),
-    fetched = length(found_ids),
-    written = 0L,
-    skipped_existing = length(parsed$arxiv_ids),
-    missing = setdiff(requested_ids, found_ids)
-  ))
-  quit(save = "no", status = 0L)
-}
-
-written <- litxr:::.litxr_write_journal_record_files(records, collection_ref_dir, journal)
-missing_ids <- setdiff(requested_ids, found_ids)
-log_line("written=", length(written))
-if (length(missing_ids)) {
-  log_line("missing_ids=", paste(missing_ids, collapse = ","))
 }
 
 emit_json(list(
   status = "ok",
-  collection_id = parsed$collection,
-  collection_ref_dir = collection_ref_dir,
-  requested = length(parsed$arxiv_ids),
-  fetched = length(found_ids),
-  written = length(written),
-  skipped_existing = if (isTRUE(parsed$force)) 0L else length(parsed$arxiv_ids) - length(requested_ids),
-  missing = missing_ids,
-  written_paths = as.character(written)
+  requested = requested_ids,
+  fetched = length(fetched_rows),
+  written = length(written_paths),
+  skipped_existing = skipped_existing,
+  created_collection_ids = unique(created_collection_ids),
+  written_paths = written_paths
 ))

@@ -357,38 +357,21 @@
   if (!length(keys)) {
     return(data.table::data.table())
   }
-
-  cfg <- tryCatch(litxr_read_config(), error = function(e) NULL)
-  if (is.null(cfg)) {
-    stop("Unable to read config for collection lookup.", call. = FALSE)
+  out <- .litxr_read_collection_records_from_json(local_path)
+  if (!nrow(out)) {
+    return(out)
   }
-  collection_index <- .litxr_collection_index_for_local_path(cfg, local_path)
-  if (is.na(collection_index) || collection_index < 1L) {
-    stop("Unable to resolve collection index for local path: ", local_path, call. = FALSE)
+  key_cols <- intersect(c("ref_id", "source_id", "doi"), names(out))
+  if (!length(key_cols)) {
+    return(out[0, , drop = FALSE])
   }
-  collections <- .litxr_config_collections(cfg)
-  if (collection_index > length(collections)) {
-    return(data.table::data.table())
+  key_mask <- Reduce(`|`, lapply(key_cols, function(col) as.character(out[[col]]) %in% keys))
+  out <- out[key_mask, , drop = FALSE]
+  if (!nrow(out)) {
+    return(out)
   }
-  collection_id <- as.character(collections[[collection_index]]$collection_id %||% collections[[collection_index]]$journal_id %||% NA_character_)
-  if (!nzchar(collection_id)) {
-    return(data.table::data.table())
-  }
-  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
-  if (!nrow(targets)) {
-    return(data.table::data.table())
-  }
-  targets <- targets[targets$ref_id %in% keys, ]
-  if (!nrow(targets)) {
-    return(data.table::data.table())
-  }
-  out <- .litxr_hydrate_rows_from_json_paths(
-    targets[, c("ref_id", "json_path"), with = FALSE],
-    targets[, c("ref_id", "json_path"), with = FALSE],
-    fields = c("abstract", "authors_list")
-  )
   key <- .litxr_upsert_key(out)
-  out <- out[!duplicated(key), ]
+  out <- out[!duplicated(key), , drop = FALSE]
   out
 }
 

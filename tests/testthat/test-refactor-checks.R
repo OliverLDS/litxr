@@ -299,15 +299,20 @@ test_that("BibTeX export scalarizes list-valued fields without leaking vector sy
   expect_false(any(grepl("list\\(", bib, fixed = FALSE)))
 })
 
-test_that("doi collection sync node parses and advertises its strict collection mode", {
-  sync_script <- normalizePath(file.path("..", "..", "scripts", "sync_doi_collection_json.R"), mustWork = TRUE)
+test_that("arxiv and DOI id fetch nodes parse and advertise strict id mode", {
+  arxiv_script <- normalizePath(file.path("..", "..", "scripts", "fetch_arxiv_ref_json_by_ids.R"), mustWork = TRUE)
+  doi_script <- normalizePath(file.path("..", "..", "scripts", "sync_doi_collection_json.R"), mustWork = TRUE)
 
-  expect_silent(parse(file = sync_script))
+  expect_silent(parse(file = arxiv_script))
+  expect_silent(parse(file = doi_script))
 
-  sync_help <- system2("Rscript", c(sync_script, "--help"), stdout = TRUE, stderr = tempfile())
-  expect_true(any(grepl("Crossref-backed collection id to sync", sync_help, fixed = TRUE)))
-  expect_true(any(grepl("--collection COLLECTION_ID", sync_help, fixed = TRUE)))
-  expect_true(any(grepl("--start DATE", sync_help, fixed = TRUE)))
-  expect_true(any(grepl("--end DATE", sync_help, fixed = TRUE)))
-  expect_true(any(grepl("--full-time", sync_help, fixed = TRUE)))
+  arxiv_help <- system2("Rscript", c(arxiv_script, "--help"), stdout = TRUE, stderr = tempfile())
+  expect_true(any(grepl("--arxiv-id IDS", arxiv_help, fixed = TRUE)))
+  expect_true(any(grepl("Routes each record by its primary subject", arxiv_help, fixed = TRUE)))
+  expect_false(any(grepl("--collection", arxiv_help, fixed = TRUE)))
+
+  doi_help <- system2("Rscript", c(doi_script, "--help"), stdout = TRUE, stderr = tempfile())
+  expect_true(any(grepl("--doi IDS", doi_help, fixed = TRUE)))
+  expect_true(any(grepl("Skips DOIs already present in ref_doi.fst", doi_help, fixed = TRUE)))
+  expect_false(any(grepl("--collection", doi_help, fixed = TRUE)))
 })
