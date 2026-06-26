@@ -1,33 +1,3 @@
-#' Export local references to a BibTeX file
-#'
-#' @param output Output `.bib` file path.
-#' @param journal_ids Optional character vector of collection ids to export. The
-#'   argument name is kept for backward compatibility.
-#' @param keys Optional character vector of record identifiers to export. Keys
-#'   are matched against `doi`, `ref_id`, or `source_id`.
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
-#'
-#' @return Invisibly returns the output path.
-#' @export
-litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  rows <- .litxr_export_bib_rows(cfg, journal_ids = journal_ids, keys = keys)
-
-  if (!nrow(rows)) {
-    writeLines(character(), output)
-    return(invisible(output))
-  }
-
-  bib_lines <- unlist(lapply(seq_len(nrow(rows)), function(i) {
-    c(row_to_bibtex(rows[i, ]), "")
-  }), use.names = FALSE)
-
-  writeLines(bib_lines, output)
-  invisible(output)
-}
-
 .litxr_canonical_ref_rows_for_keys <- function(cfg, keys, journal_ids = NULL) {
   keys <- unique(unlist(lapply(keys, .litxr_lookup_candidates), use.names = FALSE))
   keys <- keys[!is.na(keys) & nzchar(keys)]
@@ -79,35 +49,6 @@ litxr_export_bib <- function(output, journal_ids = NULL, keys = NULL, config = N
     out <- out[!duplicated(as.character(out$ref_id)), ]
   }
   out
-}
-
-.litxr_export_bib_rows <- function(cfg, journal_ids = NULL, keys = NULL) {
-  if (!is.null(keys) && length(keys)) {
-    refs <- .litxr_canonical_ref_rows_for_keys(cfg, keys = keys, journal_ids = journal_ids)
-    if (!nrow(refs)) {
-      return(refs[0, ])
-    }
-    return(refs)
-  }
-
-  if (!is.null(journal_ids) && length(journal_ids)) {
-    refs_all <- data.table::rbindlist(lapply(unique(as.character(journal_ids)), function(journal_id) {
-      if (is.na(journal_id) || !nzchar(journal_id)) {
-        return(data.table::data.table())
-      }
-      tryCatch(
-        litxr_read_collection(journal_id, cfg),
-        error = function(e) data.table::data.table()
-      )
-    }), fill = TRUE)
-  } else {
-    refs_all <- .litxr_authoritative_project_records(cfg)
-  }
-
-  if (!nrow(refs_all)) {
-    return(refs_all[0, ])
-  }
-  refs_all[!duplicated(as.character(refs_all$ref_id)), ]
 }
 
 .litxr_preferred_rows_for_keys <- function(cfg, keys, journal_ids = NULL) {

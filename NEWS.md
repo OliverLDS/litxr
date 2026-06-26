@@ -1,3 +1,8 @@
+# litxr 0.1.7.8
+
+- Reused a single preloaded BibTeX scaffold cache across each export batch so
+  DOI and ISBN resolution no longer reopens scaffold tables per entry.
+
 # litxr 0.1.7.7
 
 - Updated the thin arXiv reference update path so newly fetched arXiv JSON can
@@ -367,7 +372,7 @@
 
 # litxr 0.0.8
 
-- Tightened `scripts/write_bib_by_ref_ids.R` so create mode now stops if the
+- Tightened `scripts/write_bib_by_ref_ids.sh` so create mode now stops if the
   target `.bib` file already exists and `--append` was not requested.
 - Added `docs/llm-digest-revision-design.md` to document a future revision-aware
   digest workflow with explicit `schema_version` versus `digest_revision`
@@ -380,7 +385,7 @@
   editors such as TextMate.
 - Fixed `litxr_find_refs(ref_id = ...)` to handle vector `ref_id` inputs
   without scalar-coercion warnings.
-- Tightened `scripts/write_bib_by_ref_ids.R` so it keeps CLI startup light,
+- Tightened `scripts/write_bib_by_ref_ids.sh` so it keeps CLI startup light,
   validates multi-id local lookups cleanly, and only prefers DOI-backed local
   metadata over arXiv records when the DOI-backed record is actually richer.
 - Added `docs/doi-enrichment-design.md` to document the current DOI-enrichment
@@ -395,7 +400,7 @@
   existing research schema in markdown-style form.
 - Added `scripts/cache_category_inquiries.R` to build persistent local inquiry
   embedding caches from YAML files.
-- Added `scripts/write_bib_by_ref_ids.R` for ref-id-based BibTeX file creation
+- Added `scripts/write_bib_by_ref_ids.sh` for ref-id-based BibTeX file creation
   and append/overwrite workflows.
 - Removed the obsolete scripts `scripts/build_llm_digests.R`,
   `scripts/example_digest_builder.R`, and `scripts/get_arxiv_abstract.sh`.
@@ -641,8 +646,8 @@
 
 - Added `litxr_add_dois()` for DOI-batch ingestion across journals, with
   automatic Crossref journal registration into `config.yaml` when needed.
-- Extended `litxr_export_bib()` to export by record keys such as DOI, `ref_id`,
-  or `source_id`, with warnings for missing keys.
+- Added `write_bibtex_entries()` for BibTeX export from canonical `ref_id`
+  values, plus a thin shell wrapper for command-line use.
 - Made config loading tolerant of tab-indented YAML files.
 - Added `scripts/repair_arxiv_range.R` for day-by-day arXiv repair with
   per-day pagination and sleep intervals.

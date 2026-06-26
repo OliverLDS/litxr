@@ -10,18 +10,13 @@ choosing a task-specific working identity.
 
 ### Citation export
 
-For citation-oriented tasks such as `litxr_export_bib()` and
-`scripts/write_bib_by_ref_ids.R`:
+For citation-oriented tasks such as `write_bibtex_entries()` and
+`scripts/write_bib_by_ref_ids.sh`:
 
-- prefer `preferred_citation_ref_id`
-- if a linked DOI-backed published identity exists, prefer that row
-- otherwise fall back to the primary identity
-
-Practical effect:
-
-- a linked arXiv paper will usually export the richer DOI-backed published
-  record
-- users can still request the arXiv id at the CLI surface
+- pass canonical `ref_id` values directly
+- if a linked DOI-backed published identity exists for an arXiv id, prefer that
+  DOI-backed record during BibTeX export
+- otherwise fall back to the requested arXiv identity
 
 ### Digest and full-text prompting
 

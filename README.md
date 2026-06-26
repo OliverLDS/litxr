@@ -40,7 +40,7 @@ Sync one collection and export BibTeX:
 
 ```r
 records <- litxr_sync_collection("journal_of_finance", cfg)
-litxr_export_bib("references.bib", journal_ids = "journal_of_finance", config = cfg)
+write_bibtex_entries("references.bib", records$ref_id, config = cfg)
 ```
 
 Read from the canonical project-level store:
@@ -77,7 +77,7 @@ Read and export:
 - `litxr_search_embeddings()`
 - `litxr_read_references()`
 - `litxr_find_refs()`
-- `litxr_export_bib()`
+- `write_bibtex_entries()`
 
 Enrichment:
 
@@ -120,7 +120,7 @@ Included shell helpers:
 - `scripts/human/get_ref_summary.sh`
 - `scripts/report_arxiv_category_labels.R`
 - `scripts/cache_category_inquiries.R`
-- `scripts/write_bib_by_ref_ids.R`
+- `scripts/write_bib_by_ref_ids.sh`
 
 The arXiv repair scripts now prefer `--collection-id`; `--journal-id` still
 works as a compatibility alias.

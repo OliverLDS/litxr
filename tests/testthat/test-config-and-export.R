@@ -893,7 +893,11 @@ stopifnot(any(compacted_records$doi == "10.1000/delta"))
 stopifnot(file.exists(file.path(local_path, paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
 
 out <- file.path(td_export, "references.bib")
-litxr::litxr_export_bib(out, journal_ids = journal$journal_id, config = cfg_export)
+litxr::write_bibtex_entries(
+  out,
+  litxr::litxr_read_collection(journal$journal_id, cfg_export)$ref_id,
+  config = cfg_export
+)
 
 stopifnot(file.exists(out))
 bib <- paste(readLines(out, warn = FALSE), collapse = "\n")
@@ -904,9 +908,9 @@ stopifnot(grepl("doi = \\{10.1000/example\\}", bib))
 out_keys <- file.path(td_export, "references_by_keys.bib")
 warn_msg <- NULL
 withCallingHandlers(
-  litxr::litxr_export_bib(
+  litxr::write_bibtex_entries(
     out_keys,
-    keys = c("10.1000/example", "doi:10.1000/example", "arxiv:missing-id"),
+    c("10.1000/example", "doi:10.1000/example", "arxiv:missing-id"),
     config = cfg_export
   ),
   warning = function(w) {
@@ -921,16 +925,24 @@ stopifnot(grepl("doi = \\{10.1000/example\\}", bib_keys))
 stopifnot(grepl("arxiv:missing-id", warn_msg, fixed = TRUE))
 
 out_arxiv_preferred <- file.path(td_export, "references_arxiv_preferred.bib")
-litxr::litxr_export_bib(
-  out_arxiv_preferred,
-  keys = "arxiv:2501.00001",
-  config = cfg_export
-)
+litxr::write_bibtex_entries(out_arxiv_preferred, "arxiv:2501.00001", config = cfg_export)
 stopifnot(file.exists(out_arxiv_preferred))
 bib_arxiv_preferred <- paste(readLines(out_arxiv_preferred, warn = FALSE), collapse = "\n")
 stopifnot(grepl("Published Example Paper", bib_arxiv_preferred, fixed = TRUE))
 stopifnot(grepl("doi = \\{10.1000/published-example\\}", bib_arxiv_preferred))
 stopifnot(!grepl("https://arxiv.org", bib_arxiv_preferred, fixed = TRUE))
+
+out_arxiv_no_link <- file.path(td_export, "references_arxiv_no_link.bib")
+litxr::write_bibtex_entries(
+  out_arxiv_no_link,
+  "arxiv:2501.00001",
+  config = cfg_export,
+  prefer_linked_doi = FALSE
+)
+stopifnot(file.exists(out_arxiv_no_link))
+bib_arxiv_no_link <- paste(readLines(out_arxiv_no_link, warn = FALSE), collapse = "\n")
+stopifnot(grepl("@unpublished\\{2501_00001,", bib_arxiv_no_link))
+stopifnot(grepl("https://arxiv.org", bib_arxiv_no_link, fixed = TRUE))
 
 existing <- data.table::copy(record)
 existing[["title"]] <- "Old Title"
@@ -1062,7 +1074,7 @@ found_manual_book <- litxr::litxr_find_refs(entry_type = "book", config = cfg_ma
 stopifnot(any(found_manual_book$ref_id == "isbn:9780262046305"))
 
 manual_bib_path <- file.path(td_export, "manual_books.bib")
-litxr::litxr_export_bib(manual_bib_path, journal_ids = "manual_books", config = cfg_manual)
+litxr::write_bibtex_entries(manual_bib_path, "isbn:9780262046305", config = cfg_manual)
 manual_bib <- paste(readLines(manual_bib_path, warn = FALSE), collapse = "\n")
 stopifnot(grepl("@book\\{9780262046305,", manual_bib))
 

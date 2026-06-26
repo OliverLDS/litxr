@@ -331,7 +331,7 @@ stopifnot(identical(
   "(cat:cs.AI) AND submittedDate:[202601010000 TO 202601312359]"
 ))
 
-bib_book <- litxr::row_to_bibtex(data.table::data.table(
+bib_book <- litxr:::.litxr_row_to_bibtex(data.table::data.table(
   ref_id = "book:test",
   source = "book",
   source_id = "booktest",

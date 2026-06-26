@@ -159,19 +159,12 @@ Known limitation:
 
 Use:
 
-- `litxr_export_bib(output, journal_ids = ..., config = ...)`
-- `litxr_export_bib(output, keys = ..., config = ...)`
+- `write_bibtex_entries(output, ref_ids = ..., config = ...)`
+- `scripts/write_bib_by_ref_ids.sh`
 
-The `journal_ids` argument name is kept for backward compatibility, but it
-accepts collection ids.
-
-`keys` can match:
-
-- `doi`
-- `ref_id`
-- `source_id`
-
-Missing keys now produce a warning instead of being ignored silently.
+The BibTeX writer now accepts canonical `ref_id` values directly. Use the
+`scripts/read_bibtex_entries.sh` helper to extract canonical ids from a `.bib`
+file when needed.
 
 ## Stable Identity Policies
 

@@ -265,7 +265,7 @@ test_that("completeness scoring prefers the most complete duplicate record", {
 })
 
 test_that("BibTeX export scalarizes list-valued fields without leaking vector syntax", {
-  bib <- litxr::row_to_bibtex(data.table::data.table(
+  bib <- litxr:::.litxr_row_to_bibtex(data.table::data.table(
     ref_id = "book:test",
     source = "book",
     source_id = "booktest",
