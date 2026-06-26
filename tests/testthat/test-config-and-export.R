@@ -222,6 +222,47 @@ mock_embed <- function(texts) {
     length = nchar(texts) / 100
   )
 }
+embed_thin_paths <- litxr:::.litxr_embedding_index_paths(
+  cfg_export,
+  arxiv_collection$collection_id,
+  "abstract",
+  "mock-embedding-thin-v1"
+)
+dir.create(embed_thin_paths$dir, recursive = TRUE, showWarnings = FALSE)
+fst::write_fst(
+  as.data.frame(data.table::data.table(
+    ref_id = "arxiv:2501.00001",
+    abstract = "already cached"
+  )),
+  embed_thin_paths$metadata
+)
+jsonlite::write_json(
+  list(
+    collection_id = arxiv_collection$collection_id,
+    field = "abstract",
+    model = "mock-embedding-thin-v1",
+    provider = "mock",
+    dimension = 3L,
+    records = 1L,
+    updated_at = "2026-01-01 00:00:00 UTC"
+  ),
+  embed_thin_paths$manifest,
+  auto_unbox = TRUE,
+  pretty = TRUE,
+  null = "null"
+)
+embed_thin_delta <- litxr::litxr_embed_collection_delta(
+  arxiv_collection$collection_id,
+  cfg_export,
+  field = "abstract",
+  embed_fun = mock_embed,
+  model = "mock-embedding-thin-v1",
+  provider = "mock",
+  batch_size = 1L,
+  limit = 2L
+)
+stopifnot(nrow(embed_thin_delta) == 1L)
+stopifnot(identical(embed_thin_delta$ref_id[[1]], "arxiv:2501.00002"))
 embed_meta <- litxr::litxr_build_embedding_index(
   arxiv_collection$collection_id,
   cfg_export,

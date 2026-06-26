@@ -5,115 +5,227 @@
   )
 }
 
-.litxr_hydrate_rows_from_json_dir <- function(rows, json_dir) {
-  rows <- data.table::as.data.table(rows)
-  if (!nrow(rows) || !dir.exists(json_dir)) {
-    return(rows)
+.litxr_collection_index_for_local_path <- function(cfg, local_path) {
+  collections <- .litxr_config_collections(cfg)
+  if (!length(collections)) {
+    return(NA_integer_)
   }
-
-  json_paths <- list.files(json_dir, pattern = "\\.json$", full.names = TRUE)
-  if (!length(json_paths)) {
-    return(rows)
-  }
-
-  file_map <- data.table::data.table(
-    slug = sub("\\.json$", "", basename(json_paths)),
-    path = json_paths
+  resolved <- vapply(collections, function(collection) {
+    as.character(.litxr_resolve_local_path(cfg, collection$local_path))
+  }, character(1))
+  idx <- match(
+    normalizePath(path.expand(local_path), winslash = "/", mustWork = FALSE),
+    normalizePath(resolved, winslash = "/", mustWork = FALSE)
   )
-  row_map <- data.table::data.table(
-    ref_id = if ("ref_id" %in% names(rows)) as.character(rows$ref_id) else rep(NA_character_, nrow(rows)),
-    slug = .litxr_record_slugs(
-      if ("ref_id" %in% names(rows)) rows$ref_id else rep(NA_character_, nrow(rows)),
-      if ("doi" %in% names(rows)) rows$doi else NULL
-    ),
-    row_idx = seq_len(nrow(rows))
+  suppressWarnings(as.integer(idx[[1L]]))
+}
+
+.litxr_ref_json_locations_from_thin_stores <- function(cfg, ref_ids, collection_id = NULL) {
+  ref_ids <- unique(as.character(unlist(ref_ids, use.names = FALSE)))
+  ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+  if (!length(ref_ids)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      collection_id = character(),
+      collection_index = integer(),
+      json_filename = character(),
+      json_path = character()
+    ))
+  }
+
+  collections <- .litxr_config_collections(cfg)
+  collection_ref_dirs <- vapply(collections, function(collection) {
+    as.character(.litxr_collection_ref_dir(cfg, collection$collection_id %||% collection$journal_id))
+  }, character(1))
+
+  collection_filter <- NULL
+  if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
+    collection_filter <- match(
+      as.character(collection_id[[1L]]),
+      vapply(collections, function(collection) {
+        as.character(collection$collection_id %||% collection$journal_id %||% NA_character_)
+      }, character(1))
+    )
+    if (is.na(collection_filter) || collection_filter < 1L) {
+      return(data.table::data.table(
+        ref_id = character(),
+        collection_id = character(),
+        collection_index = integer(),
+        json_filename = character(),
+        json_path = character()
+      ))
+    }
+  }
+
+  arxiv_rows <- .litxr_read_fst_table_safe(
+    .litxr_ref_arxiv_path(cfg),
+    columns = c("arxiv_id", "collection_index", "json_filename")
   )
-  matched_idx <- match(row_map$slug, file_map$slug)
-  matched_idx <- matched_idx[!is.na(matched_idx)]
-  if (!length(matched_idx)) {
-    return(rows)
-  }
-  matched <- data.table::data.table(
-    ref_id = row_map$ref_id[!is.na(row_map$slug) & !is.na(match(row_map$slug, file_map$slug))],
-    slug = row_map$slug[!is.na(row_map$slug) & !is.na(match(row_map$slug, file_map$slug))],
-    path = file_map$path[matched_idx]
+  doi_rows <- .litxr_read_fst_table_safe(
+    .litxr_ref_doi_path(cfg),
+    columns = c("doi", "collection_index", "json_filename")
   )
 
-  unique_paths <- unique(matched$path)
-  updates <- lapply(unique_paths, function(json_path) {
-    tryCatch(.litxr_storage_payload_as_list(json_path), error = function(e) NULL)
-  })
-  updates <- updates[!vapply(updates, is.null, logical(1))]
-  if (!length(updates)) {
-    return(rows)
+  parts <- list()
+  if (nrow(arxiv_rows) && "arxiv_id" %in% names(arxiv_rows)) {
+    arxiv_rows <- arxiv_rows[
+      !is.na(arxiv_rows$collection_index) &
+        !is.na(arxiv_rows$arxiv_id) &
+        nzchar(arxiv_rows$arxiv_id) &
+        as.character(arxiv_rows$arxiv_id) %in% ref_ids,
+      ,
+      drop = FALSE
+    ]
+    if (!is.null(collection_filter)) {
+      arxiv_rows <- arxiv_rows[arxiv_rows$collection_index == collection_filter, , drop = FALSE]
+    }
+    if (nrow(arxiv_rows)) {
+      json_path <- vapply(seq_len(nrow(arxiv_rows)), function(i) {
+        idx <- suppressWarnings(as.integer(arxiv_rows$collection_index[[i]]))
+        if (is.na(idx) || idx < 1L || idx > length(collection_ref_dirs)) {
+          return(NA_character_)
+        }
+        file.path(collection_ref_dirs[[idx]], as.character(arxiv_rows$json_filename[[i]]))
+      }, character(1))
+      parts[[length(parts) + 1L]] <- data.table::data.table(
+        ref_id = vapply(arxiv_rows$arxiv_id, .litxr_normalize_arxiv_ref_id, character(1)),
+        collection_id = vapply(seq_len(nrow(arxiv_rows)), function(i) {
+          idx <- suppressWarnings(as.integer(arxiv_rows$collection_index[[i]]))
+          if (is.na(idx) || idx < 1L || idx > length(collections)) return(NA_character_)
+          as.character(collections[[idx]]$collection_id %||% collections[[idx]]$journal_id %||% NA_character_)
+        }, character(1)),
+        collection_index = as.integer(arxiv_rows$collection_index),
+        json_filename = as.character(arxiv_rows$json_filename),
+        json_path = json_path
+      )
+    }
+  }
+  if (nrow(doi_rows) && "doi" %in% names(doi_rows)) {
+    doi_rows <- doi_rows[
+      !is.na(doi_rows$collection_index) &
+        !is.na(doi_rows$doi) &
+        nzchar(doi_rows$doi) &
+        as.character(doi_rows$doi) %in% ref_ids,
+      ,
+      drop = FALSE
+    ]
+    if (!is.null(collection_filter)) {
+      doi_rows <- doi_rows[doi_rows$collection_index == collection_filter, , drop = FALSE]
+    }
+    if (nrow(doi_rows)) {
+      json_path <- vapply(seq_len(nrow(doi_rows)), function(i) {
+        idx <- suppressWarnings(as.integer(doi_rows$collection_index[[i]]))
+        if (is.na(idx) || idx < 1L || idx > length(collection_ref_dirs)) {
+          return(NA_character_)
+        }
+        file.path(collection_ref_dirs[[idx]], as.character(doi_rows$json_filename[[i]]))
+      }, character(1))
+      parts[[length(parts) + 1L]] <- data.table::data.table(
+        ref_id = vapply(doi_rows$doi, .litxr_normalize_doi_ref_id, character(1)),
+        collection_id = vapply(seq_len(nrow(doi_rows)), function(i) {
+          idx <- suppressWarnings(as.integer(doi_rows$collection_index[[i]]))
+          if (is.na(idx) || idx < 1L || idx > length(collections)) return(NA_character_)
+          as.character(collections[[idx]]$collection_id %||% collections[[idx]]$journal_id %||% NA_character_)
+        }, character(1)),
+        collection_index = as.integer(doi_rows$collection_index),
+        json_filename = as.character(doi_rows$json_filename),
+        json_path = json_path
+      )
+    }
   }
 
-  scalar_chr <- function(value) {
-    if (is.null(value) || !length(value)) {
-      return(NA_character_)
-    }
-    if (is.list(value)) {
-      value <- value[[1L]]
-    } else {
-      value <- value[[1L]]
-    }
-    if (is.null(value) || !length(value) || (length(value) == 1L && is.na(value[[1L]]))) {
-      return(NA_character_)
-    }
-    as.character(value[[1L]])
+  if (!length(parts)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      collection_id = character(),
+      collection_index = integer(),
+      json_filename = character(),
+      json_path = character()
+    ))
   }
-
-  updates <- data.table::data.table(
-    ref_id = vapply(updates, function(payload) scalar_chr(if ("ref_id" %in% names(payload)) payload$ref_id else NULL), character(1)),
-    abstract = vapply(updates, function(payload) scalar_chr(if ("abstract" %in% names(payload)) payload$abstract else NULL), character(1)),
-    authors_list = lapply(updates, function(payload) {
-      if ("authors_list" %in% names(payload) && !is.null(payload$authors_list)) {
-        unlist(payload$authors_list, use.names = FALSE)
-      } else {
-        character()
-      }
-    })
-  )
-  updates <- updates[!duplicated(as.character(updates$ref_id)), ]
-  if (!nrow(updates)) {
-    return(rows)
+  out <- data.table::rbindlist(parts, fill = TRUE)
+  out <- out[!is.na(out$ref_id) & nzchar(out$ref_id) & !is.na(out$json_path) & nzchar(out$json_path), ]
+  if (!nrow(out)) {
+    return(out)
   }
-
-  out <- data.table::copy(rows)
-  data.table::setkey(updates, ref_id)
-  match_idx <- match(out$ref_id, updates$ref_id)
-  hit_idx <- which(!is.na(match_idx))
-  if (!length(hit_idx)) {
-    return(rows)
-  }
-
-  for (field in c("abstract", "authors_list")) {
-    if (!(field %in% names(updates))) {
-      next
-    }
-    if (!(field %in% names(out))) {
-      out[[field]] <- if (is.list(updates[[field]])) rep(list(NULL), nrow(out)) else rep(NA_character_, nrow(out))
-    }
-    value <- updates[[field]][match_idx[hit_idx]]
-    column <- out[[field]]
-    column[hit_idx] <- value
-    out[[field]] <- column
-  }
-
-  attr(out, "hydrated_ref_ids") <- unique(as.character(updates$ref_id))
+  out <- out[!duplicated(out$ref_id), ]
   out
 }
 
-.litxr_hydrate_collection_projection_rows <- function(local_path, rows) {
-  needed_fields <- c("abstract", "authors_list")
+.litxr_hydrate_rows_from_json_paths <- function(rows, json_paths, fields = c("abstract", "authors_list")) {
   rows <- data.table::as.data.table(rows)
-  if (!nrow(rows) || all(needed_fields %in% names(rows))) {
+  if (!nrow(rows)) {
+    return(rows)
+  }
+  fields <- unique(as.character(fields))
+  fields <- fields[nzchar(fields)]
+  if (!length(fields)) {
+    fields <- "abstract"
+  }
+  for (field in fields) {
+    if (!(field %in% names(rows))) {
+      if (field %in% c("authors_list", "raw_entry")) {
+        rows[[field]] <- rep(list(NULL), nrow(rows))
+      } else if (field == "pub_date") {
+        rows[[field]] <- rep(as.POSIXct(NA, tz = "UTC"), nrow(rows))
+      } else if (field %in% c("year", "month", "day", "arxiv_version")) {
+        rows[[field]] <- rep(NA_integer_, nrow(rows))
+      } else {
+        rows[[field]] <- rep(NA_character_, nrow(rows))
+      }
+    }
+  }
+  json_paths <- data.table::as.data.table(json_paths)
+  if (!nrow(json_paths) || !all(c("ref_id", "json_path") %in% names(json_paths))) {
+    return(rows)
+  }
+  json_paths <- json_paths[
+    !is.na(json_paths$ref_id) & nzchar(json_paths$ref_id) &
+      !is.na(json_paths$json_path) & nzchar(json_paths$json_path),
+    ,
+    drop = FALSE
+  ]
+  if (!nrow(json_paths)) {
+    return(rows)
+  }
+  json_paths <- json_paths[!duplicated(json_paths$ref_id), ]
+  hit <- match(as.character(rows$ref_id), json_paths$ref_id)
+  keep <- which(!is.na(hit))
+  if (!length(keep)) {
     return(rows)
   }
 
-  paths <- .litxr_journal_paths(local_path)
-  json_dir <- paths$json
-  .litxr_hydrate_rows_from_json_dir(rows, json_dir)
+  json_paths <- json_paths[hit[keep], , drop = FALSE]
+  json_paths$row_idx <- keep
+  data.table::setorder(json_paths, json_path, row_idx)
+  run_starts <- c(1L, which(json_paths$json_path[-1L] != json_paths$json_path[-nrow(json_paths)]) + 1L)
+  run_ends <- c(run_starts[-1L] - 1L, nrow(json_paths))
+  for (run_id in seq_along(run_starts)) {
+    idx <- json_paths$row_idx[run_starts[[run_id]]:run_ends[[run_id]]]
+    json_path <- json_paths$json_path[[run_starts[[run_id]]]]
+    payload <- tryCatch(
+      .litxr_storage_payload_as_list(json_path, fields = fields),
+      error = function(e) NULL
+    )
+    if (is.null(payload) || !length(payload)) {
+      next
+    }
+    for (field in intersect(fields, names(payload))) {
+      value <- payload[[field]]
+      if (is.list(rows[[field]])) {
+        if (!is.list(value)) {
+          value <- list(value)
+        }
+        data.table::set(rows, i = idx, j = field, value = rep(list(value[[1L]]), length(idx)))
+      } else {
+        if (is.list(value)) {
+          value <- value[[1L]]
+        }
+        data.table::set(rows, i = idx, j = field, value = rep(value, length(idx)))
+      }
+    }
+  }
+  rows
 }
 
 .litxr_runtime_wide_projection_limit <- function(limit = getOption("litxr.runtime_wide_projection_limit", 300L)) {
@@ -199,7 +311,9 @@
       next
     }
     candidate <- out[batch_idx, ]
-    hydrated <- .litxr_hydrate_collection_projection_rows(local_path[[1]], candidate)
+    targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+    target_paths <- targets[match(candidate$ref_id, targets$ref_id), c("ref_id", "json_path"), with = FALSE]
+    hydrated <- .litxr_hydrate_rows_from_json_paths(candidate, target_paths, fields = c("abstract", "authors_list"))
     if (!nrow(hydrated)) {
       next
     }
@@ -240,14 +354,42 @@
 
 .litxr_read_journal_records_by_keys <- function(local_path, keys, keyed_fst_read_threshold = getOption("litxr.keyed_fst_read_threshold", 32L)) {
   keys <- .litxr_expand_reference_keys(keys)
-  records <- .litxr_read_journal_records(local_path)
-  if (!nrow(records)) {
-    return(records)
+  if (!length(keys)) {
+    return(data.table::data.table())
   }
-  out <- .litxr_subset_records_by_lookup_keys(records, keys)
+
+  cfg <- tryCatch(litxr_read_config(), error = function(e) NULL)
+  if (is.null(cfg)) {
+    stop("Unable to read config for collection lookup.", call. = FALSE)
+  }
+  collection_index <- .litxr_collection_index_for_local_path(cfg, local_path)
+  if (is.na(collection_index) || collection_index < 1L) {
+    stop("Unable to resolve collection index for local path: ", local_path, call. = FALSE)
+  }
+  collections <- .litxr_config_collections(cfg)
+  if (collection_index > length(collections)) {
+    return(data.table::data.table())
+  }
+  collection_id <- as.character(collections[[collection_index]]$collection_id %||% collections[[collection_index]]$journal_id %||% NA_character_)
+  if (!nzchar(collection_id)) {
+    return(data.table::data.table())
+  }
+  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+  if (!nrow(targets)) {
+    return(data.table::data.table())
+  }
+  targets <- targets[targets$ref_id %in% keys, ]
+  if (!nrow(targets)) {
+    return(data.table::data.table())
+  }
+  out <- .litxr_hydrate_rows_from_json_paths(
+    targets[, c("ref_id", "json_path"), with = FALSE],
+    targets[, c("ref_id", "json_path"), with = FALSE],
+    fields = c("abstract", "authors_list")
+  )
   key <- .litxr_upsert_key(out)
   out <- out[!duplicated(key), ]
-  .litxr_hydrate_collection_projection_rows(local_path, out)
+  out
 }
 
 .litxr_read_collection_delta <- function(local_path) {

@@ -20,8 +20,8 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
     stop("`model` must be supplied and non-empty.", call. = FALSE)
   }
 
-  records <- litxr_read_collection(collection_id, cfg)
-  collection_ref_ids <- unique(as.character(records$ref_id[!is.na(records$ref_id) & nzchar(records$ref_id)]))
+  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+  collection_ref_ids <- unique(as.character(targets$ref_id[!is.na(targets$ref_id) & nzchar(targets$ref_id)]))
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
   main <- .litxr_read_embedding_index_parts(paths, read_matrix = FALSE)
@@ -44,6 +44,129 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
     missing = length(missing_ref_ids),
     coverage_pct = if (length(collection_ref_ids)) length(embedded_in_collection) / length(collection_ref_ids) else NA_real_
   )
+}
+
+.litxr_read_fst_table_safe <- function(path, columns = NULL) {
+  if (!file.exists(path)) {
+    return(data.table::data.table())
+  }
+  tryCatch(
+    data.table::as.data.table(fst::read_fst(path, as.data.table = TRUE, columns = columns)),
+    error = function(e) data.table::data.table()
+  )
+}
+
+.litxr_collection_index_for_id <- function(cfg, collection_id) {
+  collection_id <- as.character(collection_id)[[1L]]
+  collections <- .litxr_config_collections(cfg)
+  if (!length(collections)) {
+    return(NA_integer_)
+  }
+  collection_ids <- vapply(collections, function(collection) {
+    as.character(collection$collection_id %||% collection$journal_id %||% NA_character_)
+  }, character(1))
+  idx <- match(collection_id, collection_ids)
+  suppressWarnings(as.integer(idx[[1L]]))
+}
+
+.litxr_embedding_target_rows_from_thin_ref_stores <- function(cfg, collection_id) {
+  collection_index <- .litxr_collection_index_for_id(cfg, collection_id)
+  if (is.na(collection_index) || collection_index < 1L) {
+    stop("Collection not found in config: ", collection_id, call. = FALSE)
+  }
+  collections <- .litxr_config_collections(cfg)
+  collection_ref_dir <- if (collection_index <= length(collections)) {
+    .litxr_collection_ref_dir(cfg, as.character(collections[[collection_index]]$collection_id %||% collections[[collection_index]]$journal_id))
+  } else {
+    NA_character_
+  }
+
+  arxiv_rows <- .litxr_read_fst_table_safe(
+    .litxr_ref_arxiv_path(cfg),
+    columns = c("arxiv_id", "collection_index", "json_filename")
+  )
+  doi_rows <- .litxr_read_fst_table_safe(
+    .litxr_ref_doi_path(cfg),
+    columns = c("doi", "collection_index", "json_filename")
+  )
+
+  parts <- list()
+  if (nrow(arxiv_rows) && "arxiv_id" %in% names(arxiv_rows)) {
+    arxiv_rows <- arxiv_rows[
+      !is.na(arxiv_rows$collection_index) &
+        arxiv_rows$collection_index == collection_index &
+        !is.na(arxiv_rows$arxiv_id) &
+        nzchar(arxiv_rows$arxiv_id),
+      ,
+      drop = FALSE
+    ]
+    if (nrow(arxiv_rows)) {
+      parts[[length(parts) + 1L]] <- data.table::data.table(
+        ref_id = vapply(arxiv_rows$arxiv_id, .litxr_normalize_arxiv_ref_id, character(1)),
+        collection_id = as.character(collection_id),
+        collection_index = as.integer(arxiv_rows$collection_index),
+        json_filename = as.character(arxiv_rows$json_filename),
+        json_path = if (is.na(collection_ref_dir) || !nzchar(collection_ref_dir)) {
+          NA_character_
+        } else {
+          file.path(collection_ref_dir, as.character(arxiv_rows$json_filename))
+        },
+        key_type = "arxiv_id"
+      )
+    }
+  }
+  if (nrow(doi_rows) && "doi" %in% names(doi_rows)) {
+    doi_rows <- doi_rows[
+      !is.na(doi_rows$collection_index) &
+        doi_rows$collection_index == collection_index &
+        !is.na(doi_rows$doi) &
+        nzchar(doi_rows$doi),
+      ,
+      drop = FALSE
+    ]
+    if (nrow(doi_rows)) {
+      parts[[length(parts) + 1L]] <- data.table::data.table(
+        ref_id = vapply(doi_rows$doi, .litxr_normalize_doi_ref_id, character(1)),
+        collection_id = as.character(collection_id),
+        collection_index = as.integer(doi_rows$collection_index),
+        json_filename = as.character(doi_rows$json_filename),
+        json_path = if (is.na(collection_ref_dir) || !nzchar(collection_ref_dir)) {
+          NA_character_
+        } else {
+          file.path(collection_ref_dir, as.character(doi_rows$json_filename))
+        },
+        key_type = "doi"
+      )
+    }
+  }
+
+  if (!length(parts)) {
+    return(data.table::data.table(
+      ref_id = character(),
+      collection_id = character(),
+      collection_index = integer(),
+      json_filename = character(),
+      json_path = character(),
+      key_type = character()
+    ))
+  }
+
+  targets <- data.table::rbindlist(parts, fill = TRUE)
+  targets <- targets[
+    !is.na(targets$ref_id) &
+      nzchar(targets$ref_id) &
+      !is.na(targets$json_filename) &
+      nzchar(targets$json_filename) &
+      !is.na(targets$json_path) &
+      nzchar(targets$json_path),
+    ,
+    drop = FALSE
+  ]
+  if (!nrow(targets)) {
+    return(targets)
+  }
+  targets <- targets[!duplicated(targets$ref_id), ]
+  targets
 }
 
 #' Diagnose one embedding cache on disk
@@ -71,8 +194,8 @@ litxr_diagnose_embedding_cache <- function(collection_id, config = NULL, field =
     stop("`model` must be supplied and non-empty.", call. = FALSE)
   }
 
-  records <- litxr_read_collection(collection_id, cfg)
-  collection_ref_ids <- unique(as.character(records$ref_id[!is.na(records$ref_id) & nzchar(records$ref_id)]))
+  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+  collection_ref_ids <- unique(as.character(targets$ref_id[!is.na(targets$ref_id) & nzchar(targets$ref_id)]))
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
   manifest <- if (file.exists(paths$manifest)) jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE) else list()
@@ -263,7 +386,7 @@ litxr_embedding_date_stats <- function(
     stop("`model` must be supplied and non-empty.", call. = FALSE)
   }
 
-  records <- litxr_read_collection(collection_id, cfg)
+  records <- .litxr_read_collection_records_from_json(.litxr_collection_ref_dir(cfg, collection_id))
   empty_out <- data.table::data.table(
     date = as.Date(character()),
     records_total = integer(),
@@ -330,7 +453,8 @@ litxr_embedding_date_stats <- function(
 #'
 #' This helper rewrites any `metadata.fst` file found under one embedding cache
 #' directory so that persisted metadata only contains `ref_id` and `abstract`.
-#' Existing extra columns are dropped.
+#' The `abstract` values are rehydrated from the collection JSON files using the
+#' shard `ref_id` values, and existing extra columns are dropped.
 #'
 #' @param collection_id Collection identifier from `config.yaml`.
 #' @param config Optional parsed config list or a direct config path. When
@@ -363,6 +487,10 @@ litxr_migrate_embedding_metadata_files <- function(
   if (!length(metadata_files)) {
     return(character())
   }
+  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+  if (!nrow(targets)) {
+    return(character())
+  }
 
   rewritten <- character()
   for (path in metadata_files) {
@@ -370,6 +498,18 @@ litxr_migrate_embedding_metadata_files <- function(
       next
     }
     metadata <- .litxr_normalize_embedding_metadata(fst::read_fst(path, as.data.table = TRUE))
+    if (nrow(metadata)) {
+      target_map <- targets[match(as.character(metadata$ref_id), targets$ref_id), c("ref_id", "json_path"), with = FALSE]
+      hydrated <- .litxr_hydrate_rows_from_json_paths(
+        data.table::data.table(ref_id = as.character(metadata$ref_id)),
+        target_map,
+        fields = "abstract"
+      )
+      metadata$abstract <- if ("abstract" %in% names(hydrated)) as.character(hydrated$abstract) else rep(NA_character_, nrow(metadata))
+    } else {
+      metadata$abstract <- character()
+    }
+    metadata <- metadata[, c("ref_id", "abstract"), drop = FALSE]
     .litxr_write_fst_atomic(as.data.frame(metadata), path)
     rewritten <- c(rewritten, path)
   }

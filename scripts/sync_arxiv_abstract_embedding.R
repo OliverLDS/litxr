@@ -65,7 +65,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/repair_arxiv_embedding.R [--collection-id arxiv_cs_ai] [--model MODEL] [--batch-size 64] [--limit 640]",
+      "  Rscript scripts/sync_arxiv_abstract_embedding.R [--collection-id arxiv_cs_ai] [--model MODEL] [--batch-size 64] [--limit 640]",
       "",
       "Options:",
       "  --collection-id ID   Collection id to embed. Default: arxiv_cs_ai.",

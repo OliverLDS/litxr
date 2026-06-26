@@ -136,6 +136,29 @@ storage_payload_row <- litxr:::.litxr_storage_payload_as_list(storage_payload_da
 stopifnot(inherits(storage_payload_row$pub_date, "POSIXct"))
 stopifnot(identical(format(storage_payload_row$pub_date, "%Y-%m-%d"), "2026-06-19"))
 
+storage_payload_scoped <- tempfile("litxr-storage-scoped-", fileext = ".json")
+jsonlite::write_json(
+  list(
+    ref_id = "arxiv:2601.00001",
+    abstract = "Scoped abstract",
+    authors_list = list(c("Jane Doe", "John Smith")),
+    title = "Scoped title",
+    pub_date = "2026-06-20"
+  ),
+  storage_payload_scoped,
+  auto_unbox = TRUE,
+  pretty = FALSE,
+  null = "null"
+)
+storage_payload_scoped_row <- litxr:::.litxr_storage_payload_as_list(storage_payload_scoped, fields = c("abstract"))
+stopifnot(identical(names(storage_payload_scoped_row), "abstract"))
+stopifnot(identical(storage_payload_scoped_row$abstract[[1]], "Scoped abstract"))
+
+storage_payload_title_authors <- litxr:::.litxr_storage_payload_as_list(storage_payload_scoped, fields = c("title", "authors_list"))
+stopifnot(identical(names(storage_payload_title_authors), c("title", "authors_list")))
+stopifnot(identical(storage_payload_title_authors$title[[1]], "Scoped title"))
+stopifnot(identical(storage_payload_title_authors$authors_list[[1]], c("Jane Doe", "John Smith")))
+
 arxiv_row_v1 <- data.table::copy(arxiv_row)
 arxiv_row_v1$raw_entry <- list(NULL)
 arxiv_row_v1$title[[1]] <- "Example arXiv Paper v1"

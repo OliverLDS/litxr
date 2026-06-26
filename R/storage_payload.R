@@ -53,6 +53,14 @@
 
 .litxr_storage_payload_list_fields <- c("authors_list", "raw_entry")
 
+.litxr_storage_payload_field_groups <- function() {
+  list(
+    character = .litxr_storage_payload_character_fields,
+    integer = .litxr_storage_payload_integer_fields,
+    list = .litxr_storage_payload_list_fields
+  )
+}
+
 .litxr_storage_payload_defaults <- function() {
   list(
     abstract = NA_character_,
@@ -130,22 +138,38 @@
   raw_entry
 }
 
-.litxr_storage_payload_as_list <- function(path) {
+.litxr_storage_payload_as_list <- function(path, fields = NULL) {
   payload <- jsonlite::fromJSON(path, simplifyVector = FALSE)
   payload$journal_config <- NULL
-  values <- payload
+
+  fields <- unique(as.character(fields))
+  fields <- fields[nzchar(fields)]
+  full_payload <- !length(fields)
+  if (full_payload) {
+    values <- payload
+    fields <- unique(c(
+      .litxr_storage_payload_character_fields,
+      .litxr_storage_payload_integer_fields,
+      "pub_date",
+      .litxr_storage_payload_list_fields
+    ))
+  } else {
+    values <- list()
+  }
 
   defaults <- .litxr_storage_payload_defaults()
-  for (name in .litxr_storage_payload_character_fields) {
-    value <- values[[name]]
+  groups <- .litxr_storage_payload_field_groups()
+  source_payload <- if (full_payload) values else payload
+  for (name in intersect(groups$character, fields)) {
+    value <- source_payload[[name]]
     if (is.null(value) || !length(value)) {
       values[[name]] <- defaults[[name]]
     } else {
       values[[name]] <- .litxr_scalar_or_na(value)
     }
   }
-  for (name in .litxr_storage_payload_integer_fields) {
-    value <- values[[name]]
+  for (name in intersect(groups$integer, fields)) {
+    value <- source_payload[[name]]
     if (is.null(value) || !length(value)) {
       values[[name]] <- defaults[[name]]
     } else {
@@ -153,27 +177,57 @@
       if (is.na(values[[name]])) values[[name]] <- defaults[[name]]
     }
   }
-  pub_date <- values$pub_date
-  if (inherits(pub_date, c("POSIXct", "POSIXt"))) {
-    values$pub_date <- pub_date
-  } else {
-    pub_date <- .litxr_scalar_or_na(pub_date)
-    values$pub_date <- if (!is.na(pub_date) && nzchar(pub_date)) {
-      .litxr_parse_arxiv_posixct(pub_date)
+  if ("pub_date" %in% fields) {
+    pub_date <- source_payload$pub_date
+    if (inherits(pub_date, c("POSIXct", "POSIXt"))) {
+      values$pub_date <- pub_date
     } else {
-      defaults$pub_date
+      pub_date <- .litxr_scalar_or_na(pub_date)
+      values$pub_date <- if (!is.na(pub_date) && nzchar(pub_date)) {
+        .litxr_parse_arxiv_posixct(pub_date)
+      } else {
+        defaults$pub_date
+      }
     }
   }
 
-  if (is.null(values$authors_list) || !length(values$authors_list)) {
-    values$authors_list <- defaults$authors_list
-  } else {
-    values$authors_list <- list(unlist(values$authors_list, use.names = FALSE))
+  if ("authors_list" %in% fields) {
+    if (is.null(source_payload$authors_list) || !length(source_payload$authors_list)) {
+      values$authors_list <- defaults$authors_list
+    } else {
+      values$authors_list <- list(unlist(source_payload$authors_list, use.names = FALSE))
+    }
   }
-  if (is.null(values$raw_entry) || !length(values$raw_entry)) {
-    values$raw_entry <- defaults$raw_entry
-  } else {
-    values$raw_entry <- list(.litxr_serialize_raw_entry(values$raw_entry))
+  if ("raw_entry" %in% fields) {
+    if (is.null(source_payload$raw_entry) || !length(source_payload$raw_entry)) {
+      values$raw_entry <- defaults$raw_entry
+    } else {
+      values$raw_entry <- list(.litxr_serialize_raw_entry(source_payload$raw_entry))
+    }
+  }
+
+  if (!full_payload) {
+    requested <- fields
+    if ("ref_id" %in% requested && !("ref_id" %in% names(values))) {
+      ref_id <- payload$ref_id
+      values$ref_id <- if (is.null(ref_id) || !length(ref_id)) {
+        NA_character_
+      } else {
+        .litxr_scalar_or_na(ref_id)
+      }
+    }
+    for (name in setdiff(requested, names(values))) {
+      if (name %in% groups$integer) {
+        values[[name]] <- defaults[[name]]
+      } else if (name %in% groups$list) {
+        values[[name]] <- defaults[[name]]
+      } else if (identical(name, "pub_date")) {
+        values[[name]] <- defaults$pub_date
+      } else {
+        values[[name]] <- NA_character_
+      }
+    }
+    values <- values[requested]
   }
 
   values

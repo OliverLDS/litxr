@@ -1,3 +1,10 @@
+# litxr 0.1.7.7
+
+- Updated the thin arXiv reference update path so newly fetched arXiv JSON can
+  be added to `ref_arxiv.fst` before embedding metadata migration.
+- Kept the embedding metadata migration aligned with the narrow `ref_id` and
+  `abstract` shard shape.
+
 # litxr 0.1.7.6
 
 - Added the DOI collection sync log as a shared project-level TSV under
@@ -470,7 +477,7 @@
 - Improved local sample scripts:
   `scripts/get_arxiv_abstract.sh` now validates arXiv ids and errors clearly on
   zero/multiple/missing-abstract matches, and
-  `scripts/repair_arxiv_embedding.R` now uses CLI args plus delta-only embedding
+  `scripts/sync_arxiv_abstract_embedding.R` now uses CLI args plus delta-only embedding
   with before/after coverage output.
 
 # litxr 0.0.6.3
