@@ -72,6 +72,18 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   core
 }
 
+.make_arxiv_citekey <- function(arxiv_id) {
+  arxiv_id <- .litxr_normalize_arxiv_ref_id(arxiv_id)
+  if (is.na(arxiv_id) || !nzchar(arxiv_id)) {
+    return("ref")
+  }
+  core <- sub("^arxiv:", "", arxiv_id, ignore.case = TRUE)
+  core <- gsub("\\.", "_", core, fixed = TRUE)
+  core <- gsub("[^A-Za-z0-9]+", "_", core)
+  core <- gsub("^_+|_+$", "", core)
+  if (!nzchar(core)) "ref" else core
+}
+
 .format_authors_bib <- function(authors_list) {
   if (length(authors_list) == 0L || all(is.na(authors_list))) return("")
   paste(authors_list, collapse = " and ")
@@ -260,7 +272,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     return(list(doi_to_arxiv = character(), arxiv_to_doi = character()))
   }
 
-  doi_ref_id <- vapply(identity_map$doi, .litxr_normalize_doi_ref_id, character(1))
+  doi_ref_id <- vapply(identity_map$doi, .litxr_bare_doi, character(1))
   arxiv_ref_id <- vapply(identity_map$arxiv_id, .litxr_normalize_arxiv_ref_id, character(1))
   keep <- !is.na(doi_ref_id) & nzchar(doi_ref_id) & !is.na(arxiv_ref_id) & nzchar(arxiv_ref_id)
   if (!any(keep)) {
@@ -279,7 +291,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
 }
 
 .litxr_bibtex_linked_arxiv_ref_id <- function(link_maps, doi_ref_id) {
-  doi_ref_id <- .litxr_normalize_doi_ref_id(doi_ref_id)
+  doi_ref_id <- .litxr_bare_doi(doi = doi_ref_id)
   if (is.na(doi_ref_id) || !nzchar(doi_ref_id)) {
     return(NA_character_)
   }
@@ -594,18 +606,28 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     if (!is.na(paired_doi) && nzchar(paired_doi)) {
       doi_row <- .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$doi, "doi", paired_doi, prefer_doi_key = TRUE)
       if (!is.null(doi_row) && nrow(doi_row)) {
+        doi_row$bib_key__ <- .make_arxiv_citekey(arxiv_id)
+        doi_row$prefer_doi_key__ <- FALSE
         return(list(row = doi_row, resolved_ref_id = paired_doi, warning = NULL))
       }
+      arxiv_row <- .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$arxiv, "arxiv_id", arxiv_id, prefer_doi_key = FALSE)
+      if (!is.null(arxiv_row) && nrow(arxiv_row)) {
+        arxiv_row$bib_key__ <- .make_arxiv_citekey(arxiv_id)
+      }
       return(list(
-        row = .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$arxiv, "arxiv_id", arxiv_id, prefer_doi_key = FALSE),
+        row = arxiv_row,
         resolved_ref_id = arxiv_id,
         warning = sprintf("Paired DOI %s for %s was not found in ref_doi.fst; using the arXiv record.", paired_doi, arxiv_id)
       ))
     }
   }
 
+  arxiv_row <- .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$arxiv, "arxiv_id", arxiv_id, prefer_doi_key = FALSE)
+  if (!is.null(arxiv_row) && nrow(arxiv_row)) {
+    arxiv_row$bib_key__ <- .make_arxiv_citekey(arxiv_id)
+  }
   list(
-    row = .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$arxiv, "arxiv_id", arxiv_id, prefer_doi_key = FALSE),
+    row = arxiv_row,
     resolved_ref_id = arxiv_id,
     warning = NULL
   )
@@ -739,8 +761,11 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     entry_type <- .litxr_entry_type_from_source(row[["source"]])
   }
 
+  key_override <- scalar(row[["bib_key__"]])
   prefer_doi_key <- isTRUE(row[["prefer_doi_key__"]])
-  key <- if (prefer_doi_key) {
+  key <- if (!is.null(key_override) && !is.na(key_override) && nzchar(key_override)) {
+    key_override
+  } else if (prefer_doi_key) {
     .make_citekey(scalar(row[["doi"]]), scalar(row[["source_id"]]), scalar(row[["ref_id"]]))
   } else {
     .make_citekey(NA_character_, scalar(row[["source_id"]]), scalar(row[["ref_id"]]))

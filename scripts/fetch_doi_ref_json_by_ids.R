@@ -123,7 +123,7 @@ collection_ids <- if (nrow(records) && "collection_id" %in% names(records)) uniq
 emit_json(list(
   status = "ok",
   requested = requested_dois,
-  fetched = length(fetch_dois),
+  fetched = if (data.table::is.data.table(records)) nrow(records) else length(records),
   written = if (data.table::is.data.table(records)) nrow(records) else length(records),
   skipped_existing = skipped_existing,
   created_collection_ids = created_collection_ids,

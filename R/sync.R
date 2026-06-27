@@ -1075,7 +1075,7 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
     return(data.table::data.table())
   }
 
-  messages <- fetch_crossref_messages(doi_values)
+  messages <- .litxr_fetch_doi_messages(doi_values)
   found <- !vapply(messages, is.null, logical(1))
   missing_dois <- names(messages)[!found]
   if (length(missing_dois)) {

@@ -128,14 +128,6 @@ emit <- function(x) {
   cat(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE), "\n", sep = "")
 }
 
-replace_entry_key <- function(entry, key) {
-  if (!length(entry)) {
-    return(entry)
-  }
-  entry[[1L]] <- sub("^\\s*@([[:alnum:]]+)\\s*\\{\\s*[^,]+,", sprintf("@\\1{%s,", key), entry[[1L]], perl = TRUE)
-  entry
-}
-
 parse_entries <- function(path) {
   lines <- readLines(path, warn = FALSE)
   if (!length(lines)) {
@@ -181,7 +173,6 @@ parse_entries <- function(path) {
 }
 
 write_result <- tryCatch(jsonlite::fromJSON(write_path, simplifyVector = FALSE), error = function(e) NULL)
-resolved_ids <- if (!is.null(write_result) && !is.null(write_result$resolved_ref_ids)) as.character(write_result$resolved_ref_ids) else character()
 unresolved_ids <- if (!is.null(write_result) && !is.null(write_result$unresolved_ref_ids)) as.character(write_result$unresolved_ref_ids) else character()
 
 input_parsed <- parse_entries(input_bibtex)
@@ -192,9 +183,22 @@ input_types <- input_parsed$types
 output_entries <- output_parsed$entries
 cfg <- litxr::litxr_read_config()
 link_maps <- litxr:::.litxr_bibtex_link_maps(cfg)
+scaffold_cache <- litxr:::.litxr_bibtex_scaffold_cache(cfg)
 identity_arxiv_ids <- character()
 if (!is.null(link_maps) && !is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
-  identity_arxiv_ids <- names(link_maps$arxiv_to_doi)
+  identity_arxiv_ids <- unique(vapply(
+    names(link_maps$arxiv_to_doi),
+    litxr:::.litxr_bare_arxiv_id,
+    character(1)
+  ))
+}
+available_doi_ids <- character()
+if (!is.null(scaffold_cache$doi) && nrow(scaffold_cache$doi) && "doi" %in% names(scaffold_cache$doi)) {
+  available_doi_ids <- unique(vapply(
+    as.character(scaffold_cache$doi$doi),
+    litxr:::.litxr_bare_doi,
+    character(1)
+  ))
 }
 input_ids <- if (length(input_entries)) {
   vapply(seq_along(input_entries), function(i) {
@@ -219,37 +223,51 @@ resolved_idx <- 0L
 for (i in seq_along(input_entries)) {
   input_id <- if (length(input_ids) >= i) as.character(input_ids[[i]]) else input_keys[[i]]
   input_type <- if (length(input_types) >= i) as.character(input_types[[i]]) else NA_character_
-  is_article_arxiv <- !is.na(input_type) && identical(input_type, "article") &&
-    !is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE)
-  if (is_article_arxiv && !(input_id %in% identity_arxiv_ids)) {
-    suspicious_arxiv_ids <- c(suspicious_arxiv_ids, input_id)
+  is_arxiv_input <- !is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE)
+  is_article_arxiv <- !is.na(input_type) && identical(input_type, "article") && is_arxiv_input
+  input_arxiv_bare <- if (!is.na(input_id) && nzchar(input_id)) {
+    litxr:::.litxr_bare_arxiv_id(input_id)
+  } else {
+    NA_character_
   }
-  if (is.na(input_id) || !nzchar(input_id) || (length(unresolved_ids) && input_id %in% unresolved_ids)) {
+  if (is.na(input_id) || !nzchar(input_id)) {
     result_entries[[i]] <- input_entries[[i]]
     next
   }
 
-  resolved_idx <- resolved_idx + 1L
-  if (resolved_idx <= length(output_entries)) {
-    result_entries[[i]] <- output_entries[[resolved_idx]]
-  } else {
+  if (length(unresolved_ids) && input_id %in% unresolved_ids) {
     result_entries[[i]] <- input_entries[[i]]
+  } else {
+    resolved_idx <- resolved_idx + 1L
+    if (resolved_idx <= length(output_entries)) {
+      result_entries[[i]] <- output_entries[[resolved_idx]]
+    } else {
+      result_entries[[i]] <- input_entries[[i]]
+    }
   }
 
-  resolved_ref_id <- if (length(resolved_ids) >= resolved_idx) as.character(resolved_ids[[resolved_idx]]) else NA_character_
-  if (!is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE) &&
-      !is.na(resolved_ref_id) && grepl("^doi:", resolved_ref_id, ignore.case = TRUE)) {
-    converted_arxiv_ids <- c(converted_arxiv_ids, input_id)
-    doi_of_converted_arxiv_ids <- c(doi_of_converted_arxiv_ids, resolved_ref_id)
-    result_entries[[i]] <- replace_entry_key(result_entries[[i]], input_keys[[i]])
-  } else if (!is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE) &&
-      !is.na(resolved_ref_id) && grepl("^arxiv:", resolved_ref_id, ignore.case = TRUE)) {
-    linked_doi <- unname(link_maps$arxiv_to_doi[input_id])
-    linked_doi <- if (length(linked_doi) && !is.na(linked_doi[[1L]]) && nzchar(linked_doi[[1L]])) as.character(linked_doi[[1L]]) else NA_character_
-    if (!is.na(linked_doi) && nzchar(linked_doi)) {
-      missing_linked_doi_arxiv_ids <- c(missing_linked_doi_arxiv_ids, input_id)
-      doi_of_missing_linked_doi_arxiv_ids <- c(doi_of_missing_linked_doi_arxiv_ids, linked_doi)
-    }
+  linked_doi <- if (!is.null(link_maps) && !is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
+    unname(link_maps$arxiv_to_doi[input_id])
+  } else {
+    NA_character_
+  }
+  linked_doi <- if (length(linked_doi) && !is.na(linked_doi[[1L]]) && nzchar(linked_doi[[1L]])) as.character(linked_doi[[1L]]) else NA_character_
+  linked_doi_bare <- if (!is.na(linked_doi) && nzchar(linked_doi)) {
+    litxr:::.litxr_bare_doi(doi = linked_doi)
+  } else {
+    NA_character_
+  }
+  linked_doi_present <- !is.na(linked_doi_bare) && nzchar(linked_doi_bare) && linked_doi_bare %in% available_doi_ids
+  linked_doi_known <- !is.na(linked_doi) && nzchar(linked_doi)
+
+  if (is_arxiv_input && linked_doi_present) {
+    converted_arxiv_ids <- c(converted_arxiv_ids, input_arxiv_bare)
+    doi_of_converted_arxiv_ids <- c(doi_of_converted_arxiv_ids, linked_doi_bare)
+  } else if (is_arxiv_input && linked_doi_known && !linked_doi_present) {
+    missing_linked_doi_arxiv_ids <- c(missing_linked_doi_arxiv_ids, input_arxiv_bare)
+    doi_of_missing_linked_doi_arxiv_ids <- c(doi_of_missing_linked_doi_arxiv_ids, linked_doi_bare)
+  } else if (is_article_arxiv && !(input_arxiv_bare %in% identity_arxiv_ids)) {
+    suspicious_arxiv_ids <- c(suspicious_arxiv_ids, input_arxiv_bare)
   }
 }
 
