@@ -221,7 +221,11 @@
     if (is.na(isbn_value) || !nzchar(isbn_value)) {
       return(NULL)
     }
-    return(list(isbn = isbn_value))
+    return(list(
+      isbn = isbn_value,
+      collection_index = collection_index,
+      json_filename = json_filename
+    ))
   }
 
   list(
@@ -608,19 +612,47 @@
     identities <- data.table::data.table(arxiv_id = character(), doi = character())
   }
   arxiv_rows_write <- if (nrow(arxiv_rows)) {
-    data.table::data.table(arxiv_id = as.character(arxiv_rows$arxiv_id))
+    data.table::data.table(
+      arxiv_id = as.character(arxiv_rows$arxiv_id),
+      arxiv_version = as.integer(arxiv_rows$arxiv_version),
+      collection_index = as.integer(arxiv_rows$collection_index),
+      json_filename = as.character(arxiv_rows$json_filename),
+      doi = if ("doi" %in% names(arxiv_rows)) as.character(arxiv_rows$doi) else rep(NA_character_, nrow(arxiv_rows))
+    )
   } else {
-    data.table::data.table(arxiv_id = character())
+    data.table::data.table(
+      arxiv_id = character(),
+      arxiv_version = integer(),
+      collection_index = integer(),
+      json_filename = character(),
+      doi = character()
+    )
   }
   doi_rows_write <- if (nrow(doi_rows)) {
-    data.table::data.table(doi = as.character(doi_rows$doi))
+    data.table::data.table(
+      doi = as.character(doi_rows$doi),
+      collection_index = as.integer(doi_rows$collection_index),
+      json_filename = as.character(doi_rows$json_filename)
+    )
   } else {
-    data.table::data.table(doi = character())
+    data.table::data.table(
+      doi = character(),
+      collection_index = integer(),
+      json_filename = character()
+    )
   }
   isbn_rows_write <- if (nrow(isbn_rows)) {
-    data.table::data.table(isbn = as.character(isbn_rows$isbn))
+    data.table::data.table(
+      isbn = as.character(isbn_rows$isbn),
+      collection_index = as.integer(isbn_rows$collection_index),
+      json_filename = as.character(isbn_rows$json_filename)
+    )
   } else {
-    data.table::data.table(isbn = character())
+    data.table::data.table(
+      isbn = character(),
+      collection_index = integer(),
+      json_filename = character()
+    )
   }
 
   arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows_write, "arxiv_id", remove_missing = remove_missing)
