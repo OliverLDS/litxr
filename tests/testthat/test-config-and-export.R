@@ -100,13 +100,8 @@ record <- data.table::data.table(
 litxr:::.litxr_write_journal_records(record, local_path, journal, cfg = cfg_export)
 stopifnot(!file.exists(file.path(local_path, "index", "references.fst")))
 stopifnot(dir.exists(local_path))
-stopifnot(file.exists(litxr:::.litxr_ref_doi_path(cfg_export)))
 stopifnot(!file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "references.fst")))
 stopifnot(!file.exists(file.path(litxr:::.litxr_project_root(cfg_export), "index", "reference_collections.fst")))
-collection_index_columns <- fst::metadata_fst(litxr:::.litxr_ref_doi_path(cfg_export))$columnNames
-stopifnot(!("authors_list_json" %in% collection_index_columns))
-stopifnot(!("raw_entry_json" %in% collection_index_columns))
-stopifnot(!("abstract" %in% collection_index_columns))
 
 read_back <- litxr::litxr_read_journal(journal$journal_id, cfg_export)
 stopifnot(nrow(read_back) == 1L)
@@ -172,14 +167,15 @@ link_result <- litxr::litxr_enrich_arxiv_with_doi(
   config = cfg_export,
   add_doi = FALSE
 )
+stopifnot(identical(link_result$status, "ok"))
 stopifnot(identical(link_result$arxiv_ref_id, "arxiv:2501.00001"))
 stopifnot(identical(link_result$doi_ref_id, "doi:10.1000/published-example"))
-stopifnot(!is.na(link_result$entity_id))
-stopifnot(is.na(link_result$primary_ref_id))
 stopifnot(identical(link_result$preferred_citation_ref_id, "doi:10.1000/published-example"))
+stopifnot(file.exists(link_result$ref_identity_map_path))
 
 linked_arxiv <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg_export)
-stopifnot(identical(as.character(linked_arxiv$linked_doi_ref_id[[1]]), "doi:10.1000/published-example"))
+identity_map <- litxr::litxr_read_ref_identity_map(cfg_export)
+stopifnot(any(identity_map$arxiv_id == "2501.00001" & identity_map$doi == "10.1000/published-example"))
 
 linked_doi <- litxr::litxr_find_refs(ref_id = "doi:10.1000/published-example", config = cfg_export)
 
@@ -819,8 +815,6 @@ stopifnot(identical(found_arxiv_bare$ref_id[[1]], "arxiv:2501.00001"))
 found_arxiv_canonical <- litxr::litxr_find_refs(ref_id = "arxiv:2501.00001", config = cfg_export)
 stopifnot(nrow(found_arxiv_canonical) == 1L)
 stopifnot(identical(found_arxiv_canonical$source_id[[1]], "2501.00001"))
-rebuilt_path <- litxr::litxr_rebuild_journal_index(journal$journal_id, cfg_export)
-stopifnot(identical(rebuilt_path, local_path))
 stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) >= 1L)
 
 new_record <- data.table::copy(record)
@@ -834,8 +828,6 @@ new_record$month[[1]] <- 2L
 new_record$day[[1]] <- 1L
 litxr:::.litxr_write_journal_record_files(new_record, local_path, journal)
 stopifnot(nrow(litxr::litxr_read_collection(journal$journal_id, cfg_export)) == 3L)
-refreshed_path <- litxr::litxr_refresh_collection_index(journal$journal_id, cfg_export)
-stopifnot(file.exists(refreshed_path))
 refreshed_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
 stopifnot(any(refreshed_records$doi == "10.1000/newer"))
 
@@ -849,13 +841,8 @@ delta_record$year[[1]] <- 2024L
 delta_record$month[[1]] <- 3L
 delta_record$day[[1]] <- 1L
 litxr:::.litxr_write_journal_records(delta_record, local_path, journal, cfg = cfg_export)
-delta_path <- file.path(local_path, "index", "references_delta.fst")
-stopifnot(!file.exists(delta_path))
 with_delta <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
 stopifnot(any(with_delta$doi == "10.1000/delta"))
-compacted_path <- litxr::litxr_compact_collection_index(journal$journal_id, cfg_export)
-stopifnot(dir.exists(compacted_path))
-stopifnot(!file.exists(delta_path))
 compacted_records <- litxr::litxr_read_collection(journal$journal_id, cfg_export)
 stopifnot(any(compacted_records$doi == "10.1000/delta"))
 stopifnot(file.exists(file.path(local_path, paste0(litxr:::.litxr_record_slug(delta_record), ".json"))))
@@ -950,8 +937,6 @@ legacy_path <- file.path(local_path, "json", "doi_10_1000_example.json")
 full_path <- file.path(local_path, "json", "10_1000_example.json")
 jsonlite::write_json(litxr:::.litxr_row_to_storage_payload(legacy_truncated, journal), legacy_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
 jsonlite::write_json(litxr:::.litxr_row_to_storage_payload(record, journal), full_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
-rebuilt_path <- litxr::litxr_rebuild_journal_index(journal$journal_id, cfg_export)
-stopifnot(identical(rebuilt_path, local_path))
 rebuilt <- litxr::litxr_read_journal(journal$journal_id, cfg_export)
 rebuilt_one <- rebuilt[rebuilt$ref_id == "doi:10.1000/example", ]
 stopifnot(nrow(rebuilt_one) == 1L)

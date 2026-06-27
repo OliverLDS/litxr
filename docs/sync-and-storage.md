@@ -45,16 +45,12 @@ Main collection-level functions:
 - `litxr_repair_collection()`
 - `litxr_read_collection()`
 - `litxr_collection_date_stats()`
-- `litxr_refresh_collection_index()`
-- `litxr_compact_collection_index()`
-- `litxr_rebuild_collection_index()`
 
-Backward-compatible journal wrappers still exist:
+Journal convenience wrappers still exist:
 
 - `litxr_sync_journal()`
 - `litxr_repair_journal()`
 - `litxr_read_journal()`
-- `litxr_rebuild_journal_index()`
 
 ## Crossref
 
@@ -92,18 +88,17 @@ Practical notes:
 Helpers:
 
 - `litxr_repair_collection(..., submitted_from = ..., submitted_to = ...)`
-- `scripts/sync_arxiv_collection_json.R`
+- `scripts/fetch_arxiv_by_collection.R`
 
-`scripts/sync_arxiv_collection_json.R` records successful day-level fetches in
+`scripts/fetch_arxiv_by_collection.R` records successful day-level fetches in
 `log/<collection>_collection_fetch_history.tsv` and skips already completed days
 unless `--force` is used. It writes fetched pages directly into the collection
 JSON store. There is no durable `references_delta.fst` or project-wide
 compatibility projection in the target model.
 
-Use `litxr_refresh_collection_index()` when recently written JSON files need to
-be merged into the existing `fst` index without a full JSON scan. Use
-`litxr_rebuild_collection_index()` for full correctness-first rebuilds after
-schema changes, legacy cleanup, or suspected index corruption.
+Use `litxr_sync_thin_ref_stores_from_json()` when the thin project stores need
+to be rebuilt or incrementally updated from the normalized collection JSON
+store.
 
 For local coverage diagnostics, use:
 
@@ -123,7 +118,7 @@ litxr:::.litxr_latest_collection_fetch_completed_date(cfg, "arxiv_cs_ai")
 For shell-driven updates from the next collection-index date through today:
 
 ```sh
-Rscript scripts/sync_arxiv_collection_json.R --collection arxiv_cs_ai
+Rscript scripts/fetch_arxiv_by_collection.R --collection arxiv_cs_ai
 ```
 
 ## DOI And Manual Ingest

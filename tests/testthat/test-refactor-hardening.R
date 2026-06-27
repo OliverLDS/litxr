@@ -102,6 +102,7 @@ test_that("refactor hardening paths work through identity/entity layer", {
     config = cfg,
     add_doi = FALSE
   )
+  expect_identical(link_result$status, "ok")
   expect_identical(link_result$preferred_citation_ref_id, "doi:10.1000/published-example")
   expect_false(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "references.fst")))
   expect_false(file.exists(file.path(litxr:::.litxr_project_root(cfg), "index", "reference_collections.fst")))

@@ -319,13 +319,17 @@
   if (!nrow(rows)) {
     return(.litxr_empty_collection_sync_log())
   }
-  if (!("collection_id" %in% names(rows))) rows$collection_id <- character()
-  if (!("latest_update_timestamp" %in% names(rows))) rows$latest_update_timestamp <- character()
-  rows <- rows[, c("collection_id", "latest_update_timestamp"), with = FALSE]
-  rows$collection_id <- as.character(rows$collection_id)
-  rows$latest_update_timestamp <- as.character(rows$latest_update_timestamp)
-  rows <- rows[!is.na(rows$collection_id) & nzchar(rows$collection_id)]
-  rows[!duplicated(rows$collection_id, fromLast = TRUE), ]
+  collection_id <- if ("collection_id" %in% names(rows)) as.character(rows[["collection_id"]]) else rep(NA_character_, nrow(rows))
+  latest_update_timestamp <- if ("latest_update_timestamp" %in% names(rows)) as.character(rows[["latest_update_timestamp"]]) else rep(NA_character_, nrow(rows))
+  rows <- data.table::data.table(
+    collection_id = collection_id,
+    latest_update_timestamp = latest_update_timestamp
+  )
+  rows <- rows[!is.na(rows$collection_id) & nzchar(rows$collection_id), ]
+  if (nrow(rows)) {
+    rows <- rows[!duplicated(rows$collection_id, fromLast = TRUE), ]
+  }
+  rows
 }
 
 .litxr_write_collection_sync_log <- function(cfg, rows, path = .litxr_project_collection_thin_sync_log_path(cfg)) {
@@ -379,6 +383,41 @@
   invisible(latest_update_timestamp)
 }
 
+.litxr_upsert_collection_sync_logs <- function(cfg, rows, path = .litxr_project_collection_thin_sync_log_path(cfg)) {
+  rows <- data.table::as.data.table(rows)
+  if (!nrow(rows)) {
+    return(invisible(path))
+  }
+  if (!("collection_id" %in% names(rows))) {
+    stop("Collection sync log rows require `collection_id`.", call. = FALSE)
+  }
+  if (!("latest_update_timestamp" %in% names(rows))) {
+    stop("Collection sync log rows require `latest_update_timestamp`.", call. = FALSE)
+  }
+
+  rows <- data.table::data.table(
+    collection_id = as.character(rows$collection_id),
+    latest_update_timestamp = as.character(rows$latest_update_timestamp)
+  )
+  rows <- rows[!is.na(rows$collection_id) & nzchar(rows$collection_id)]
+  if (!nrow(rows)) {
+    return(invisible(path))
+  }
+  rows <- rows[!duplicated(rows$collection_id, fromLast = TRUE)]
+
+  existing <- .litxr_read_collection_sync_log(cfg, path = path)
+  if (!nrow(existing)) {
+    .litxr_write_collection_sync_log(cfg, rows, path = path)
+    return(invisible(path))
+  }
+
+  existing <- existing[!existing$collection_id %in% rows$collection_id, , drop = FALSE]
+  merged <- data.table::rbindlist(list(existing, rows), fill = TRUE)
+  merged <- merged[!duplicated(merged$collection_id, fromLast = TRUE), ]
+  .litxr_write_collection_sync_log(cfg, merged, path = path)
+  invisible(path)
+}
+
 .litxr_latest_collection_sync_timestamp <- function(cfg, collection_id, path = .litxr_project_collection_thin_sync_log_path(cfg)) {
   collection_id <- as.character(collection_id)[[1L]]
   if (is.na(collection_id) || !nzchar(collection_id)) {
@@ -394,17 +433,6 @@
   }
   ts <- as.character(hit$latest_update_timestamp[[nrow(hit)]])
   if (!nzchar(ts)) NA_character_ else ts
-}
-
-.litxr_refresh_ref_identity_map <- function(cfg, refs = NULL, identities = NULL) {
-  if (is.null(identities)) {
-    if (is.null(refs)) {
-      refs <- .litxr_authoritative_project_records(cfg)
-    }
-    identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
-  }
-  .litxr_write_project_ref_identity_index(cfg, identities)
-  invisible(identities)
 }
 
 .litxr_ensure_project_llm_dir <- function(cfg) {

@@ -46,7 +46,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/sync_doi_collection_json.R --doi DOI1,DOI2 [... ]",
+      "  Rscript scripts/fetch_doi_ref_json_by_ids.R --doi DOI1,DOI2 [... ]",
       "",
       "Options:",
       "  --doi IDS     Comma-separated DOIs or canonical DOI ref_ids.",

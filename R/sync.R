@@ -36,7 +36,7 @@ litxr_sync_collection <- function(
     journal,
     cfg = cfg,
     refresh_entity_indexes = refresh_entity_indexes,
-    refresh_ref_identity_map = refresh_ref_identity_map
+    refresh_ref_identity_map = FALSE
   )
   records
 }
@@ -78,13 +78,6 @@ litxr_sync_all <- function(config = NULL) {
     }),
     vapply(collections, `[[`, character(1), "collection_id")
   )
-  if (length(results)) {
-    project_refs <- data.table::rbindlist(results, fill = TRUE)
-    project_refs <- .litxr_project_references_from_collection_records(project_refs)
-    .litxr_refresh_ref_identity_map(cfg, refs = project_refs)
-  } else {
-    .litxr_refresh_ref_identity_map(cfg)
-  }
   results
 }
 
@@ -233,7 +226,8 @@ litxr_repair_collection <- function(
     local_path,
     journal,
     cfg = cfg,
-    refresh_entity_indexes = refresh_entity_indexes
+    refresh_entity_indexes = refresh_entity_indexes,
+    refresh_ref_identity_map = FALSE
   )
   records
 }
@@ -274,83 +268,6 @@ litxr_repair_journal <- function(
     limit = limit,
     refresh_entity_indexes = refresh_entity_indexes
   )
-}
-
-#' Rebuild the local collection fst index from JSON files
-#'
-#' @param collection_id Collection identifier from `config.yaml`.
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
-#'
-#' @return Invisibly returns the rebuilt fst index path.
-#' @export
-litxr_rebuild_collection_index <- function(collection_id, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, collection_id)
-  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  records <- .litxr_read_collection_records_from_json(local_path)
-  identities <- .litxr_build_ref_identity_index(cfg, refs = records)
-  .litxr_refresh_ref_identity_map(cfg, identities = identities)
-  .litxr_refresh_normalized_reference_scaffold(cfg, records = records, refresh_entity_indexes = FALSE)
-  invisible(local_path)
-}
-
-#' Refresh the collection-derived reference stores from recently changed JSON files
-#'
-#' This is a fast, mtime-based refresh for the common case where JSON record
-#' files were written after the thin authoritative stores were last updated.
-#'
-#' @param collection_id Collection identifier from `config.yaml`.
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
-#'
-#' @return Invisibly returns the refreshed fst index path.
-#' @export
-litxr_refresh_collection_index <- function(collection_id, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, collection_id)
-  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  records <- .litxr_read_collection_records_from_json(local_path)
-  .litxr_update_project_indexes(cfg, journal, records, refresh_entity_indexes = TRUE)
-  invisible(local_path)
-}
-
-#' Compact pending collection delta records into the main fst index
-#'
-#' @param collection_id Collection identifier from `config.yaml`.
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
-#' @param refresh_project_index Whether to refresh project-level canonical
-#'   reference indexes after compaction.
-#'
-#' @return Invisibly returns the compacted fst index path.
-#' @export
-litxr_compact_collection_index <- function(collection_id, config = NULL, refresh_project_index = FALSE) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  journal <- .litxr_get_journal(cfg, collection_id)
-  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-
-  records <- .litxr_read_collection_records_from_json(local_path)
-  .litxr_update_project_indexes(cfg, journal, records, refresh_entity_indexes = TRUE)
-  invisible(local_path)
-}
-
-#' Rebuild the local journal fst index from JSON files
-#'
-#' Backward-compatible wrapper around `litxr_rebuild_collection_index()`.
-#'
-#' @param journal_id Collection identifier from `config.yaml`. The argument name
-#'   is kept for backward compatibility.
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
-#'
-#' @return Invisibly returns the rebuilt fst index path.
-#' @export
-litxr_rebuild_journal_index <- function(journal_id, config = NULL) {
-  litxr_rebuild_collection_index(journal_id, config = config)
 }
 
 #' Create a default structured LLM digest template
@@ -1195,12 +1112,11 @@ litxr_add_dois <- function(dois, config = NULL, auto_register = TRUE) {
       local_path,
       journal,
       cfg = cfg,
-      refresh_entity_indexes = FALSE
+      refresh_entity_indexes = FALSE,
+      refresh_ref_identity_map = FALSE
     )
     incoming
   })
-
-  .litxr_refresh_ref_identity_map(cfg)
   data.table::rbindlist(out, fill = TRUE)
 }
 
@@ -1353,7 +1269,8 @@ litxr_add_ref_identity_pair <- function(arxiv_ref_id, doi, config = NULL) {
     local_path,
     collection,
     cfg = cfg,
-    refresh_entity_indexes = refresh_entity_indexes
+    refresh_entity_indexes = refresh_entity_indexes,
+    refresh_ref_identity_map = FALSE
   )
 }
 
@@ -1379,12 +1296,6 @@ litxr_add_ref_identity_pair <- function(arxiv_ref_id, doi, config = NULL) {
 litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_doi = TRUE, auto_register = TRUE) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  config_path <- if (is.character(config)) {
-    config
-  } else {
-    attr(cfg, "config_path", exact = TRUE)
-  }
-
   arxiv_ref_id <- .litxr_normalize_arxiv_ref_id(arxiv_ref_id)
   doi_ref_id <- .litxr_normalize_doi_ref_id(doi)
   if (is.na(arxiv_ref_id) || !nzchar(arxiv_ref_id)) {
@@ -1393,96 +1304,21 @@ litxr_enrich_arxiv_with_doi <- function(arxiv_ref_id, doi, config = NULL, add_do
   if (is.na(doi_ref_id) || !nzchar(doi_ref_id)) {
     stop("`doi` must be a non-empty DOI value.", call. = FALSE)
   }
-  doi_value <- sub("^doi:", "", doi_ref_id)
-
-  arxiv_row <- .litxr_find_unique_collection_row(cfg, arxiv_ref_id, expected_source = "arxiv")
-  existing_doi <- .litxr_scalar_chr(arxiv_row$doi)
-  existing_link <- .litxr_scalar_chr(arxiv_row$linked_doi_ref_id)
-
-  if (!is.na(existing_doi) && nzchar(existing_doi) && !identical(existing_doi, doi_value)) {
-    stop(
-      "ArXiv record already has a different DOI: ",
-      existing_doi,
-      ". Refusing to overwrite with ",
-      doi_value,
-      call. = FALSE
-    )
-  }
-  if (!is.na(existing_link) && nzchar(existing_link) && !identical(existing_link, doi_ref_id)) {
-    stop(
-      "ArXiv record already links to a different DOI ref_id: ",
-      existing_link,
-      ". Refusing to overwrite with ",
-      doi_ref_id,
-      call. = FALSE
-    )
+  identity_map <- data.table::as.data.table(litxr_read_ref_identity_map(cfg))
+  if (nrow(identity_map)) {
+    existing_arxiv <- if ("arxiv_id" %in% names(identity_map)) as.character(identity_map$arxiv_id) else character()
+    existing_doi <- if ("doi" %in% names(identity_map)) as.character(identity_map$doi) else character()
+    if (any(existing_arxiv == sub("^arxiv:", "", arxiv_ref_id), na.rm = TRUE)) {
+      stop("arXiv id already exists in ref_identity_map: ", arxiv_ref_id, call. = FALSE)
+    }
+    if (any(existing_doi == sub("^doi:", "", doi_ref_id), na.rm = TRUE)) {
+      stop("DOI already exists in ref_identity_map: ", doi_ref_id, call. = FALSE)
+    }
   }
 
-  doi_row <- .litxr_find_collection_refs_by_keys(cfg, doi_ref_id)
-  doi_row <- doi_row[doi_row$ref_id == doi_ref_id & doi_row$source != "arxiv", ]
-  if (!nrow(doi_row) && isTRUE(add_doi)) {
-    litxr_add_dois(doi_value, config = cfg, auto_register = auto_register)
-    cfg <- if (!is.null(config_path) && nzchar(config_path)) litxr_read_config(config_path) else litxr_read_config()
-    doi_row <- .litxr_find_collection_refs_by_keys(cfg, doi_ref_id)
-    doi_row <- doi_row[doi_row$ref_id == doi_ref_id & doi_row$source != "arxiv", ]
-  }
-  if (!nrow(doi_row)) {
-    stop("Published DOI record is not available locally: ", doi_ref_id, call. = FALSE)
-  }
-  if (nrow(doi_row) != 1L) {
-    stop("Expected exactly one DOI collection row for ", doi_ref_id, " but found ", nrow(doi_row), ".", call. = FALSE)
-  }
-
-  doi_existing_link <- .litxr_scalar_chr(doi_row$linked_arxiv_ref_id)
-  if (!is.na(doi_existing_link) && nzchar(doi_existing_link) && !identical(doi_existing_link, arxiv_ref_id)) {
-    stop(
-      "DOI record already links to a different arXiv ref_id: ",
-      doi_existing_link,
-      ". Refusing to overwrite with ",
-      arxiv_ref_id,
-      call. = FALSE
-    )
-  }
-
-  if (!("doi" %in% names(arxiv_row))) arxiv_row[["doi"]] <- NA_character_
-  if (!("linked_doi_ref_id" %in% names(arxiv_row))) arxiv_row[["linked_doi_ref_id"]] <- NA_character_
-  if (!("linked_arxiv_ref_id" %in% names(doi_row))) doi_row[["linked_arxiv_ref_id"]] <- NA_character_
-
-  arxiv_row$doi[[1]] <- doi_value
-  arxiv_row$linked_doi_ref_id[[1]] <- doi_ref_id
-  doi_row$linked_arxiv_ref_id[[1]] <- arxiv_ref_id
-
-  .litxr_update_collection_row(cfg, arxiv_row, refresh_entity_indexes = FALSE)
-  .litxr_update_collection_row(cfg, doi_row, refresh_entity_indexes = FALSE)
-
-  .litxr_refresh_ref_identity_map(cfg)
-  identity_map <- litxr_read_ref_identity_map(cfg)
-  linked_entity_ids <- unique(as.character(identity_map$entity_id[
-    identity_map$ref_id %in% c(arxiv_ref_id, doi_ref_id)
-  ]))
-  if (length(linked_entity_ids) != 1L) {
-    stop(
-      "DOI/arXiv link update did not converge to a single entity_id for ",
-      arxiv_ref_id,
-      " and ",
-      doi_ref_id,
-      call. = FALSE
-    )
-  }
-
-  linked_entity <- .litxr_read_project_ref_identity_index(cfg)
-  linked_entity <- linked_entity[linked_entity$entity_id == linked_entity_ids[[1]], ]
-  primary_ref_id <- if (nrow(linked_entity)) .litxr_scalar_chr(linked_entity$ref_id[linked_entity$is_primary_ref_id %in% TRUE]) else NA_character_
-
-  list(
-    arxiv_ref_id = arxiv_ref_id,
-    doi_ref_id = doi_ref_id,
-    arxiv_title = .litxr_scalar_chr(arxiv_row$title),
-    doi_title = .litxr_scalar_chr(doi_row$title),
-    entity_id = linked_entity_ids[[1]],
-    primary_ref_id = primary_ref_id,
-    preferred_citation_ref_id = doi_ref_id
-  )
+  result <- litxr_add_ref_identity_pair(arxiv_ref_id, doi_ref_id, config = cfg)
+  result$preferred_citation_ref_id <- doi_ref_id
+  result
 }
 
 #' Add manually supplied references to a collection
@@ -3019,7 +2855,6 @@ litxr_add_refs <- function(
   records <- .litxr_read_collection_records_from_json(local_path)
   projection <- .litxr_project_references_from_collection_records(records)
   links <- .litxr_project_reference_links_from_collection_records(records, journal)
-  .litxr_refresh_normalized_reference_scaffold(cfg, records = projection, refresh_entity_indexes = TRUE)
 
   list(
     collection_id = collection_id,
@@ -3032,7 +2867,6 @@ litxr_add_refs <- function(
 }
 
 .litxr_upsert_project_references_index <- function(cfg, records) {
-  .litxr_refresh_normalized_reference_scaffold(cfg, records = .litxr_reference_projection(records), refresh_entity_indexes = TRUE)
   invisible(.litxr_reference_projection(records))
 }
 
@@ -3049,20 +2883,6 @@ litxr_add_refs <- function(
   identities = NULL
 ) {
   .litxr_ensure_project_index_dir(cfg)
-  incoming_refs <- .litxr_project_references_from_collection_records(records)
-  if (nrow(incoming_refs)) {
-    # Keep the original collection-scoped rows for scaffold refresh so the
-    # arXiv-side collection filter can exclude DOI-bearing arXiv rows from the
-    # DOI thin store while still keeping the arXiv identity link.
-    .litxr_refresh_normalized_reference_scaffold(cfg, records = records, refresh_entity_indexes = FALSE)
-  }
-  if (isTRUE(refresh_ref_identity_map)) {
-    if (is.null(identities)) {
-      .litxr_refresh_ref_identity_map(cfg)
-    } else {
-      .litxr_refresh_ref_identity_map(cfg, identities = identities)
-    }
-  }
   invisible(NULL)
 }
 

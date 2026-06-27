@@ -301,18 +301,25 @@ test_that("BibTeX export scalarizes list-valued fields without leaking vector sy
 
 test_that("arxiv and DOI id fetch nodes parse and advertise strict id mode", {
   arxiv_script <- normalizePath(file.path("..", "..", "scripts", "fetch_arxiv_ref_json_by_ids.R"), mustWork = TRUE)
-  doi_script <- normalizePath(file.path("..", "..", "scripts", "sync_doi_collection_json.R"), mustWork = TRUE)
+  doi_fetch_script <- normalizePath(file.path("..", "..", "scripts", "fetch_doi_ref_json_by_ids.R"), mustWork = TRUE)
+  doi_sync_script <- normalizePath(file.path("..", "..", "scripts", "fetch_doi_by_collection.R"), mustWork = TRUE)
 
   expect_silent(parse(file = arxiv_script))
-  expect_silent(parse(file = doi_script))
+  expect_silent(parse(file = doi_fetch_script))
+  expect_silent(parse(file = doi_sync_script))
 
   arxiv_help <- system2("Rscript", c(arxiv_script, "--help"), stdout = TRUE, stderr = tempfile())
   expect_true(any(grepl("--arxiv-id IDS", arxiv_help, fixed = TRUE)))
   expect_true(any(grepl("Routes each record by its primary subject", arxiv_help, fixed = TRUE)))
   expect_false(any(grepl("--collection", arxiv_help, fixed = TRUE)))
 
-  doi_help <- system2("Rscript", c(doi_script, "--help"), stdout = TRUE, stderr = tempfile())
-  expect_true(any(grepl("--doi IDS", doi_help, fixed = TRUE)))
-  expect_true(any(grepl("Skips DOIs already present in ref_doi.fst", doi_help, fixed = TRUE)))
-  expect_false(any(grepl("--collection", doi_help, fixed = TRUE)))
+  doi_fetch_help <- system2("Rscript", c(doi_fetch_script, "--help"), stdout = TRUE, stderr = tempfile())
+  expect_true(any(grepl("--doi IDS", doi_fetch_help, fixed = TRUE)))
+  expect_true(any(grepl("Skips DOIs already present in ref_doi.fst", doi_fetch_help, fixed = TRUE)))
+  expect_false(any(grepl("--collection", doi_fetch_help, fixed = TRUE)))
+
+  doi_sync_help <- system2("Rscript", c(doi_sync_script, "--help"), stdout = TRUE, stderr = tempfile())
+  expect_true(any(grepl("--collection ID", doi_sync_help, fixed = TRUE)))
+  expect_true(any(grepl("Writes fetched records as JSON files directly under ref/COLLECTION_ID", doi_sync_help, fixed = TRUE)))
+  expect_false(any(grepl("--doi", doi_sync_help, fixed = TRUE)))
 })

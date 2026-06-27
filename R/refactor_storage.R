@@ -126,14 +126,18 @@
     return(character())
   }
   if (!is.null(json_mtime_after)) {
+    local_tz <- Sys.timezone()
+    if (is.null(local_tz) || !nzchar(local_tz)) {
+      local_tz <- ""
+    }
     cutoff <- if (inherits(json_mtime_after, "POSIXt")) {
-      as.POSIXct(json_mtime_after, tz = "UTC")
+      as.POSIXct(json_mtime_after, tz = local_tz)
     } else {
-      suppressWarnings(as.POSIXct(json_mtime_after, tz = "UTC"))
+      suppressWarnings(as.POSIXct(json_mtime_after, tz = local_tz))
     }
     if (!is.na(cutoff)) {
       info <- file.info(files)
-      keep <- !is.na(info$mtime) & as.POSIXct(info$mtime, tz = "UTC") > cutoff
+      keep <- !is.na(info$mtime) & as.POSIXct(info$mtime, tz = local_tz) > cutoff
       files <- files[keep]
     }
   }
@@ -457,27 +461,6 @@
 }
 
 .litxr_rebuild_project_reference_indexes <- function(cfg, repair_collection_indexes = TRUE) {
-  collections <- .litxr_config_collections(cfg)
-  if (!length(collections)) {
-    .litxr_refresh_normalized_reference_scaffold(cfg, records = data.table::data.table(), refresh_entity_indexes = FALSE)
-    return(invisible(NULL))
-  }
-
-  refs_list <- list()
-
-  for (collection in collections) {
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_collection_records_from_json(local_path)
-    projection <- .litxr_project_references_from_collection_records(records)
-    if (nrow(projection)) {
-      refs_list[[length(refs_list) + 1L]] <- projection
-    }
-  }
-
-  refs <- if (length(refs_list)) data.table::rbindlist(refs_list, fill = TRUE) else data.table::data.table()
-  identities <- .litxr_build_ref_identity_index(cfg, refs = refs)
-  .litxr_refresh_ref_identity_map(cfg, identities = identities)
-  .litxr_refresh_normalized_reference_scaffold(cfg, refs = refs, refresh_entity_indexes = FALSE)
   invisible(NULL)
 }
 
@@ -531,7 +514,7 @@
   if (!nrow(rows)) {
     if (remove_missing) {
       empty_rows <- if (nrow(existing)) existing[0, , drop = FALSE] else rows
-      fst::write_fst(as.data.frame(empty_rows), path)
+      fst::write_fst(empty_rows, path)
       return(list(
         written = TRUE,
         added = character(),
@@ -549,7 +532,7 @@
 
   if (remove_missing) {
     rows <- rows[!duplicated(new_keys), , drop = FALSE]
-    fst::write_fst(as.data.frame(rows), path)
+    fst::write_fst(rows, path)
     return(list(
       written = TRUE,
       added = unique(new_keys),
@@ -560,7 +543,7 @@
 
   if (!nrow(existing)) {
     rows <- rows[!duplicated(new_keys), , drop = FALSE]
-    fst::write_fst(as.data.frame(rows), path)
+    fst::write_fst(rows, path)
     return(list(
       written = TRUE,
       added = unique(new_keys),
@@ -577,7 +560,7 @@
   if (length(out_keys)) {
     out <- out[!duplicated(out_keys), , drop = FALSE]
   }
-  fst::write_fst(as.data.frame(out), path)
+  fst::write_fst(out, path)
 
   list(
     written = TRUE,
@@ -643,7 +626,18 @@
   arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows_write, "arxiv_id", remove_missing = remove_missing)
   doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows_write, "doi", remove_missing = remove_missing)
   isbn_store <- .litxr_upsert_scaffold_rows(.litxr_ref_isbn_path(cfg), isbn_rows_write, "isbn", remove_missing = remove_missing)
-  identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir, remove_missing = remove_missing)
+  if (remove_missing || nrow(identities)) {
+    identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir, remove_missing = remove_missing)
+  } else {
+    existing_identity_rows <- .litxr_read_project_ref_identity_index(cfg)
+    identity_store <- list(
+      rows = existing_identity_rows,
+      added = character(),
+      removed = character(),
+      added_path = NA_character_,
+      removed_path = NA_character_
+    )
+  }
 
   if (remove_missing && length(arxiv_store$removed)) {
     warning(
@@ -729,7 +723,16 @@
     selected_collection_ids = selected_ids,
     mode = current_mode,
     collection_results = list(
-      list(collection_id = report_collection_id, rebuilt_collection_index = FALSE, collection_ref_dir = report_collection_ref_dir, refs_written = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows), links_written = nrow(identities), refs_removed = length(arxiv_store$removed) + length(doi_store$removed) + length(isbn_store$removed))
+      list(
+        collection_id = report_collection_id,
+        rebuilt_collection_index = FALSE,
+        collection_ref_dir = report_collection_ref_dir,
+        fetched_jsons = inputs$fetched_jsons %||% (nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows)),
+        unique_arxiv_rows = nrow(arxiv_rows),
+        identity_pairs = nrow(identities),
+        ref_arxiv_added = length(arxiv_store$added),
+        ref_identity_map_added = length(identity_store$added)
+      )
     ),
     diff_paths = list(
       ref_identity_map = list(

@@ -86,7 +86,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/sync_arxiv_collection_json.R --collection COLLECTION_ID [--start YYYY-MM-DD --end YYYY-MM-DD]",
+      "  Rscript scripts/fetch_arxiv_by_collection.R --collection COLLECTION_ID [--start YYYY-MM-DD --end YYYY-MM-DD]",
       "",
       "Options:",
       "  --collection ID    arXiv-backed collection id to sync.",
