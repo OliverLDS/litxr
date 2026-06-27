@@ -47,6 +47,23 @@
   }
 }
 
+.litxr_collection_entry_by_id <- function(cfg, collection_id) {
+  collection_id <- as.character(collection_id)[[1L]]
+  if (is.na(collection_id) || !nzchar(collection_id)) {
+    return(NULL)
+  }
+
+  collections <- .litxr_config_collections(cfg)
+  for (collection in collections) {
+    if (identical(as.character(collection$collection_id), collection_id) ||
+        identical(as.character(collection$journal_id), collection_id)) {
+      return(collection)
+    }
+  }
+
+  NULL
+}
+
 .litxr_crossref_journal_title <- function(cr_message) {
   title <- cr_message$`container-title`
   if (is.null(title) || length(title) == 0) return(NA_character_)
@@ -87,11 +104,16 @@
 
 .litxr_register_crossref_journal <- function(cfg, cr_message) {
   journal_title <- .litxr_crossref_journal_title(cr_message)
-  if (is.na(journal_title) || !nzchar(journal_title)) {
-    journal_title <- "Crossref Unclassified"
+  base_id <- if (is.na(journal_title) || !nzchar(journal_title)) {
+    NA_character_
+  } else {
+    .litxr_make_journal_id(journal_title)
   }
 
-  base_id <- .litxr_make_journal_id(journal_title)
+  if (is.na(base_id) || !nzchar(base_id) || grepl("^[0-9]+$", base_id)) {
+    return(.litxr_register_unclassified_doi_collection(cfg, cr_message))
+  }
+
   journal_id <- .litxr_unique_collection_id(cfg, base_id)
   metadata <- .litxr_crossref_journal_metadata(cr_message)
   local_path <- file.path("ref", journal_id)
@@ -110,6 +132,39 @@
     sync = list(
       filters = list(
         issn = if (!is.null(sync_issn) && nzchar(sync_issn)) sync_issn else NA_character_
+      )
+    )
+  )
+
+  collections <- .litxr_config_collections(cfg)
+  collections[[length(collections) + 1L]] <- journal
+  cfg$collections <- collections
+  cfg <- .litxr_normalize_config_schema(cfg)
+  .litxr_write_config(cfg)
+  list(cfg = cfg, journal = journal)
+}
+
+.litxr_register_unclassified_doi_collection <- function(cfg, cr_message = NULL) {
+  existing <- .litxr_collection_entry_by_id(cfg, "unclassified_doi")
+  if (!is.null(existing)) {
+    return(list(cfg = cfg, journal = existing))
+  }
+
+  metadata <- list()
+  if (!is.null(cr_message)) {
+    metadata$publisher <- .litxr_scalar_chr(cr_message$publisher)
+  }
+
+  journal <- list(
+    collection_id = "unclassified_doi",
+    collection_type = "doi_collection",
+    title = "Unclassified DOI",
+    remote_channel = "crossref",
+    local_path = file.path("ref", "unclassified_doi"),
+    metadata = metadata,
+    sync = list(
+      filters = list(
+        issn = NA_character_
       )
     )
   )

@@ -310,9 +310,51 @@ litxr_list_journals <- function(config = NULL) {
     collections <- list()
   }
 
+  collections <- .litxr_compact_collection_entries(collections)
   cfg$collections <- collections
   cfg$journals <- lapply(collections, .litxr_collection_to_legacy_journal)
   cfg
+}
+
+.litxr_compact_collection_entries <- function(collections) {
+  if (!length(collections)) {
+    return(collections)
+  }
+
+  ids <- vapply(collections, function(collection) {
+    collection_id <- collection$collection_id
+    if (is.null(collection_id) || !length(collection_id) || is.na(collection_id[[1L]])) {
+      collection_id <- collection$journal_id
+    }
+    if (is.null(collection_id) || !length(collection_id) || is.na(collection_id[[1L]]) || !nzchar(as.character(collection_id[[1L]]))) {
+      NA_character_
+    } else {
+      as.character(collection_id[[1L]])
+    }
+  }, character(1))
+
+  ids[is.na(ids) | !nzchar(ids)] <- NA_character_
+  keep <- rep(TRUE, length(collections))
+  for (id in unique(ids[!is.na(ids)])) {
+    idx <- which(ids == id)
+    if (!length(idx)) {
+      next
+    }
+    if (identical(id, "unclassified_doi")) {
+      preferred <- idx[!vapply(collections[idx], .litxr_collection_is_legacy_unclassified_doi, logical(1))]
+      if (length(preferred)) {
+        idx <- tail(preferred, 1L)
+      } else {
+        idx <- tail(idx, 1L)
+      }
+    } else {
+      idx <- tail(idx, 1L)
+    }
+    keep[which(ids == id)] <- FALSE
+    keep[idx] <- TRUE
+  }
+
+  collections[keep]
 }
 
 .litxr_collection_from_legacy_journal <- function(journal) {
@@ -340,8 +382,34 @@ litxr_list_journals <- function(config = NULL) {
   if (is.null(out$collection_id) && !is.null(out$journal_id)) {
     out$collection_id <- out$journal_id
   }
+  if (.litxr_collection_is_legacy_unclassified_doi(out)) {
+    original_id <- if (!is.null(out$collection_id) && length(out$collection_id)) as.character(out$collection_id[[1L]]) else NA_character_
+    out$collection_id <- "unclassified_doi"
+    out$collection_type <- "doi_collection"
+    out$title <- "Unclassified DOI"
+    out$remote_channel <- "crossref"
+    out$local_path <- file.path("ref", "unclassified_doi")
+    out$metadata <- c(out$metadata, list(legacy_collection_id = original_id))
+    out$sync <- list(filters = list(issn = NA_character_))
+  }
   if (is.null(out$collection_type) || !nzchar(as.character(out$collection_type))) {
     out$collection_type <- if (identical(out$remote_channel, "arxiv")) "arxiv_category" else "journal"
   }
   out
+}
+
+.litxr_collection_is_legacy_unclassified_doi <- function(collection) {
+  collection_id <- collection$collection_id
+  if (is.null(collection_id) || !length(collection_id)) {
+    collection_id <- collection$journal_id
+  }
+  collection_id <- if (is.null(collection_id) || !length(collection_id)) NA_character_ else as.character(collection_id[[1L]])
+  title <- if (!is.null(collection$title) && length(collection$title)) as.character(collection$title[[1L]]) else NA_character_
+
+  is_legacy_id <- !is.na(collection_id) && (
+    identical(collection_id, "23") ||
+      grepl("^crossref_unclassified(?:_[0-9]+)?$", collection_id, ignore.case = TRUE)
+  )
+  is_legacy_title <- !is.na(title) && identical(title, "Crossref Unclassified")
+  is_legacy_id || is_legacy_title
 }

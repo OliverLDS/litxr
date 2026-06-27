@@ -36,6 +36,7 @@
   for (candidate in candidates) {
     candidate <- sub("^doi:", "", candidate, ignore.case = TRUE)
     candidate <- trimws(candidate)
+    candidate <- tolower(candidate)
     if (nzchar(candidate)) return(candidate)
   }
   NA_character_

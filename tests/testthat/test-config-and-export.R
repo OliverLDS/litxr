@@ -53,6 +53,39 @@ stopifnot(identical(tab_cfg$project$name, "bad_tabs"))
 stopifnot(identical(tab_cfg$journals[[1]]$journal_id, "journal_of_finance"))
 stopifnot(identical(tab_cfg$collections[[1]]$collection_id, "journal_of_finance"))
 
+legacy_cfg_path <- file.path(td, ".litxr", "legacy-unclassified.yaml")
+writeLines(c(
+  "version: 1",
+  "project:",
+  "  name: legacy_unclassified",
+  "  data_root: data/literature",
+  "collections:",
+  "  - collection_id: crossref_unclassified",
+  "    collection_type: journal",
+  "    title: Crossref Unclassified",
+  "    remote_channel: crossref",
+  "    local_path: ref/crossref_unclassified",
+  "  - collection_id: crossref_unclassified_2",
+  "    collection_type: journal",
+  "    title: Crossref Unclassified",
+  "    remote_channel: crossref",
+  "    local_path: ref/crossref_unclassified_2",
+  "  - collection_id: 23",
+  "    collection_type: journal",
+  "    title: 23",
+  "    remote_channel: crossref",
+  "    local_path: ref/23",
+  "  - collection_id: unclassified_doi",
+  "    collection_type: doi_collection",
+  "    title: Unclassified DOI",
+  "    remote_channel: crossref",
+  "    local_path: ref/unclassified_doi"
+), legacy_cfg_path)
+legacy_cfg <- litxr::litxr_read_config(legacy_cfg_path)
+legacy_collections <- litxr::litxr_list_collections(legacy_cfg)
+stopifnot(sum(legacy_collections$collection_id == "unclassified_doi") == 1L)
+stopifnot(!any(legacy_collections$collection_id %in% c("crossref_unclassified", "crossref_unclassified_2", "23")))
+
 td_export <- tempfile("litxr-test-")
 dir.create(td_export)
 cfg_path <- file.path(td_export, "config.yaml")
@@ -987,6 +1020,24 @@ stopifnot(identical(
   litxr:::.litxr_get_journal(assigned$cfg, as.character(assigned$records$collection_id[[1]]))$collection_id,
   new_journal$collection_id
 ))
+
+unclassified_message <- list(
+  title = NA_character_,
+  publisher = "Fallback Publisher",
+  DOI = "10.3000/unclassified"
+)
+unclassified_registered <- litxr:::.litxr_register_crossref_journal(cfg_export, unclassified_message)
+stopifnot(identical(unclassified_registered$journal$collection_id, "unclassified_doi"))
+stopifnot(identical(unclassified_registered$journal$title, "Unclassified DOI"))
+stopifnot(identical(unclassified_registered$journal$remote_channel, "crossref"))
+
+numeric_title_message <- list(
+  title = "23",
+  publisher = "Numeric Title Publisher",
+  DOI = "10.3000/numeric-title"
+)
+numeric_title_registered <- litxr:::.litxr_register_crossref_journal(unclassified_registered$cfg, numeric_title_message)
+stopifnot(identical(numeric_title_registered$journal$collection_id, "unclassified_doi"))
 }
 
 if (FALSE) {

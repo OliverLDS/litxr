@@ -16,6 +16,7 @@ Behavior:
   - Normalizes both inputs to canonical ref_ids.
   - Fails if either arXiv id or DOI already exists in ref_identity_map.fst.
   - Appends the pair only to ref_identity_map.fst.
+  - Appends the same manually supplied pair to log/manual_ref_identity_pairs.tsv.
   - Compact JSON is written to stdout.
 EOF
   exit 0
@@ -65,7 +66,7 @@ if [[ -z "$doi" ]]; then
   exit 1
 fi
 
-Rscript - "$arxiv_id" "$doi" <<'EOF'
+json_out="$(Rscript - "$arxiv_id" "$doi" <<'EOF'
 args <- commandArgs(trailingOnly = TRUE)
 arxiv_id <- args[[1]]
 doi <- args[[2]]
@@ -83,4 +84,40 @@ options(error = function() {
 
 result <- litxr::litxr_add_ref_identity_pair(arxiv_id, doi)
 emit_json(result)
+EOF
+)"
+
+print -r -- "$json_out"
+
+manual_log_dir="${LITXR_DATA_ROOT}/log"
+manual_log_path="${manual_log_dir}/manual_ref_identity_pairs.tsv"
+mkdir -p "$manual_log_dir"
+if [[ ! -f "$manual_log_path" ]]; then
+  print -r -- $'arxiv_id\tdoi' > "$manual_log_path"
+fi
+
+python3 - "$json_out" "$manual_log_path" <<'EOF'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+if payload.get("status") != "ok":
+    sys.exit(0)
+
+def bare_arxiv(value):
+    value = str(value or "")
+    return value[7:] if value.startswith("arxiv:") else value
+
+def bare_doi(value):
+    value = str(value or "")
+    return value[4:] if value.startswith("doi:") else value
+
+path = sys.argv[2]
+arxiv_id = bare_arxiv(payload.get("arxiv_ref_id"))
+doi = bare_doi(payload.get("doi_ref_id"))
+if not arxiv_id or not doi:
+    sys.exit(0)
+
+with open(path, "a", encoding="utf-8") as fh:
+    fh.write(f"{arxiv_id}\t{doi}\n")
 EOF
