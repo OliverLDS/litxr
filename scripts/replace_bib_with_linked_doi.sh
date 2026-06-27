@@ -17,8 +17,13 @@ Behavior:
   - Writes those ref_ids to OUTPUT_BIB using scripts/write_bib_by_ref_ids.sh.
   - Uses the default modes of both wrapped scripts, so arXiv entries are
     rewritten with linked DOI BibTeX entries when a DOI link exists.
+  - Converted entries keep their original BibTeX keys.
+  - Unresolved or unrecognized BibTeX entries are preserved unchanged.
+  - Article-type arXiv entries without a matching identity-map pair are
+    reported as suspicious.
   - Compact JSON is written to stdout and reports which arXiv ids were
-    converted.
+    converted, which DOI values replaced them, and which linked DOI values
+    were missing from the local DOI store.
 EOF
   exit 0
 fi
@@ -82,58 +87,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-emit_json() {
-  Rscript - "$read_json" "$write_json" "$input_bibtex" "$output_bibtex" "$1" <<'EOF'
-args <- commandArgs(trailingOnly = TRUE)
-read_path <- args[[1]]
-write_path <- args[[2]]
-input_bibtex <- args[[3]]
-output_bibtex <- args[[4]]
-status <- args[[5]]
-
-emit <- function(x) {
-  cat(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE), "\n", sep = "")
-}
-
-read_result <- tryCatch(jsonlite::fromJSON(read_path, simplifyVector = FALSE), error = function(e) NULL)
-write_result <- tryCatch(jsonlite::fromJSON(write_path, simplifyVector = FALSE), error = function(e) NULL)
-
-input_ids <- character()
-resolved_ids <- character()
-if (!is.null(read_result) && !is.null(read_result$ref_ids)) {
-  input_ids <- as.character(read_result$ref_ids)
-}
-if (!is.null(write_result) && !is.null(write_result$resolved_ref_ids)) {
-  resolved_ids <- as.character(write_result$resolved_ref_ids)
-}
-
-converted <- character()
-n <- min(length(input_ids), length(resolved_ids))
-if (n > 0L) {
-  idx <- seq_len(n)
-  converted <- input_ids[idx][
-    grepl("^arxiv:", input_ids[idx], ignore.case = TRUE) &
-      grepl("^doi:", resolved_ids[idx], ignore.case = TRUE)
-  ]
-  converted <- converted[!duplicated(converted)]
-}
-
-output <- list(
-  status = status,
-  input_bibtex = normalizePath(input_bibtex, winslash = "/", mustWork = FALSE),
-  output_bibtex = normalizePath(output_bibtex, winslash = "/", mustWork = FALSE),
-  ref_ids = input_ids,
-  converted_arxiv_ids = converted
-)
-emit(output)
-EOF
-}
-
 if ! "$read_script" --bibtex "$input_bibtex" > "$read_json"; then
   if [[ -s "$read_json" ]]; then
     cat "$read_json"
   else
-    emit_json "error"
+    cat '{"status":"error"}'
   fi
   exit 1
 fi
@@ -150,65 +108,160 @@ if (is.null(ids) || !length(ids)) {
 EOF
 )"
 
-if [[ -z "$ref_ids_raw" ]]; then
-  : > "$output_tmp"
-  if [[ "$output_tmp" != "$output_bibtex" ]]; then
-    mv -f "$output_tmp" "$output_bibtex"
-  fi
-  emit_json "ok"
-  exit 0
-fi
-
 if ! "$write_script" --output "$output_tmp" --ref-ids "$ref_ids_raw" > "$write_json"; then
   if [[ -s "$write_json" ]]; then
     cat "$write_json"
   else
-    emit_json "error"
+    cat '{"status":"error"}'
   fi
   exit 1
 fi
 
-written_ref_ids_count="$(Rscript - "$write_json" <<'EOF'
+Rscript - "$write_json" "$input_bibtex" "$output_bibtex" "$output_tmp" <<'EOF'
 args <- commandArgs(trailingOnly = TRUE)
-result <- jsonlite::fromJSON(args[[1]], simplifyVector = FALSE)
-ids <- result$resolved_ref_ids
-if (is.null(ids)) {
-  cat("0")
-} else {
-  cat(as.character(length(ids)))
-}
-EOF
-)"
-
-if [[ "$in_place" -eq 1 && "$written_ref_ids_count" == "0" ]]; then
-  Rscript - "$input_bibtex" "$output_bibtex" "$read_json" "$write_json" <<'EOF'
-args <- commandArgs(trailingOnly = TRUE)
-input_bibtex <- args[[1]]
-output_bibtex <- args[[2]]
-read_json <- args[[3]]
-write_json <- args[[4]]
+write_path <- args[[1]]
+input_bibtex <- args[[2]]
+output_bibtex <- args[[3]]
+output_tmp <- args[[4]]
 
 emit <- function(x) {
   cat(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE), "\n", sep = "")
 }
 
-read_result <- tryCatch(jsonlite::fromJSON(read_json, simplifyVector = FALSE), error = function(e) NULL)
-write_result <- tryCatch(jsonlite::fromJSON(write_json, simplifyVector = FALSE), error = function(e) NULL)
+replace_entry_key <- function(entry, key) {
+  if (!length(entry)) {
+    return(entry)
+  }
+  entry[[1L]] <- sub("^\\s*@([[:alnum:]]+)\\s*\\{\\s*[^,]+,", sprintf("@\\1{%s,", key), entry[[1L]], perl = TRUE)
+  entry
+}
+
+parse_entries <- function(path) {
+  lines <- readLines(path, warn = FALSE)
+  if (!length(lines)) {
+    return(list(entries = list(), keys = character()))
+  }
+
+  entries <- list()
+  keys <- character()
+  types <- character()
+  i <- 1L
+  while (i <= length(lines)) {
+    line <- lines[[i]]
+    if (!grepl("^\\s*@", line)) {
+      i <- i + 1L
+      next
+    }
+
+    entry_type <- sub("^\\s*@([[:alnum:]]+)\\s*\\{.*$", "\\1", line, perl = TRUE)
+    key <- sub("^\\s*@\\w+\\s*\\{\\s*([^,]+),.*$", "\\1", line, perl = TRUE)
+    chunk <- character()
+    depth <- 0L
+    repeat {
+      if (i > length(lines)) {
+        break
+      }
+      current <- lines[[i]]
+      chunk <- c(chunk, current)
+      opens <- lengths(regmatches(current, gregexpr("\\{", current, perl = TRUE)))
+      closes <- lengths(regmatches(current, gregexpr("\\}", current, perl = TRUE)))
+      depth <- depth + opens - closes
+      i <- i + 1L
+      if (depth <= 0L) {
+        break
+      }
+    }
+
+    entries[[length(entries) + 1L]] <- chunk
+    keys <- c(keys, key)
+    types <- c(types, tolower(entry_type))
+  }
+
+  list(entries = entries, keys = keys, types = types)
+}
+
+write_result <- tryCatch(jsonlite::fromJSON(write_path, simplifyVector = FALSE), error = function(e) NULL)
+resolved_ids <- if (!is.null(write_result) && !is.null(write_result$resolved_ref_ids)) as.character(write_result$resolved_ref_ids) else character()
+unresolved_ids <- if (!is.null(write_result) && !is.null(write_result$unresolved_ref_ids)) as.character(write_result$unresolved_ref_ids) else character()
+
+input_parsed <- parse_entries(input_bibtex)
+output_parsed <- parse_entries(output_tmp)
+input_entries <- input_parsed$entries
+input_keys <- input_parsed$keys
+input_types <- input_parsed$types
+output_entries <- output_parsed$entries
+cfg <- litxr::litxr_read_config()
+link_maps <- litxr:::.litxr_bibtex_link_maps(cfg)
+identity_arxiv_ids <- character()
+if (!is.null(link_maps) && !is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
+  identity_arxiv_ids <- names(link_maps$arxiv_to_doi)
+}
+input_ids <- if (length(input_entries)) {
+  vapply(seq_along(input_entries), function(i) {
+    litxr:::.litxr_bibtex_entry_ref_id(
+      paste(input_entries[[i]], collapse = "\n"),
+      input_keys[[i]],
+      link_maps = link_maps,
+      prefer_linked_arxiv = TRUE
+    )
+  }, character(1))
+} else {
+  character()
+}
+
+result_entries <- vector("list", length(input_entries))
+converted_arxiv_ids <- character()
+doi_of_converted_arxiv_ids <- character()
+missing_linked_doi_arxiv_ids <- character()
+doi_of_missing_linked_doi_arxiv_ids <- character()
+suspicious_arxiv_ids <- character()
+resolved_idx <- 0L
+for (i in seq_along(input_entries)) {
+  input_id <- if (length(input_ids) >= i) as.character(input_ids[[i]]) else input_keys[[i]]
+  input_type <- if (length(input_types) >= i) as.character(input_types[[i]]) else NA_character_
+  is_article_arxiv <- !is.na(input_type) && identical(input_type, "article") &&
+    !is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE)
+  if (is_article_arxiv && !(input_id %in% identity_arxiv_ids)) {
+    suspicious_arxiv_ids <- c(suspicious_arxiv_ids, input_id)
+  }
+  if (is.na(input_id) || !nzchar(input_id) || (length(unresolved_ids) && input_id %in% unresolved_ids)) {
+    result_entries[[i]] <- input_entries[[i]]
+    next
+  }
+
+  resolved_idx <- resolved_idx + 1L
+  if (resolved_idx <= length(output_entries)) {
+    result_entries[[i]] <- output_entries[[resolved_idx]]
+  } else {
+    result_entries[[i]] <- input_entries[[i]]
+  }
+
+  resolved_ref_id <- if (length(resolved_ids) >= resolved_idx) as.character(resolved_ids[[resolved_idx]]) else NA_character_
+  if (!is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE) &&
+      !is.na(resolved_ref_id) && grepl("^doi:", resolved_ref_id, ignore.case = TRUE)) {
+    converted_arxiv_ids <- c(converted_arxiv_ids, input_id)
+    doi_of_converted_arxiv_ids <- c(doi_of_converted_arxiv_ids, resolved_ref_id)
+    result_entries[[i]] <- replace_entry_key(result_entries[[i]], input_keys[[i]])
+  } else if (!is.na(input_id) && grepl("^arxiv:", input_id, ignore.case = TRUE) &&
+      !is.na(resolved_ref_id) && grepl("^arxiv:", resolved_ref_id, ignore.case = TRUE)) {
+    linked_doi <- unname(link_maps$arxiv_to_doi[input_id])
+    linked_doi <- if (length(linked_doi) && !is.na(linked_doi[[1L]]) && nzchar(linked_doi[[1L]])) as.character(linked_doi[[1L]]) else NA_character_
+    if (!is.na(linked_doi) && nzchar(linked_doi)) {
+      missing_linked_doi_arxiv_ids <- c(missing_linked_doi_arxiv_ids, input_id)
+      doi_of_missing_linked_doi_arxiv_ids <- c(doi_of_missing_linked_doi_arxiv_ids, linked_doi)
+    }
+  }
+}
+
+written_lines <- unlist(lapply(result_entries, function(entry) c(entry, "")), use.names = FALSE)
+writeLines(written_lines, output_bibtex)
+
 emit(list(
-  status = "error",
-  input_bibtex = normalizePath(input_bibtex, winslash = "/", mustWork = FALSE),
-  output_bibtex = normalizePath(output_bibtex, winslash = "/", mustWork = FALSE),
-  error = "No BibTeX entries were written; leaving the input file unchanged.",
-  ref_ids = if (!is.null(read_result$ref_ids)) as.character(read_result$ref_ids) else character(),
-  converted_arxiv_ids = character(),
-  resolved_ref_ids = if (!is.null(write_result$resolved_ref_ids)) as.character(write_result$resolved_ref_ids) else character()
+  status = "ok",
+  converted_arxiv_ids = as.list(unique(converted_arxiv_ids)),
+  doi_of_converted_arxiv_ids = as.list(doi_of_converted_arxiv_ids[!duplicated(converted_arxiv_ids)]),
+  missing_linked_doi_arxiv_ids = as.list(unique(missing_linked_doi_arxiv_ids)),
+  doi_of_missing_linked_doi_arxiv_ids = as.list(doi_of_missing_linked_doi_arxiv_ids[!duplicated(missing_linked_doi_arxiv_ids)]),
+  suspicious_arxiv_ids = as.list(unique(suspicious_arxiv_ids))
 ))
 EOF
-  exit 1
-fi
-
-if [[ "$in_place" -eq 1 ]]; then
-  mv -f "$output_tmp" "$output_bibtex"
-fi
-
-emit_json "ok"
