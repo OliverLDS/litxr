@@ -3,11 +3,16 @@
 - Reused a single preloaded BibTeX scaffold cache across each export batch so
   DOI and ISBN resolution no longer reopens scaffold tables per entry.
 
+# litxr 0.1.7.8
+
+- Fixed the BibTeX linked-DOI wrapper so linked DOI substitutions and
+  unresolved-entry reporting stay in one wrapper result.
+
 # litxr 0.1.7.7
 
 - Updated the thin arXiv reference update path so newly fetched arXiv JSON can
   be added to `ref_arxiv.fst` before embedding metadata migration.
-- Kept the embedding metadata migration aligned with the narrow `ref_id` and
+  - Kept the embedding metadata migration aligned with the narrow `ref_id` and
   `abstract` shard shape.
 
 # litxr 0.1.7.6
@@ -16,6 +21,11 @@
   `log/`, keyed by `collection_id`.
 - Added single-collection incremental support to the thin ref-store sync
   wrapper while keeping the default cutoff lookup collection-specific.
+
+# litxr 0.1.7.5
+
+- Refined the thin-store source metadata path so DOI collection sync can use
+  collection-specific fetch cutoffs from the shared log.
 
 # litxr 0.1.7.4
 
@@ -51,6 +61,13 @@
 - Removed a remaining dead collection/DOI projection field from the narrow
   normalized payload projection path and added regression coverage for the
   audit/report nodes and normalized payload shape.
+
+# litxr 0.1.7
+
+- Introduced the normalized scaffold rewrite and lookup refactor that moved
+  the package toward thin canonical identity/payload storage.
+- Updated the refactor hardening tests and documentation to reflect the
+  normalized scaffold shape and lookup policy.
 
 # litxr 0.1.6
 
