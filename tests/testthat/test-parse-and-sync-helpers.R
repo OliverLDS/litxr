@@ -358,3 +358,28 @@ bib_book <- litxr:::.litxr_row_to_bibtex(data.table::data.table(
 ))
 stopifnot(identical(bib_book[[1]], "@book{booktest, title = {Example Book},"))
 stopifnot(any(grepl("isbn = \\{9780262046305\\}", bib_book)))
+
+html_doc <- xml2::read_html(paste(
+  "<html><head>",
+  '<meta name="citation_title" content="Example HTML Paper"/>',
+  '<meta name="citation_author" content="Jane Doe"/>',
+  '<meta name="citation_author" content="John Smith"/>',
+  '<meta name="citation_publication_date" content="2026/06/27"/>',
+  '<meta name="citation_journal_title" content="Example Journal"/>',
+  '<meta name="citation_publisher" content="Example Publisher"/>',
+  '<meta name="citation_volume" content="12"/>',
+  '<meta name="citation_issue" content="3"/>',
+  '<meta name="citation_firstpage" content="101"/>',
+  '<meta name="citation_lastpage" content="110"/>',
+  '<meta name="citation_abstract" content="HTML metadata fallback works."/>',
+  '<meta name="citation_url" content="https://example.org/article"/>',
+  '<meta name="citation_issn" content="1234-5678"/>',
+  "</head><body></body></html>",
+  collapse = ""
+))
+html_message <- litxr:::.litxr_doi_message_from_html(html_doc, "10.1145/9999.9999", source_url = "https://dl.acm.org/doi/10.1145/9999.9999")
+stopifnot(identical(html_message$DOI, "10.1145/9999.9999"))
+stopifnot(identical(html_message$title[[1]], "Example HTML Paper"))
+stopifnot(identical(html_message$publisher[[1]], "Example Publisher"))
+stopifnot(identical(html_message$page[[1]], "101-110"))
+stopifnot(identical(html_message$URL[[1]], "https://example.org/article"))

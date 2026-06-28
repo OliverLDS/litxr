@@ -241,18 +241,14 @@ if (isTRUE(embed_missing)) {
 
 ref_ids <- NULL
 if (!is.null(year_from) || !is.null(year_to)) {
-  journal <- litxr:::.litxr_get_journal(cfg, "arxiv_cs_ai")
-  local_path <- litxr:::.litxr_resolve_local_path(cfg, journal$local_path)
-  index_path <- litxr:::.litxr_index_path(local_path)
+  index_path <- litxr:::.litxr_ref_arxiv_path(cfg)
   index_columns <- fst::metadata_fst(index_path)$columnNames
-  if (!("ref_id" %in% index_columns)) {
-    stop("Collection index is missing `ref_id`: ", index_path, call. = FALSE)
+  if (!("arxiv_id" %in% index_columns)) {
+    stop("Collection index is missing `arxiv_id`: ", index_path, call. = FALSE)
   }
-  read_columns <- intersect(c("ref_id", "year"), index_columns)
+  read_columns <- intersect(c("arxiv_id"), index_columns)
   refs <- fst::read_fst(index_path, columns = read_columns, as.data.table = TRUE)
-  if (!("year" %in% names(refs))) {
-    refs$year <- NA_integer_
-  }
+  refs$year <- suppressWarnings(as.integer(2000L + as.integer(substr(refs$arxiv_id, 1L, 2L))))
   keep <- rep(TRUE, nrow(refs))
   if (!is.null(year_from)) {
     keep <- keep & !is.na(refs$year) & refs$year >= year_from
@@ -261,7 +257,7 @@ if (!is.null(year_from) || !is.null(year_to)) {
     keep <- keep & !is.na(refs$year) & refs$year <= year_to
   }
   if (nrow(refs)) {
-    ref_ids <- unique(as.character(refs$ref_id[keep & !is.na(refs$ref_id) & nzchar(refs$ref_id)]))
+    ref_ids <- unique(as.character(refs$arxiv_id[keep & !is.na(refs$arxiv_id) & nzchar(refs$arxiv_id)]))
   } else {
     ref_ids <- character()
   }
@@ -296,7 +292,7 @@ if (!nrow(scores)) {
 }
 
 scores <- data.table::as.data.table(scores)
-data.table::setorderv(scores, c("category_id", "score_max", "title"), order = c(1L, -1L, 1L), na.last = TRUE)
+data.table::setorderv(scores, c("category_id", "score_max"), order = c(1L, -1L), na.last = TRUE)
 scores[, rank_in_category := seq_len(.N), by = category_id]
 
 selected <- copy(scores)
@@ -361,6 +357,20 @@ if (!nrow(selected)) {
   quit(save = "no", status = 0)
 }
 
+selected_paths <- litxr:::.litxr_embedding_target_rows_from_thin_ref_stores(cfg, "arxiv_cs_ai")
+selected_paths <- selected_paths[
+  as.character(selected_paths$ref_id) %in% unique(as.character(selected$ref_id)),
+  c("ref_id", "json_path"),
+  with = FALSE
+]
+selected <- litxr:::.litxr_hydrate_rows_from_json_paths(
+  selected,
+  selected_paths,
+  fields = "title"
+)
+if (!("title" %in% names(selected))) {
+  selected[, title := NA_character_]
+}
 data.table::setorderv(selected, c("category_id", "score_max", "title"), order = c(1L, -1L, 1L), na.last = TRUE)
 
 if (identical(output_format, "json")) {

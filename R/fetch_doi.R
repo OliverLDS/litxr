@@ -212,6 +212,153 @@
   tryCatch(httr2::resp_body_json(resp, simplifyVector = FALSE), error = function(e) NULL)
 }
 
+.litxr_fetch_html_or_null <- function(url) {
+  req <- httr2::request(url) |>
+    httr2::req_error(is_error = function(resp) FALSE)
+  resp <- tryCatch(httr2::req_perform(req), error = function(e) NULL)
+  if (is.null(resp) || httr2::resp_status(resp) >= 400) {
+    return(NULL)
+  }
+  tryCatch(httr2::resp_body_string(resp), error = function(e) NULL)
+}
+
+.litxr_html_meta_map <- function(doc) {
+  nodes <- xml2::xml_find_all(doc, ".//meta")
+  if (!length(nodes)) {
+    return(list())
+  }
+
+  names <- trimws(as.character(xml2::xml_attr(nodes, "name")))
+  props <- trimws(as.character(xml2::xml_attr(nodes, "property")))
+  keys <- ifelse(!is.na(names) & nzchar(names), names, props)
+  contents <- trimws(as.character(xml2::xml_attr(nodes, "content")))
+  keep <- !is.na(keys) & nzchar(keys) & !is.na(contents) & nzchar(contents)
+  if (!any(keep)) {
+    return(list())
+  }
+
+  split(as.character(contents[keep]), as.character(keys[keep]))
+}
+
+.litxr_html_meta_first <- function(meta, keys) {
+  keys <- as.character(keys)
+  for (key in keys) {
+    if (!length(key) || is.na(key) || !nzchar(key)) next
+    value <- meta[[key]]
+    if (!is.null(value) && length(value)) {
+      value <- as.character(value)
+      value <- value[!is.na(value) & nzchar(trimws(value))]
+      if (length(value)) {
+        return(value[[1L]])
+      }
+    }
+  }
+  NA_character_
+}
+
+.litxr_html_meta_author_list <- function(meta) {
+  authors <- meta[["citation_author"]]
+  if (is.null(authors) || !length(authors)) {
+    return(NULL)
+  }
+  authors <- as.character(authors)
+  authors <- authors[!is.na(authors) & nzchar(trimws(authors))]
+  if (!length(authors)) {
+    return(NULL)
+  }
+  lapply(authors, function(name) list(name = name))
+}
+
+.litxr_html_meta_date_parts <- function(meta) {
+  raw_date <- .litxr_html_meta_first(meta, c("citation_publication_date", "citation_online_date", "citation_date"))
+  if (is.na(raw_date) || !nzchar(raw_date)) {
+    return(NULL)
+  }
+  raw_date <- gsub("/", "-", raw_date, fixed = TRUE)
+  parsed <- suppressWarnings(as.Date(raw_date))
+  if (is.na(parsed)) {
+    return(NULL)
+  }
+  list(`date-parts` = list(c(
+    as.integer(format(parsed, "%Y")),
+    as.integer(format(parsed, "%m")),
+    as.integer(format(parsed, "%d"))
+  )))
+}
+
+.litxr_doi_message_from_html <- function(html, doi, source_url = NULL) {
+  meta <- .litxr_html_meta_map(html)
+
+  title <- .litxr_html_meta_first(meta, c("citation_title", "og:title", "twitter:title", "dc.title"))
+  authors <- .litxr_html_meta_author_list(meta)
+  issued <- .litxr_html_meta_date_parts(meta)
+
+  container_title <- .litxr_html_meta_first(meta, c("citation_journal_title", "citation_conference_title", "citation_venue", "dc.source"))
+  publisher <- .litxr_html_meta_first(meta, c("citation_publisher", "dc.publisher", "og:site_name"))
+  volume <- .litxr_html_meta_first(meta, "citation_volume")
+  issue <- .litxr_html_meta_first(meta, "citation_issue")
+  pages <- .litxr_html_meta_first(meta, c("citation_firstpage", "citation_lastpage"))
+  if (!is.na(pages) && nzchar(pages)) {
+    last_page <- .litxr_html_meta_first(meta, "citation_lastpage")
+    first_page <- .litxr_html_meta_first(meta, "citation_firstpage")
+    if (!is.na(first_page) && !is.na(last_page) && nzchar(first_page) && nzchar(last_page)) {
+      pages <- paste0(first_page, "-", last_page)
+    } else if (!is.na(first_page) && nzchar(first_page)) {
+      pages <- first_page
+    }
+  }
+  abstract <- .litxr_html_meta_first(meta, c("citation_abstract", "description", "dc.description"))
+  url <- .litxr_html_meta_first(meta, c("citation_url", "citation_pdf_url", "og:url"))
+  if (is.na(url) || !nzchar(url)) {
+    url <- source_url
+  }
+  isbn <- meta[["citation_isbn"]]
+  isbn <- if (!is.null(isbn) && length(isbn)) paste(unique(as.character(isbn)), collapse = "; ") else NA_character_
+  issn <- meta[["citation_issn"]]
+  issn <- if (!is.null(issn) && length(issn)) paste(unique(as.character(issn)), collapse = "; ") else NA_character_
+  subject <- meta[["citation_keywords"]]
+  subject <- if (!is.null(subject) && length(subject)) unique(as.character(subject)) else character()
+
+  list(
+    DOI = doi,
+    title = if (is.na(title)) character() else title,
+    author = authors,
+    issued = issued,
+    `container-title` = if (is.na(container_title)) character() else container_title,
+    publisher = if (is.na(publisher)) NA_character_ else publisher,
+    volume = if (is.na(volume)) NA_character_ else volume,
+    issue = if (is.na(issue)) NA_character_ else issue,
+    page = if (is.na(pages)) NA_character_ else pages,
+    abstract = if (is.na(abstract)) NA_character_ else abstract,
+    URL = if (is.na(url)) NA_character_ else url,
+    ISBN = if (is.na(isbn)) character() else isbn,
+    ISSN = if (is.na(issn)) character() else issn,
+    subject = subject
+  )
+}
+
+.litxr_fetch_doi_message_from_html <- function(doi, source_url = NULL) {
+  doi <- .litxr_normalize_doi_ref_id(doi)
+  if (is.na(doi) || !nzchar(doi)) {
+    return(NULL)
+  }
+  bare_doi <- sub("^doi:", "", doi, ignore.case = TRUE)
+  html_url <- if (!is.null(source_url) && nzchar(source_url)) source_url else sprintf("https://doi.org/%s", utils::URLencode(bare_doi, reserved = TRUE))
+  html <- .litxr_fetch_html_or_null(html_url)
+  if (is.null(html)) {
+    return(NULL)
+  }
+  doc <- tryCatch(xml2::read_html(html), error = function(e) NULL)
+  if (is.null(doc)) {
+    return(NULL)
+  }
+  message <- .litxr_doi_message_from_html(doc, bare_doi, source_url = html_url)
+  if (is.null(message) || !length(message)) {
+    return(NULL)
+  }
+  message
+}
+
 .litxr_fetch_doi_message_one <- function(doi) {
   doi <- .litxr_normalize_doi_ref_id(doi)
   if (is.na(doi) || !nzchar(doi)) {
@@ -222,6 +369,13 @@
   crossref <- tryCatch(fetch_crossref_messages(doi), error = function(e) list(setNames(list(NULL), doi)))
   if (!is.null(crossref[[1L]])) {
     return(crossref[[1L]])
+  }
+
+  if (grepl("^10\\.1145/", bare_doi) || grepl("^10\\.3390/", bare_doi)) {
+    html_message <- .litxr_fetch_doi_message_from_html(bare_doi)
+    if (!is.null(html_message)) {
+      return(html_message)
+    }
   }
 
   if (grepl("zenodo", bare_doi, ignore.case = TRUE)) {

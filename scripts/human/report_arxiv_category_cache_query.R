@@ -4,11 +4,6 @@ suppressPackageStartupMessages({
   library(jsonlite)
 })
 
-script_arg <- commandArgs(trailingOnly = FALSE)
-script_file <- sub("^--file=", "", script_arg[grep("^--file=", script_arg)][1])
-script_dir <- dirname(script_file)
-source(file.path(script_dir, "_diagnostics.R"), local = TRUE)
-
 `%||%` <- function(x, y) {
   if (is.null(x) || !length(x)) y else x
 }
@@ -16,18 +11,13 @@ source(file.path(script_dir, "_diagnostics.R"), local = TRUE)
 args <- commandArgs(trailingOnly = TRUE)
 
 parse_args <- function(args) {
-  out <- list(show_help = FALSE, diagnose = FALSE)
+  out <- list(show_help = FALSE)
   i <- 1L
 
   while (i <= length(args)) {
     key <- args[[i]]
     if (identical(key, "-h") || identical(key, "--help")) {
       out$show_help <- TRUE
-      i <- i + 1L
-      next
-    }
-    if (identical(key, "--diagnose")) {
-      out$diagnose <- TRUE
       i <- i + 1L
       next
     }
@@ -41,7 +31,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/human/report_arxiv_category_cache_query.sh < input.json",
+      "  Rscript scripts/human/report_arxiv_category_cache_query.R < input.json",
       "",
       "Purpose:",
       "  Convert the compact JSON output of scripts/report_arxiv_category_labels.R",
@@ -55,9 +45,8 @@ usage <- function() {
       "",
       "Notes:",
       "  - This node is intended to be used in a pipe:",
-      "    scripts/report_arxiv_category_labels.R --output-format json | Rscript scripts/human/report_arxiv_category_cache_query.sh",
+      "    scripts/report_arxiv_category_labels.R --output-format json | Rscript scripts/human/report_arxiv_category_cache_query.R",
       "  - When the JSON contains no selected refs, it prints a short no-results message.",
-      "  - --diagnose emits step timings and I/O metadata to stderr.",
       "  - -h, --help shows this message and exits.",
       sep = "\n"
     )
@@ -65,6 +54,9 @@ usage <- function() {
 }
 
 read_stdin_text <- function() {
+  if (isatty(stdin())) {
+    stop("No JSON was provided on stdin. Pipe the JSON output into this script.", call. = FALSE)
+  }
   con <- file("stdin", open = "r")
   on.exit(close(con), add = TRUE)
   lines <- readLines(con, warn = FALSE)
@@ -117,10 +109,6 @@ render_md <- function(payload) {
 }
 
 parsed <- parse_args(args)
-diag_state <- litxr_diag_init(
-  "scripts/human/report_arxiv_category_cache_query.sh",
-  enabled = parsed$diagnose
-)
 if (isTRUE(parsed$show_help)) {
   usage()
   quit(save = "no", status = 0L)
@@ -128,45 +116,14 @@ if (isTRUE(parsed$show_help)) {
 
 result <- tryCatch(
   {
-    read_started <- Sys.time()
     stdin_text <- read_stdin_text()
-    diag_state <<- litxr_diag_step(
-      diag_state,
-      "read_stdin",
-      read_started,
-      inputs = list(list(stream = "stdin", bytes = nchar(stdin_text, type = "bytes")))
-    )
-    parse_started <- Sys.time()
     payload <- jsonlite::fromJSON(stdin_text, simplifyVector = FALSE)
-    diag_state <<- litxr_diag_step(
-      diag_state,
-      "parse_json",
-      parse_started,
-      inputs = list(list(bytes = nchar(stdin_text, type = "bytes"))),
-      outputs = list(list(status = as.character(payload$status[[1]] %||% payload$status)))
-    )
-    render_started <- Sys.time()
-    rendered <- render_md(payload)
-    diag_state <<- litxr_diag_step(
-      diag_state,
-      "render_markdown",
-      render_started,
-      outputs = list(list(bytes = nchar(rendered, type = "bytes")))
-    )
-    rendered
+    render_md(payload)
   },
   error = function(e) {
-    litxr_diag_emit(litxr_diag_finish(diag_state, status = "error", error = conditionMessage(e)))
     message(conditionMessage(e))
     quit(save = "no", status = 1L)
   }
 )
 
-litxr_diag_emit(
-  litxr_diag_finish(
-    diag_state,
-    status = "ok",
-    details = list(output_bytes = nchar(result, type = "bytes"))
-  )
-)
 cat(result)

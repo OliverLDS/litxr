@@ -89,8 +89,25 @@ EOF
 
 print -r -- "$json_out"
 
-manual_log_dir="${LITXR_DATA_ROOT}/log"
-manual_log_path="${manual_log_dir}/manual_ref_identity_pairs.tsv"
+manual_log_path="$(python3 - "$json_out" <<'EOF'
+import json
+import os
+import sys
+
+payload = json.loads(sys.argv[1])
+if payload.get("status") != "ok":
+    sys.exit(1)
+
+identity_path = payload.get("ref_identity_map_path")
+if not identity_path:
+    sys.exit(1)
+
+project_root = os.path.dirname(os.path.dirname(identity_path))
+print(os.path.join(project_root, "log", "manual_ref_identity_pairs.tsv"))
+EOF
+)"
+
+manual_log_dir="${manual_log_path:h}"
 mkdir -p "$manual_log_dir"
 if [[ ! -f "$manual_log_path" ]]; then
   print -r -- $'arxiv_id\tdoi' > "$manual_log_path"

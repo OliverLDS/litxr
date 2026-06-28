@@ -2,6 +2,31 @@
   .litxr_resolve_from_config_root(cfg, cfg$project$data_root)
 }
 
+.litxr_embedding_slug <- function(x) {
+  x <- as.character(x)[[1L]]
+  x <- trimws(x)
+  if (!nzchar(x)) {
+    return("unknown")
+  }
+  x <- tolower(x)
+  x <- gsub("[^a-z0-9]+", "_", x, perl = TRUE)
+  x <- gsub("_+", "_", x, perl = TRUE)
+  x <- gsub("^_|_$", "", x, perl = TRUE)
+  if (!nzchar(x)) "unknown" else x
+}
+
+.litxr_project_embeddings_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "embeddings")
+}
+
+.litxr_ensure_project_embeddings_dir <- function(cfg) {
+  dir_path <- .litxr_project_embeddings_dir(cfg)
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  dir_path
+}
+
 .litxr_path_size <- function(path) {
   if (!file.exists(path)) {
     return(NA_real_)
@@ -276,6 +301,10 @@
   file.path(.litxr_project_root(cfg), "digest", "llm_history")
 }
 
+.litxr_project_llm_digest_index_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "llm_digest.fst")
+}
+
 .litxr_project_md_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "md")
 }
@@ -449,6 +478,23 @@
     dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
   }
   dir_path
+}
+
+.litxr_llm_digest_index_key <- function(ref_id) {
+  ref_id <- as.character(ref_id)[[1L]]
+  if (is.na(ref_id) || !nzchar(trimws(ref_id))) {
+    return(NA_character_)
+  }
+  ref_id <- trimws(ref_id)
+  ref_id <- sub("^arxiv:", "", ref_id, ignore.case = TRUE)
+  ref_id <- sub("^doi:", "", ref_id, ignore.case = TRUE)
+  ref_id <- sub("^isbn:", "", ref_id, ignore.case = TRUE)
+  ref_id <- trimws(tolower(ref_id))
+  if (!nzchar(ref_id)) {
+    NA_character_
+  } else {
+    ref_id
+  }
 }
 
 .litxr_ensure_project_md_dir <- function(cfg) {

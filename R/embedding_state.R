@@ -102,7 +102,7 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
     ]
     if (nrow(arxiv_rows)) {
       parts[[length(parts) + 1L]] <- data.table::data.table(
-        ref_id = vapply(arxiv_rows$arxiv_id, .litxr_normalize_arxiv_ref_id, character(1)),
+        ref_id = vapply(arxiv_rows$arxiv_id, .litxr_bare_arxiv_id, character(1)),
         collection_id = as.character(collection_id),
         collection_index = as.integer(arxiv_rows$collection_index),
         json_filename = as.character(arxiv_rows$json_filename),
@@ -126,7 +126,7 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
     ]
     if (nrow(doi_rows)) {
       parts[[length(parts) + 1L]] <- data.table::data.table(
-        ref_id = vapply(doi_rows$doi, .litxr_normalize_doi_ref_id, character(1)),
+        ref_id = vapply(doi_rows$doi, .litxr_bare_doi, character(1)),
         collection_id = as.character(collection_id),
         collection_index = as.integer(doi_rows$collection_index),
         json_filename = as.character(doi_rows$json_filename),
@@ -509,6 +509,7 @@ litxr_migrate_embedding_metadata_files <- function(
     } else {
       metadata$abstract <- character()
     }
+    metadata$ref_id <- vapply(metadata$ref_id, .litxr_embedding_metadata_ref_id, character(1))
     metadata <- metadata[, c("ref_id", "abstract"), drop = FALSE]
     .litxr_write_fst_atomic(as.data.frame(metadata), path)
     rewritten <- c(rewritten, path)

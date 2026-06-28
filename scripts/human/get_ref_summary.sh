@@ -181,15 +181,15 @@ resolve_strict_reference_row <- function(cfg, ref_kind, ref_value) {
   }
 
   collection_id <- as.character(collections$collection_id[[collection_index]])
-  local_path <- litxr:::.litxr_resolve_local_path(cfg, collections$local_path[[collection_index]])
-  if (is.na(local_path) || !nzchar(local_path)) {
-    stop("Unable to resolve local path for collection_index ", collection_index, ".", call. = FALSE)
+  collection_ref_dir <- litxr:::.litxr_collection_ref_dir(cfg, collection_id)
+  if (is.na(collection_ref_dir) || !nzchar(collection_ref_dir)) {
+    stop("Unable to resolve ref directory for collection_index ", collection_index, ".", call. = FALSE)
   }
   json_filename <- trimws(as.character(hits$json_filename[[1L]]))
   if (!nzchar(json_filename)) {
     stop("Thin store row is missing `json_filename` for ", key_value, ".", call. = FALSE)
   }
-  json_path <- file.path(local_path, json_filename)
+  json_path <- file.path(collection_ref_dir, json_filename)
   if (!file.exists(json_path)) {
     stop(
       "Resolved JSON file not found for ",

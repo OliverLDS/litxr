@@ -245,6 +245,7 @@ litxr_search_embedding_delta <- function(
   if (!nrow(delta$metadata) || !nrow(delta$matrix)) {
     return(data.table::data.table())
   }
+  .litxr_assert_unit_normalized_matrix(delta$matrix, context = "embedding delta matrix")
   manifest_model <- delta$manifest$model %||% NA_character_
   if (!identical(as.character(model), as.character(manifest_model))) {
     stop("Query model does not match selected delta shard model: ", manifest_model, call. = FALSE)
@@ -342,6 +343,7 @@ litxr_search_embeddings <- function(
       if (!nrow(shard$metadata) || !nrow(shard$matrix)) {
         next
       }
+      .litxr_assert_unit_normalized_matrix(shard$matrix, context = paste0("embedding shard ", key))
       scores <- litxr_cosine_similarity(query_vector, shard$matrix)
       shard_candidates <- .litxr_top_n_scored_candidates(shard$metadata, scores, top_n)
       if (nrow(shard_candidates)) {
@@ -360,6 +362,7 @@ litxr_search_embeddings <- function(
     if (!nrow(index$metadata) || !nrow(index$matrix)) {
       return(data.table::data.table(score = numeric()))
     }
+    .litxr_assert_unit_normalized_matrix(index$matrix, context = "embedding main matrix")
     scores <- litxr_cosine_similarity(query_vector, index$matrix)
     .litxr_top_n_scored_candidates(index$metadata, scores, top_n)
   }
@@ -549,17 +552,24 @@ litxr_score_collection_categories <- function(
   }
   query_meta <- query_index$metadata
   query_matrix <- query_index$matrix
+  .litxr_assert_unit_normalized_matrix(query_matrix, context = "query embedding matrix")
   if (top_k == 0L && "top_k_mean" %in% aggregations) {
     aggregations <- setdiff(aggregations, "top_k_mean")
   }
 
-  target_ref_ids <- .litxr_select_score_ref_ids(
-    collection_id = collection_id,
-    cfg = cfg,
-    ref_ids = ref_ids,
-    date_from = date_from,
-    date_to = date_to
-  )
+  target_ref_ids <- if (!is.null(ref_ids)) {
+    ref_ids <- unique(vapply(as.character(ref_ids), .litxr_llm_digest_index_key, character(1)))
+    ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+    ref_ids
+  } else {
+    .litxr_select_score_ref_ids(
+      collection_id = collection_id,
+      cfg = cfg,
+      ref_ids = NULL,
+      date_from = date_from,
+      date_to = date_to
+    )
+  }
   if (!length(target_ref_ids)) {
     out <- data.table::data.table()
     if (isTRUE(include_query_scores)) {
@@ -665,28 +675,23 @@ litxr_label_collection_by_category <- function(
 }
 
 litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
-  query_vec <- as.numeric(query_vec)
-  if (!length(query_vec)) {
-    stop("Query vector must contain numeric values.", call. = FALSE)
+  if (!is.double(query_vec) || !length(query_vec)) {
+    stop("Query vector must already be a non-empty double vector.", call. = FALSE)
   }
-  if (!is.matrix(embedding_matrix)) {
-    embedding_matrix <- as.matrix(embedding_matrix)
+  if (!is.matrix(embedding_matrix) || !is.double(embedding_matrix)) {
+    stop("Embedding matrix must already be a double matrix.", call. = FALSE)
   }
-  storage.mode(embedding_matrix) <- "double"
   if (length(query_vec) != ncol(embedding_matrix)) {
     stop("Query vector and embedding matrix have different dimensions.", call. = FALSE)
   }
-  denom <- sqrt(rowSums(embedding_matrix^2)) * sqrt(sum(query_vec^2))
-  scores <- as.numeric(embedding_matrix %*% query_vec) / denom
-  scores[!is.finite(scores)] <- NA_real_
-  scores
+  .litxr_assert_unit_normalized_query_vector(query_vec, context = "query vector")
+  as.numeric(embedding_matrix %*% query_vec)
 }
 
 .litxr_resolve_query_vector <- function(query = NULL, embed_fun = NULL, query_vec = NULL) {
   if (!is.null(query_vec)) {
-    query_vec <- as.numeric(query_vec)
-    if (!length(query_vec)) {
-      stop("`query_vec` must contain numeric values.", call. = FALSE)
+    if (!is.double(query_vec) || !length(query_vec)) {
+      stop("`query_vec` must already be a non-empty double vector.", call. = FALSE)
     }
     return(query_vec)
   }
@@ -700,7 +705,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   if (nrow(query_vec) != 1L) {
     stop("`embed_fun` must return a single query embedding.", call. = FALSE)
   }
-  as.numeric(query_vec[1L, ])
+  query_vec[1L, ]
 }
 
 .litxr_normalize_label_query_set <- function(query_set) {
@@ -907,17 +912,22 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 }
 
 .litxr_select_score_ref_ids <- function(collection_id, cfg, ref_ids = NULL, date_from = NULL, date_to = NULL) {
-  records <- litxr_read_collection(collection_id, cfg)
-  if (!nrow(records)) {
+  out <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+  if (!nrow(out)) {
     return(character())
   }
-  out <- data.table::as.data.table(records)
   out <- out[!is.na(out$ref_id) & nzchar(out$ref_id), ]
   if (!nrow(out)) {
     return(character())
   }
+  out$ref_key <- vapply(out$ref_id, .litxr_llm_digest_index_key, character(1))
   if (!is.null(ref_ids)) {
-    out <- out[out$ref_id %in% as.character(ref_ids), ]
+    ref_keys <- vapply(as.character(ref_ids), .litxr_llm_digest_index_key, character(1))
+    ref_keys <- ref_keys[!is.na(ref_keys) & nzchar(ref_keys)]
+    if (!length(ref_keys)) {
+      return(character())
+    }
+    out <- out[out$ref_key %in% ref_keys, ]
   }
   date_from <- .litxr_parse_optional_date(date_from, "`date_from`")
   date_to <- .litxr_parse_optional_date(date_to, "`date_to`")
@@ -925,6 +935,14 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     stop("`date_to` must be on or after `date_from`.", call. = FALSE)
   }
   if (!is.null(date_from) || !is.null(date_to)) {
+    out <- .litxr_hydrate_rows_from_json_paths(
+      out[, c("ref_id", "json_path"), with = FALSE],
+      out[, c("ref_id", "json_path"), with = FALSE],
+      fields = "pub_date"
+    )
+    if (!nrow(out) || !("pub_date" %in% names(out))) {
+      return(character())
+    }
     pub_dates <- as.Date(out$pub_date)
     keep <- !is.na(pub_dates)
     if (!is.null(date_from)) keep <- keep & pub_dates >= date_from
@@ -980,26 +998,35 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   if (length(scores) != nrow(metadata)) {
     stop("Internal score count mismatch in embedding candidate ranking.", call. = FALSE)
   }
-  metadata <- data.table::copy(metadata)
-  data.table::set(metadata, j = "score", value = as.numeric(scores))
-  metadata <- metadata[!is.na(metadata[["score"]]), , drop = FALSE]
-  if (!nrow(metadata) || top_n == 0L) {
+  scores <- as.numeric(scores)
+  keep <- which(!is.na(scores))
+  if (!length(keep) || top_n == 0L) {
     return(metadata[0, ])
   }
-
   if ("ref_id" %in% names(metadata)) {
-    data.table::setorderv(metadata, c("score", "ref_id"), c(-1L, 1L))
-    metadata <- metadata[!duplicated(metadata[["ref_id"]]), , drop = FALSE]
+    rank_dt <- data.table::data.table(
+      row_idx = keep,
+      ref_id = as.character(metadata$ref_id[keep]),
+      score = scores[keep]
+    )
+    data.table::setorderv(rank_dt, c("score", "ref_id"), c(-1L, 1L))
+    rank_dt <- rank_dt[!duplicated(rank_dt$ref_id), , drop = FALSE]
   } else {
-    data.table::setorderv(metadata, "score", order = -1L)
+    rank_dt <- data.table::data.table(
+      row_idx = keep,
+      score = scores[keep]
+    )
+    data.table::setorderv(rank_dt, "score", -1L)
   }
-  if (nrow(metadata) > top_n) {
-    metadata <- metadata[seq_len(top_n), , drop = FALSE]
+  if (nrow(rank_dt) > top_n) {
+    rank_dt <- rank_dt[seq_len(top_n), , drop = FALSE]
   }
-  metadata
+  out <- data.table::copy(metadata[rank_dt$row_idx, , drop = FALSE])
+  out[["score"]] <- rank_dt$score
+  out
 }
 
-.litxr_score_corpus_chunk <- function(corpus_meta, corpus_matrix, query_meta, query_matrix, aggregations, top_k, include_query_scores) {
+.litxr_score_corpus_chunk <- function(corpus_meta, corpus_matrix, query_meta, query_matrix, aggregations, top_k, include_query_scores = FALSE) {
   if (!nrow(corpus_meta) || !nrow(corpus_matrix)) {
     return(list(category_scores = data.table::data.table(), query_scores = data.table::data.table()))
   }
@@ -1026,11 +1053,13 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   if (!nrow(corpus_meta) || !nrow(score_matrix) || !nrow(query_meta)) {
     return(data.table::data.table())
   }
-  categories <- unique(as.character(query_meta$category_id))
-  rows <- vector("list", length(categories))
-  for (i in seq_along(categories)) {
-    category_id <- categories[[i]]
-    idx <- which(as.character(query_meta$category_id) == category_id)
+  query_categories <- as.character(query_meta$category_id)
+  category_indices <- split(seq_along(query_categories), query_categories)
+  category_ids <- names(category_indices)
+  rows <- vector("list", length(category_indices))
+  for (i in seq_along(category_indices)) {
+    category_id <- category_ids[[i]]
+    idx <- category_indices[[i]]
     category_scores <- score_matrix[, idx, drop = FALSE]
     values <- list(
       ref_id = as.character(corpus_meta$ref_id),
@@ -1039,38 +1068,40 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     )
     if ("title" %in% names(corpus_meta)) values[["title"]] <- as.character(corpus_meta$title)
     if ("year" %in% names(corpus_meta)) values[["year"]] <- as.integer(corpus_meta$year)
-    if ("max" %in% aggregations) values[["score_max"]] <- apply(category_scores, 1L, max)
-    if ("mean" %in% aggregations) values[["score_mean"]] <- rowMeans(category_scores)
+    if ("max" %in% aggregations) values[["score_max"]] <- matrixStats::rowMaxs(category_scores, useNames = FALSE)
+    if ("mean" %in% aggregations) values[["score_mean"]] <- matrixStats::rowMeans2(category_scores, useNames = FALSE)
     if ("top_k_mean" %in% aggregations) {
-      values[["score_top_k_mean"]] <- apply(category_scores, 1L, .litxr_top_k_mean_value, top_k = top_k)
+      values[["score_top_k_mean"]] <- .litxr_top_k_mean_rows(category_scores, top_k)
     }
     rows[[i]] <- data.table::as.data.table(values)
   }
   data.table::rbindlist(rows, fill = TRUE)
 }
 
-.litxr_top_k_mean_value <- function(x, top_k) {
-  x <- as.numeric(x)
-  x <- x[!is.na(x)]
-  if (!length(x)) {
-    return(NA_real_)
+.litxr_top_k_mean_rows <- function(x, top_k) {
+  if (!nrow(x) || !ncol(x)) {
+    return(numeric(nrow(x)))
   }
   top_k <- as.integer(top_k)
   if (is.na(top_k) || top_k <= 0L) {
-    return(NA_real_)
+    return(rep(NA_real_, nrow(x)))
   }
-  top_k <- min(top_k, length(x))
-  if (top_k == length(x)) {
-    return(mean(x))
+  top_k <- min(top_k, ncol(x))
+  if (top_k == 1L) {
+    return(matrixStats::rowOrderStats(x, which = ncol(x), useNames = FALSE))
   }
-  top_vals <- -sort.int(-x, partial = top_k)[seq_len(top_k)]
-  mean(top_vals)
+  top_vals <- matrix(NA_real_, nrow = nrow(x), ncol = top_k)
+  for (k in seq_len(top_k)) {
+    top_vals[, k] <- matrixStats::rowOrderStats(-x, which = k, useNames = FALSE)
+  }
+  -matrixStats::rowMeans2(top_vals, useNames = FALSE)
 }
 
 .litxr_collect_embedding_score_parts <- function(collection_id, cfg, field, model, target_ref_ids, query_meta, query_matrix, aggregations, top_k, chunk_size, include_query_scores) {
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
-  target_ref_ids <- unique(as.character(target_ref_ids))
-  if (!length(target_ref_ids)) {
+  target_ref_keys <- unique(vapply(as.character(target_ref_ids), .litxr_llm_digest_index_key, character(1)))
+  target_ref_keys <- target_ref_keys[!is.na(target_ref_keys) & nzchar(target_ref_keys)]
+  if (!length(target_ref_keys)) {
     out <- data.table::data.table()
     return(list(category_scores = out, query_scores = out))
   }
@@ -1088,16 +1119,17 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   }
 
   if (.litxr_embedding_has_shards(paths)) {
-    shard_keys <- unique(.litxr_embedding_shard_key(target_ref_ids))
+    shard_keys <- .litxr_score_target_shard_keys(target_ref_keys, .litxr_embedding_shard_keys(paths))
     shard_keys <- shard_keys[nzchar(shard_keys)]
-    shard_keys <- intersect(shard_keys, .litxr_embedding_shard_keys(paths))
     for (key in shard_keys) {
       shard <- .litxr_read_embedding_shard_part(paths, key, read_matrix = TRUE)
       if (!nrow(shard$metadata) || !nrow(shard$matrix)) next
-      keep <- shard$metadata$ref_id %in% target_ref_ids
+      shard_keys <- vapply(as.character(shard$metadata$ref_id), .litxr_llm_digest_index_key, character(1))
+      keep <- shard_keys %in% target_ref_keys
       if (!any(keep)) next
       shard_meta <- shard$metadata[keep, ]
       shard_matrix <- shard$matrix[keep, , drop = FALSE]
+      .litxr_assert_unit_normalized_matrix(shard_matrix, context = paste0("embedding score shard ", key))
       for (start in seq(1L, nrow(shard_meta), by = chunk_size)) {
         end <- min(start + chunk_size - 1L, nrow(shard_meta))
         append_part(.litxr_score_corpus_chunk(
@@ -1114,9 +1146,11 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   } else {
     corpus <- litxr_read_embedding_index(collection_id, cfg, field = field, model = model)
     if (nrow(corpus$metadata) && nrow(corpus$matrix)) {
-      keep <- corpus$metadata$ref_id %in% target_ref_ids
+      corpus_keys <- vapply(as.character(corpus$metadata$ref_id), .litxr_llm_digest_index_key, character(1))
+      keep <- corpus_keys %in% target_ref_keys
       corpus_meta <- corpus$metadata[keep, ]
       corpus_matrix <- corpus$matrix[keep, , drop = FALSE]
+      .litxr_assert_unit_normalized_matrix(corpus_matrix, context = "embedding score corpus")
       for (start in seq(1L, nrow(corpus_meta), by = chunk_size)) {
         end <- min(start + chunk_size - 1L, nrow(corpus_meta))
         append_part(.litxr_score_corpus_chunk(
@@ -1138,6 +1172,31 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   )
 }
 
+.litxr_score_target_shard_keys <- function(ref_ids, available_shard_keys) {
+  available_shard_keys <- unique(as.character(available_shard_keys))
+  available_shard_keys <- available_shard_keys[!is.na(available_shard_keys) & nzchar(available_shard_keys)]
+  if (!length(available_shard_keys)) {
+    return(character())
+  }
+
+  ref_ids <- unique(as.character(ref_ids))
+  ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+  if (!length(ref_ids)) {
+    return(character())
+  }
+
+  arxiv_like <- grepl("^[0-9]{4}\\.[0-9]{4,5}$", ref_ids)
+  if (all(arxiv_like)) {
+    yy <- substr(ref_ids, 1L, 2L)
+    yy_int <- suppressWarnings(as.integer(yy))
+    shard_keys <- ifelse(is.na(yy_int), NA_character_, paste0(ifelse(yy_int >= 90L, "19", "20"), yy))
+    shard_keys <- unique(shard_keys[!is.na(shard_keys) & nzchar(shard_keys)])
+    return(intersect(shard_keys, available_shard_keys))
+  }
+
+  available_shard_keys
+}
+
 .litxr_label_query_existing_dimension <- function(parts) {
   if (!is.null(parts$matrix) && nrow(parts$matrix)) {
     return(ncol(parts$matrix))
@@ -1150,21 +1209,56 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 }
 
 .litxr_cosine_similarity_matrix <- function(embedding_matrix, query_matrix) {
-  embedding_matrix <- as.matrix(embedding_matrix)
-  query_matrix <- as.matrix(query_matrix)
-  storage.mode(embedding_matrix) <- "double"
-  storage.mode(query_matrix) <- "double"
+  if (!is.matrix(embedding_matrix) || !is.matrix(query_matrix)) {
+    stop("Embedding matrix and query matrix must already be matrices.", call. = FALSE)
+  }
+  if (!is.double(embedding_matrix) || !is.double(query_matrix)) {
+    stop("Embedding matrix and query matrix must already be double matrices.", call. = FALSE)
+  }
   if (ncol(embedding_matrix) != ncol(query_matrix)) {
     stop("Embedding matrix and query matrix have different dimensions.", call. = FALSE)
   }
+  tcrossprod(embedding_matrix, query_matrix)
+}
 
-  embedding_norm <- sqrt(rowSums(embedding_matrix^2))
-  query_norm <- sqrt(rowSums(query_matrix^2))
-  scores <- embedding_matrix %*% t(query_matrix)
-  scores <- sweep(scores, 1L, embedding_norm, "/")
-  scores <- sweep(scores, 2L, query_norm, "/")
-  scores[is.na(scores) | is.infinite(scores)] <- 0
-  scores
+.litxr_assert_unit_normalized_matrix <- function(x, context, tolerance = 1e-3, max_rows = 32L) {
+  if (!is.matrix(x) || !is.double(x)) {
+    stop("`", context, "` must already be a double matrix.", call. = FALSE)
+  }
+  n <- nrow(x)
+  if (!n) {
+    return(invisible(TRUE))
+  }
+  max_rows <- as.integer(max_rows)
+  if (is.na(max_rows) || max_rows <= 0L) {
+    max_rows <- 32L
+  }
+  idx <- seq_len(min(n, max_rows))
+  if (n > max_rows) {
+    idx <- unique(c(idx, seq.int(max(1L, n - max_rows + 1L), n)))
+  }
+  sample <- x[idx, , drop = FALSE]
+  norms <- sqrt(matrixStats::rowSums2(sample * sample, useNames = FALSE))
+  bad <- which(abs(norms - 1) > tolerance)
+  if (length(bad)) {
+    stop(
+      "Embedding matrix in ", context, " is not unit-normalized. ",
+      "Row sample indices: ", paste(idx[bad], collapse = ", "),
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+.litxr_assert_unit_normalized_query_vector <- function(x, context, tolerance = 1e-3) {
+  if (!is.double(x) || !length(x)) {
+    stop("`", context, "` must already be a non-empty double vector.", call. = FALSE)
+  }
+  norm <- sqrt(sum(x * x))
+  if (!is.finite(norm) || abs(norm - 1) > tolerance) {
+    stop("Query vector in ", context, " is not unit-normalized.", call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
 .litxr_query_score_table <- function(corpus_meta, query_meta, score_matrix) {
@@ -1192,31 +1286,6 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     names(out)
   )
   out[, keep_cols, with = FALSE]
-}
-
-.litxr_aggregate_category_scores <- function(query_score_dt, aggregations = c("max", "mean"), top_k = 3L) {
-  dt <- data.table::copy(query_score_dt)
-  if (!nrow(dt)) {
-    return(data.table::data.table())
-  }
-
-  split_key <- paste(dt$ref_id, dt$category_id, sep = "\r")
-  groups <- split(seq_len(nrow(dt)), split_key)
-  rows <- lapply(groups, function(idx) {
-    chunk <- dt[idx, , drop = FALSE]
-    values <- list(
-      ref_id = chunk$ref_id[[1]],
-      category_id = chunk$category_id[[1]],
-      query_n = nrow(chunk)
-    )
-    if ("title" %in% names(chunk)) values[["title"]] <- chunk$title[[1]]
-    if ("year" %in% names(chunk)) values[["year"]] <- chunk$year[[1]]
-    if ("max" %in% aggregations) values[["score_max"]] <- max(chunk$score)
-    if ("mean" %in% aggregations) values[["score_mean"]] <- mean(chunk$score)
-    if ("top_k_mean" %in% aggregations) values[["score_top_k_mean"]] <- .litxr_top_k_mean_value(chunk$score, top_k)
-    data.table::as.data.table(values)
-  })
-  data.table::rbindlist(rows, fill = TRUE)
 }
 
 .litxr_threshold_by_category <- function(category_id, threshold) {
