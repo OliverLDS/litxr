@@ -1,3 +1,11 @@
+# litxr 0.1.8
+
+- Added scaffolded lexical search modules for shard discovery, keyword/category
+  labeling, and BM25 indexing/search.
+- Added focused lexical regression tests for normalization, category label
+  matching, and BM25 ranking.
+- Aligned package metadata with the lexical module dependencies.
+
 # litxr 0.1.7.9
 
 - Reused a single preloaded BibTeX scaffold cache across each export batch so
