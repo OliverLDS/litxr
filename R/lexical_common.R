@@ -164,11 +164,8 @@ litxr_lexical_normalize_text <- function(
   x <- as.character(x)
   x[is.na(x)] <- ""
   x <- enc2utf8(x)
-  if (isTRUE(normalize_unicode)) {
-    x <- stringi::stri_trans_nfkc(x)
-  }
   if (isTRUE(lowercase)) {
-    x <- stringi::stri_trans_tolower(x)
+    x <- tolower(x)
   }
   if (isTRUE(collapse_hyphen)) {
     x <- gsub("[-/_]+", " ", x, perl = TRUE)

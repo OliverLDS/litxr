@@ -141,7 +141,7 @@ litxr_lexical_label_categories <- function(
     rows <- list()
     row_n <- 0L
     for (k in seq_len(nrow(compiled))) {
-      matched <- stringi::stri_detect_regex(shard$text, compiled$pattern[[k]])
+      matched <- grepl(compiled$pattern[[k]], shard$text, perl = TRUE)
       if (!any(matched)) {
         next
       }

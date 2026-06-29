@@ -3,11 +3,12 @@ test_that("litxr_lexical_keyword_pattern uses whole-term boundaries", {
   pattern_rag <- litxr::litxr_lexical_keyword_pattern("rag")
   pattern_phrase <- litxr::litxr_lexical_keyword_pattern("retrieval augmented generation")
 
-  expect_false(stringi::stri_detect_regex("chair", pattern_ai))
-  expect_true(stringi::stri_detect_regex("rag", pattern_rag))
-  expect_true(stringi::stri_detect_regex(
+  expect_false(grepl(pattern_ai, "chair", perl = TRUE))
+  expect_true(grepl(pattern_rag, "rag", perl = TRUE))
+  expect_true(grepl(
+    pattern_phrase,
     litxr::litxr_lexical_normalize_text("retrieval augmented generation"),
-    pattern_phrase
+    perl = TRUE
   ))
 })
 

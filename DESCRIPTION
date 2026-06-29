@@ -26,7 +26,6 @@ Imports:
     httr2,
     jsonlite,
     matrixStats,
-    stringi,
     xml2,
     yaml
 Suggests:
