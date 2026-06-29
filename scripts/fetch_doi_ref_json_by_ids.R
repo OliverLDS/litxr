@@ -22,12 +22,17 @@ parse_ids <- function(x) {
 }
 
 parse_args <- function(args) {
-  out <- list(help = FALSE, dois = character())
+  out <- list(help = FALSE, force = FALSE, dois = character())
   i <- 1L
   while (i <= length(args)) {
     arg <- args[[i]]
     if (identical(arg, "-h") || identical(arg, "--help")) {
       out$help <- TRUE
+      i <- i + 1L
+      next
+    }
+    if (identical(arg, "--force")) {
+      out$force <- TRUE
       i <- i + 1L
       next
     }
@@ -53,11 +58,12 @@ usage <- function() {
       "  --dois IDS    Alias for --doi.",
       "  --doi-id IDS  Alias for --doi.",
       "  --doi-ids IDS Alias for --doi.",
+      "  --force       Re-fetch and rewrite JSON even if the DOI already exists in ref_doi.fst.",
       "  -h, --help    Show this help message.",
       "",
       "Behavior:",
       "  - Fetches each DOI from Crossref.",
-      "  - Skips DOIs already present in ref_doi.fst.",
+      "  - Skips DOIs already present in ref_doi.fst unless --force is supplied.",
       "  - Auto-registers Crossref collections as needed.",
       "  - Writes JSON files directly under the collection's ref directory.",
       "  - Progress logs go to stderr; compact JSON goes to stdout.",
@@ -89,8 +95,13 @@ existing_doi_store <- litxr:::.litxr_read_scaffold_table_safe(litxr:::.litxr_ref
 existing_dois <- if (nrow(existing_doi_store) && "doi" %in% names(existing_doi_store)) unique(trimws(as.character(existing_doi_store$doi))) else character()
 existing_dois <- existing_dois[nzchar(existing_dois)]
 
-fetch_dois <- setdiff(requested_dois, existing_dois)
-skipped_existing <- setdiff(requested_dois, fetch_dois)
+if (isTRUE(parsed$force)) {
+  fetch_dois <- requested_dois
+  skipped_existing <- character()
+} else {
+  fetch_dois <- setdiff(requested_dois, existing_dois)
+  skipped_existing <- setdiff(requested_dois, fetch_dois)
+}
 
 log_line("syncing DOI ref JSON by id")
 log_line("requested=", length(requested_dois))
@@ -103,6 +114,7 @@ if (!length(fetch_dois)) {
     requested = requested_dois,
     fetched = 0L,
     written = 0L,
+    force = isTRUE(parsed$force),
     skipped_existing = skipped_existing,
     created_collection_ids = character(),
     collection_ids = character()
@@ -125,6 +137,7 @@ emit_json(list(
   requested = requested_dois,
   fetched = if (data.table::is.data.table(records)) nrow(records) else length(records),
   written = if (data.table::is.data.table(records)) nrow(records) else length(records),
+  force = isTRUE(parsed$force),
   skipped_existing = skipped_existing,
   created_collection_ids = created_collection_ids,
   collection_ids = collection_ids

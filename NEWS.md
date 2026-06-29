@@ -1,3 +1,12 @@
+# litxr 0.1.8.1
+
+- Fixed the linked-DOI BibTeX replacement path so arXiv-keyed entries keep
+  their original BibTeX keys while being rewritten with DOI-backed fields.
+- Narrowed BibTeX link and scaffold resolution to the ids present in the
+  current `.bib` batch instead of preloading broad identity/scaffold tables.
+- Hardened DOI fallback ingestion and added focused DOI fallback regression
+  coverage.
+
 # litxr 0.1.8
 
 - Added scaffolded lexical search modules for shard discovery, keyword/category

@@ -12,6 +12,15 @@ parse_crossref_entry_unified <- function(cr_message) {
     if (is.na(x1) || identical(x1, "")) NA_character_ else as.character(x1)
   }
 
+  getf_list_name <- function(x) {
+    if (is.null(x) || !length(x)) return(NA_character_)
+    if (!is.list(x)) return(NA_character_)
+    x <- x[["name"]]
+    if (is.null(x) || !length(x)) return(NA_character_)
+    x <- as.character(x[[1L]])
+    if (is.na(x) || !nzchar(trimws(x))) NA_character_ else x
+  }
+
   # --- Title ---
   title <- getf_chr(cr_message$title)
 
@@ -26,9 +35,10 @@ parse_crossref_entry_unified <- function(cr_message) {
           function(i) {
             given  <- getf_chr(adf$given[i])
             family <- getf_chr(adf$family[i])
+            name   <- if ("name" %in% names(adf)) getf_chr(adf$name[i]) else NA_character_
             parts  <- c(given, family)
             parts  <- parts[!is.na(parts) & nzchar(parts)]
-            if (!length(parts)) "" else paste(parts, collapse = " ")
+            if (length(parts)) paste(parts, collapse = " ") else if (!is.na(name)) name else ""
           },
           FUN.VALUE = character(1)
         )
@@ -39,9 +49,10 @@ parse_crossref_entry_unified <- function(cr_message) {
         function(author) {
           given  <- getf_chr(author$given)
           family <- getf_chr(author$family)
+          name   <- getf_list_name(author)
           parts  <- c(given, family)
           parts  <- parts[!is.na(parts) & nzchar(parts)]
-          if (!length(parts)) "" else paste(parts, collapse = " ")
+          if (length(parts)) paste(parts, collapse = " ") else if (!is.na(name)) name else ""
         },
         FUN.VALUE = character(1)
       )
@@ -90,6 +101,10 @@ parse_crossref_entry_unified <- function(cr_message) {
 
   # --- DOI + URLs ---
   doi <- getf_chr(cr_message$DOI)
+  source <- getf_chr(cr_message$source)
+  if (is.na(source)) {
+    source <- "crossref"
+  }
   isbn <- if (!is.null(cr_message$ISBN) && length(cr_message$ISBN) > 0) {
     paste(unique(as.character(unlist(cr_message$ISBN, use.names = FALSE))), collapse = "; ")
   } else {
@@ -150,7 +165,7 @@ parse_crossref_entry_unified <- function(cr_message) {
 
   data.table::data.table(
     ref_id      = paste0("doi:", doi),
-    source      = "crossref",
+    source      = source,
     source_id   = doi,
     entry_type  = "article",
     title       = title,

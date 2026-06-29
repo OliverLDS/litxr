@@ -26,27 +26,22 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
 
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  link_maps <- if (isTRUE(prefer_linked_arxiv)) .litxr_bibtex_link_maps(cfg) else NULL
+  link_maps <- NULL
 
   parsed <- .litxr_bibtex_parse_entries(path)
   if (!length(parsed$entries)) {
     return(character())
   }
 
-  ref_ids <- character()
-  for (i in seq_along(parsed$entries)) {
-    ref_id <- .litxr_bibtex_entry_ref_id(
-      parsed$entries[[i]],
-      parsed$keys[[i]],
-      link_maps = link_maps,
-      prefer_linked_arxiv = prefer_linked_arxiv
-    )
-    if (!is.na(ref_id) && nzchar(ref_id)) {
-      ref_ids <- c(ref_ids, ref_id)
-    }
+  raw_ref_ids <- .litxr_bibtex_entry_ref_ids(parsed, link_maps = NULL, prefer_linked_arxiv = FALSE)
+  if (isTRUE(prefer_linked_arxiv)) {
+    candidates <- .litxr_bibtex_candidate_sets(raw_ref_ids)
+    link_maps <- .litxr_bibtex_link_maps(cfg, arxiv_ids = candidates$arxiv_ids, doi_ids = candidates$doi_ids)
   }
+  ref_ids <- .litxr_bibtex_entry_ref_ids(parsed, link_maps = link_maps, prefer_linked_arxiv = prefer_linked_arxiv)
 
-  ref_ids
+  keep <- !is.na(ref_ids) & nzchar(ref_ids)
+  ref_ids[keep]
 }
 
 .bibtex_escape <- function(x) {
@@ -92,11 +87,13 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
 .litxr_bibtex_parse_entries <- function(path) {
   lines <- readLines(path, warn = FALSE)
   if (!length(lines)) {
-    return(list(entries = character(), keys = character()))
+    return(list(entries = character(), keys = character(), types = character()))
   }
 
-  entries <- character()
-  keys <- character()
+  entries <- vector("list", length(lines))
+  keys <- vector("list", length(lines))
+  types <- vector("list", length(lines))
+  n_entries <- 0L
   i <- 1L
   while (i <= length(lines)) {
     line <- lines[[i]]
@@ -109,15 +106,21 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     if (!nzchar(key) || identical(key, line)) {
       stop("Unable to parse BibTeX entry key from line: ", line, call. = FALSE)
     }
+    entry_type <- sub("^\\s*@([[:alnum:]]+)\\s*\\{.*$", "\\1", line, perl = TRUE)
 
-    chunk <- character()
+    chunk <- vector("list", max(8L, min(64L, length(lines) - i + 1L)))
+    chunk_n <- 0L
     depth <- 0L
     repeat {
       if (i > length(lines)) {
         stop("Unterminated BibTeX entry for key: ", key, call. = FALSE)
       }
       current <- lines[[i]]
-      chunk <- c(chunk, current)
+      chunk_n <- chunk_n + 1L
+      if (chunk_n > length(chunk)) {
+        length(chunk) <- length(chunk) * 2L
+      }
+      chunk[[chunk_n]] <- current
       opens <- lengths(regmatches(current, gregexpr("\\{", current, perl = TRUE)))
       closes <- lengths(regmatches(current, gregexpr("\\}", current, perl = TRUE)))
       opens[opens < 0L] <- 0L
@@ -129,11 +132,50 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
       }
     }
 
-    entries <- c(entries, paste(chunk, collapse = "\n"))
-    keys <- c(keys, key)
+    n_entries <- n_entries + 1L
+    entries[[n_entries]] <- paste(unlist(chunk[seq_len(chunk_n)], use.names = FALSE), collapse = "\n")
+    keys[[n_entries]] <- key
+    types[[n_entries]] <- tolower(entry_type)
   }
 
-  list(entries = entries, keys = keys)
+  list(
+    entries = unlist(entries[seq_len(n_entries)], use.names = FALSE),
+    keys = unlist(keys[seq_len(n_entries)], use.names = FALSE),
+    types = unlist(types[seq_len(n_entries)], use.names = FALSE)
+  )
+}
+
+.litxr_bibtex_entry_ref_ids <- function(parsed, link_maps = NULL, prefer_linked_arxiv = TRUE) {
+  n_entries <- length(parsed$entries)
+  if (!n_entries) {
+    return(character())
+  }
+  ref_ids <- rep(NA_character_, n_entries)
+  for (i in seq_len(n_entries)) {
+    ref_ids[[i]] <- .litxr_bibtex_entry_ref_id(
+      parsed$entries[[i]],
+      parsed$keys[[i]],
+      link_maps = link_maps,
+      prefer_linked_arxiv = prefer_linked_arxiv
+    )
+  }
+  ref_ids
+}
+
+.litxr_bibtex_candidate_sets <- function(ref_ids) {
+  ref_ids <- as.character(ref_ids)
+  ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(trimws(ref_ids))]
+  if (!length(ref_ids)) {
+    return(list(arxiv_ids = character(), doi_ids = character(), isbn_ids = character()))
+  }
+  routes <- lapply(ref_ids, .litxr_route_ref_id)
+  key_types <- vapply(routes, function(x) as.character(x$key_type), character(1))
+  key_values <- vapply(routes, function(x) as.character(x$key_value), character(1))
+  list(
+    arxiv_ids = unique(vapply(key_values[key_types == "arxiv_id" & !is.na(key_values) & nzchar(key_values)], .litxr_bare_arxiv_id, character(1))),
+    doi_ids = unique(vapply(key_values[key_types == "doi" & !is.na(key_values) & nzchar(key_values)], .litxr_bare_doi, character(1))),
+    isbn_ids = unique(sub("^isbn:", "", vapply(key_values[key_types == "isbn" & !is.na(key_values) & nzchar(key_values)], .litxr_normalize_isbn_ref_id, character(1)), ignore.case = TRUE))
+  )
 }
 
 .litxr_bibtex_entry_field <- function(entry, field) {
@@ -266,25 +308,43 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   NA_character_
 }
 
-.litxr_bibtex_link_maps <- function(cfg) {
-  identity_map <- tryCatch(data.table::as.data.table(litxr_read_ref_identity_map(cfg)), error = function(e) data.table::data.table())
+.litxr_bibtex_link_maps <- function(cfg, arxiv_ids = character(), doi_ids = character()) {
+  arxiv_ids <- unique(vapply(as.character(arxiv_ids), .litxr_bare_arxiv_id, character(1)))
+  arxiv_ids <- arxiv_ids[!is.na(arxiv_ids) & nzchar(arxiv_ids)]
+  doi_ids <- unique(vapply(as.character(doi_ids), .litxr_bare_doi, character(1)))
+  doi_ids <- doi_ids[!is.na(doi_ids) & nzchar(doi_ids)]
+  if (!length(arxiv_ids) && !length(doi_ids)) {
+    return(list(doi_to_arxiv = character(), arxiv_to_doi = character()))
+  }
+  identity_map <- tryCatch(fst::read_fst(.litxr_project_ref_identity_index_path(cfg), columns = c("arxiv_id", "doi"), as.data.table = TRUE), error = function(e) data.table::data.table())
   if (!nrow(identity_map) || !all(c("arxiv_id", "doi") %in% names(identity_map))) {
     return(list(doi_to_arxiv = character(), arxiv_to_doi = character()))
   }
-
-  doi_ref_id <- vapply(identity_map$doi, .litxr_bare_doi, character(1))
-  arxiv_ref_id <- vapply(identity_map$arxiv_id, .litxr_normalize_arxiv_ref_id, character(1))
-  keep <- !is.na(doi_ref_id) & nzchar(doi_ref_id) & !is.na(arxiv_ref_id) & nzchar(arxiv_ref_id)
+  identity_map$arxiv_id <- as.character(identity_map$arxiv_id)
+  identity_map$doi <- tolower(as.character(identity_map$doi))
+  keep <- !is.na(identity_map$doi) & nzchar(identity_map$doi) & !is.na(identity_map$arxiv_id) & nzchar(identity_map$arxiv_id)
   if (!any(keep)) {
     return(list(doi_to_arxiv = character(), arxiv_to_doi = character()))
   }
+  identity_map <- identity_map[keep, , drop = FALSE]
+  keep <- rep(FALSE, nrow(identity_map))
+  if (length(arxiv_ids)) {
+    keep <- keep | identity_map$arxiv_id %in% arxiv_ids
+  }
+  if (length(doi_ids)) {
+    keep <- keep | identity_map$doi %in% doi_ids
+  }
+  identity_map <- identity_map[keep, , drop = FALSE]
+  if (!nrow(identity_map)) {
+    return(list(doi_to_arxiv = character(), arxiv_to_doi = character()))
+  }
 
-  doi_to_arxiv <- arxiv_ref_id[keep]
-  names(doi_to_arxiv) <- doi_ref_id[keep]
+  doi_to_arxiv <- identity_map$arxiv_id
+  names(doi_to_arxiv) <- identity_map$doi
   doi_to_arxiv <- doi_to_arxiv[!duplicated(names(doi_to_arxiv))]
 
-  arxiv_to_doi <- doi_ref_id[keep]
-  names(arxiv_to_doi) <- arxiv_ref_id[keep]
+  arxiv_to_doi <- identity_map$doi
+  names(arxiv_to_doi) <- identity_map$arxiv_id
   arxiv_to_doi <- arxiv_to_doi[!duplicated(names(arxiv_to_doi))]
 
   list(doi_to_arxiv = doi_to_arxiv, arxiv_to_doi = arxiv_to_doi)
@@ -302,7 +362,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (!length(hit) || is.na(hit[[1L]]) || !nzchar(hit[[1L]])) {
     return(NA_character_)
   }
-  arxiv_id <- as.character(hit[[1L]])
+  arxiv_id <- paste0("arxiv:", as.character(hit[[1L]]))
   if (is.na(arxiv_id) || !nzchar(arxiv_id)) {
     return(NA_character_)
   }
@@ -418,6 +478,32 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   payload
 }
 
+.litxr_bibtex_payload_fields <- function() {
+  c(
+    "ref_id",
+    "source",
+    "source_id",
+    "entry_type",
+    "title",
+    "authors",
+    "authors_list",
+    "year",
+    "journal",
+    "container_title",
+    "publisher",
+    "volume",
+    "issue",
+    "pages",
+    "doi",
+    "isbn",
+    "issn",
+    "url",
+    "url_landing",
+    "url_pdf",
+    "note"
+  )
+}
+
 .litxr_bibtex_json_path_from_scaffold_row <- function(cfg, row) {
   row <- data.table::as.data.table(row)
   if (!nrow(row) || !("collection_index" %in% names(row)) || !("json_filename" %in% names(row))) {
@@ -442,14 +528,44 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   file.path(.litxr_collection_ref_dir(cfg, collection_id), json_filename)
 }
 
-.litxr_bibtex_scaffold_table_cached <- function(cfg, path) {
-  table <- .litxr_read_scaffold_table_safe(path)
+.litxr_bibtex_scaffold_table_cached <- function(cfg, path, key_col, keys = character()) {
+  keys <- unique(as.character(keys))
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+  if (!length(keys)) {
+    return(data.table::data.table())
+  }
+  if (identical(key_col, "arxiv_id")) {
+    keys <- unique(vapply(keys, .litxr_bare_arxiv_id, character(1)))
+  } else if (identical(key_col, "doi")) {
+    keys <- unique(vapply(keys, .litxr_bare_doi, character(1)))
+  } else if (identical(key_col, "isbn")) {
+    keys <- sub("^isbn:", "", vapply(keys, .litxr_normalize_isbn_ref_id, character(1)), ignore.case = TRUE)
+    keys <- unique(as.character(keys))
+  }
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+  if (!length(keys)) {
+    return(data.table::data.table())
+  }
+  columns <- unique(c(key_col, "collection_index", "json_filename"))
+  table <- tryCatch(fst::read_fst(path, columns = columns, as.data.table = TRUE), error = function(e) data.table::data.table())
   if (!nrow(table)) {
     return(table)
   }
-  if (!("collection_index" %in% names(table)) || !("json_filename" %in% names(table))) {
-    table$json_path <- NA_character_
-    return(table)
+  if (!(key_col %in% names(table)) || !("collection_index" %in% names(table)) || !("json_filename" %in% names(table))) {
+    return(data.table::data.table())
+  }
+  if (identical(key_col, "arxiv_id")) {
+    table$arxiv_id <- as.character(table$arxiv_id)
+    table <- table[!is.na(table$arxiv_id) & nzchar(table$arxiv_id) & table$arxiv_id %in% keys, , drop = FALSE]
+  } else if (identical(key_col, "doi")) {
+    table$doi <- tolower(as.character(table$doi))
+    table <- table[!is.na(table$doi) & nzchar(table$doi) & table$doi %in% keys, , drop = FALSE]
+  } else if (identical(key_col, "isbn")) {
+    table$isbn <- as.character(table$isbn)
+    table <- table[!is.na(table$isbn) & nzchar(table$isbn) & table$isbn %in% keys, , drop = FALSE]
+  }
+  if (!nrow(table)) {
+    return(data.table::data.table())
   }
 
   collections <- .litxr_config_collections(cfg)
@@ -472,25 +588,20 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     )
   }
   table$json_path <- json_path
+  if (nrow(table)) data.table::setkeyv(table, key_col)
   table
 }
 
-.litxr_bibtex_scaffold_cache <- function(cfg) {
-  arxiv <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_arxiv_path(cfg))
-  doi <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_doi_path(cfg))
-  isbn <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_isbn_path(cfg))
-  if (nrow(arxiv) && "arxiv_id" %in% names(arxiv)) {
-    arxiv <- arxiv[!is.na(arxiv$arxiv_id) & nzchar(as.character(arxiv$arxiv_id)), ]
-    if (nrow(arxiv)) data.table::setkey(arxiv, arxiv_id)
-  }
-  if (nrow(doi) && "doi" %in% names(doi)) {
-    doi <- doi[!is.na(doi$doi) & nzchar(as.character(doi$doi)), ]
-    if (nrow(doi)) data.table::setkey(doi, doi)
-  }
-  if (nrow(isbn) && "isbn" %in% names(isbn)) {
-    isbn <- isbn[!is.na(isbn$isbn) & nzchar(as.character(isbn$isbn)), ]
-    if (nrow(isbn)) data.table::setkey(isbn, isbn)
-  }
+.litxr_bibtex_scaffold_cache <- function(cfg, arxiv_ids = character(), doi_ids = character(), isbn_ids = character()) {
+  arxiv_ids <- unique(as.character(arxiv_ids))
+  arxiv_ids <- arxiv_ids[!is.na(arxiv_ids) & nzchar(arxiv_ids)]
+  doi_ids <- unique(tolower(as.character(doi_ids)))
+  doi_ids <- doi_ids[!is.na(doi_ids) & nzchar(doi_ids)]
+  isbn_ids <- unique(as.character(isbn_ids))
+  isbn_ids <- isbn_ids[!is.na(isbn_ids) & nzchar(isbn_ids)]
+  arxiv <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_arxiv_path(cfg), "arxiv_id", arxiv_ids)
+  doi <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_doi_path(cfg), "doi", doi_ids)
+  isbn <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_isbn_path(cfg), "isbn", isbn_ids)
   list(arxiv = arxiv, doi = doi, isbn = isbn)
 }
 
@@ -520,7 +631,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (is.na(json_path) || !nzchar(json_path) || !file.exists(json_path)) {
     return(NULL)
   }
-  payload <- .litxr_storage_payload_as_list(json_path)
+  payload <- .litxr_storage_payload_as_list(json_path, fields = .litxr_bibtex_payload_fields())
   .litxr_bibtex_payload_to_row(payload, prefer_doi_key = prefer_doi_key)
 }
 
@@ -532,14 +643,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (is.na(cache_key) || !nzchar(cache_key)) {
     return(NULL)
   }
-  if (!data.table::haskey(cache_table) || !identical(data.table::key(cache_table), key_col)) {
-    data.table::setkeyv(cache_table, key_col)
-  }
-  if (identical(key_col, "doi")) {
-    hit <- cache_table[tolower(as.character(cache_table[[key_col]])) == cache_key, ]
-  } else {
-    hit <- cache_table[as.character(cache_table[[key_col]]) == cache_key, ]
-  }
+  hit <- cache_table[as.character(cache_table[[key_col]]) == cache_key, , drop = FALSE]
   if (!nrow(hit)) {
     return(NULL)
   }
@@ -548,44 +652,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (!is.null(row) && nrow(row)) {
     return(row)
   }
-
-  fallback <- tryCatch(litxr::litxr_read_references(cfg), error = function(e) data.table::data.table())
-  if (!nrow(fallback)) {
-    return(NULL)
-  }
-  normalized_key <- cache_key
-  if (key_col %in% names(fallback)) {
-    if (identical(key_col, "doi")) {
-      fallback_key <- tolower(sub("^doi:", "", vapply(fallback[[key_col]], .litxr_normalize_doi_ref_id, character(1)), ignore.case = TRUE))
-    } else if (identical(key_col, "arxiv_id")) {
-      fallback_key <- sub("^arxiv:", "", vapply(fallback[[key_col]], .litxr_normalize_arxiv_ref_id, character(1)), ignore.case = TRUE)
-    } else if (identical(key_col, "isbn")) {
-      fallback_key <- sub("^isbn:", "", vapply(fallback[[key_col]], .litxr_normalize_isbn_ref_id, character(1)), ignore.case = TRUE)
-    } else {
-      fallback_key <- as.character(fallback[[key_col]])
-    }
-    keep <- !is.na(fallback_key) & nzchar(fallback_key) & fallback_key == normalized_key
-    fallback <- fallback[keep, ]
-  } else if ("ref_id" %in% names(fallback)) {
-    fallback_ref_id <- as.character(fallback$ref_id)
-    fallback_ref_id_norm <- if (identical(key_col, "doi")) {
-      tolower(sub("^doi:", "", vapply(fallback_ref_id, .litxr_normalize_doi_ref_id, character(1)), ignore.case = TRUE))
-    } else if (identical(key_col, "arxiv_id")) {
-      sub("^arxiv:", "", vapply(fallback_ref_id, .litxr_normalize_arxiv_ref_id, character(1)), ignore.case = TRUE)
-    } else if (identical(key_col, "isbn")) {
-      sub("^isbn:", "", vapply(fallback_ref_id, .litxr_normalize_isbn_ref_id, character(1)), ignore.case = TRUE)
-    } else {
-      fallback_ref_id
-    }
-    keep <- !is.na(fallback_ref_id_norm) & nzchar(fallback_ref_id_norm) & fallback_ref_id_norm == normalized_key
-    fallback <- fallback[keep, ]
-  }
-  if (!nrow(fallback)) {
-    return(NULL)
-  }
-  fallback <- fallback[1L, ]
-  fallback$prefer_doi_key__ <- prefer_doi_key
-  fallback
+  NULL
 }
 
 .litxr_bibtex_resolve_arxiv_row <- function(cfg, ref_id, scaffold_cache = NULL, link_maps = NULL, prefer_linked_doi = TRUE) {
@@ -593,11 +660,12 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (is.na(arxiv_id) || !nzchar(arxiv_id)) {
     return(list(row = NULL, resolved_ref_id = NA_character_, warning = NULL))
   }
+  arxiv_id_bare <- .litxr_bare_arxiv_id(arxiv_id)
 
   if (isTRUE(prefer_linked_doi)) {
     paired_doi <- NA_character_
     if (!is.null(link_maps) && !is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
-      hit <- unname(link_maps$arxiv_to_doi[arxiv_id])
+      hit <- unname(link_maps$arxiv_to_doi[arxiv_id_bare])
       if (length(hit) && !is.na(hit[[1L]]) && nzchar(hit[[1L]])) {
         paired_doi <- as.character(hit[[1L]])
       }
@@ -639,7 +707,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     return(list(row = NULL, resolved_ref_id = NA_character_, warning = NULL))
   }
   if (is.null(scaffold_cache)) {
-    scaffold_cache <- .litxr_bibtex_scaffold_cache(cfg)
+    scaffold_cache <- .litxr_bibtex_scaffold_cache(cfg, doi_ids = .litxr_bare_doi(doi_id))
   }
   list(
     row = .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$doi, "doi", doi_id, prefer_doi_key = TRUE),
@@ -654,24 +722,12 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     return(list(row = NULL, resolved_ref_id = NA_character_, warning = NULL))
   }
   if (is.null(scaffold_cache)) {
-    scaffold_cache <- .litxr_bibtex_scaffold_cache(cfg)
+    scaffold_cache <- .litxr_bibtex_scaffold_cache(
+      cfg,
+      isbn_ids = sub("^isbn:", "", isbn_id, ignore.case = TRUE)
+    )
   }
   row <- .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$isbn, "isbn", isbn_id, prefer_doi_key = TRUE)
-  if (is.null(row) || !nrow(row)) {
-    fallback <- tryCatch(data.table::as.data.table(litxr::litxr_read_references(cfg)), error = function(e) data.table::data.table())
-    if (nrow(fallback)) {
-      if ("isbn" %in% names(fallback)) {
-        fallback <- fallback[as.character(fallback$isbn) == sub("^isbn:", "", isbn_id), ]
-      } else if ("ref_id" %in% names(fallback)) {
-        fallback <- fallback[as.character(fallback$ref_id) == isbn_id, ]
-      }
-      if (nrow(fallback)) {
-        fallback <- fallback[1L, ]
-        fallback$prefer_doi_key__ <- TRUE
-        row <- fallback
-      }
-    }
-  }
   list(row = row, resolved_ref_id = isbn_id, warning = NULL)
 }
 
@@ -708,10 +764,13 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     ))
   }
 
-  resolved <- list()
-  warnings <- character()
-  resolved_ref_ids <- character()
-  unresolved <- character()
+  resolved <- vector("list", length(ref_ids))
+  resolved_ref_ids <- rep(NA_character_, length(ref_ids))
+  unresolved <- rep(NA_character_, length(ref_ids))
+  warnings <- vector("list", length(ref_ids))
+  resolved_n <- 0L
+  unresolved_n <- 0L
+  warning_n <- 0L
   for (ref_id in ref_ids) {
     result <- .litxr_bibtex_resolve_row(
       cfg,
@@ -721,32 +780,34 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
       prefer_linked_doi = prefer_linked_doi
     )
     if (!is.null(result$warning) && nzchar(result$warning)) {
-      warnings <- c(warnings, result$warning)
+      warning_n <- warning_n + 1L
+      warnings[[warning_n]] <- result$warning
     }
     if (is.null(result$row) || !nrow(result$row)) {
-      unresolved <- c(unresolved, ref_id)
+      unresolved_n <- unresolved_n + 1L
+      unresolved[[unresolved_n]] <- ref_id
       next
     }
-    resolved[[length(resolved) + 1L]] <- result$row[1L, ]
-    resolved_ref_ids <- c(resolved_ref_ids, as.character(result$resolved_ref_id))
+    resolved_n <- resolved_n + 1L
+    resolved[[resolved_n]] <- result$row[1L, ]
+    resolved_ref_ids[[resolved_n]] <- as.character(result$resolved_ref_id)
   }
 
-  if (length(unresolved)) {
-    warnings <- c(
-      warnings,
+  if (unresolved_n > 0L) {
+    warning_n <- warning_n + 1L
+    warnings[[warning_n]] <-
       paste(
         "The following ref_id(s) could not be resolved for BibTeX export:",
-        paste(unresolved, collapse = ", ")
+        paste(unresolved[seq_len(unresolved_n)], collapse = ", ")
       )
-    )
   }
 
-  rows <- if (length(resolved)) data.table::rbindlist(resolved, fill = TRUE) else data.table::data.table()
+  rows <- if (resolved_n > 0L) data.table::rbindlist(resolved[seq_len(resolved_n)], fill = TRUE) else data.table::data.table()
   list(
     rows = rows,
-    resolved_ref_ids = resolved_ref_ids,
-    unresolved_ref_ids = unresolved,
-    warnings = warnings
+    resolved_ref_ids = if (resolved_n > 0L) resolved_ref_ids[seq_len(resolved_n)] else character(),
+    unresolved_ref_ids = if (unresolved_n > 0L) unresolved[seq_len(unresolved_n)] else character(),
+    warnings = if (warning_n > 0L) unlist(warnings[seq_len(warning_n)], use.names = FALSE) else character()
   )
 }
 
@@ -857,8 +918,21 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
 write_bibtex_entries <- function(path, ref_ids, config = NULL, prefer_linked_doi = TRUE) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
-  scaffold_cache <- .litxr_bibtex_scaffold_cache(cfg)
-  link_maps <- if (isTRUE(prefer_linked_doi)) .litxr_bibtex_link_maps(cfg) else NULL
+  candidates <- .litxr_bibtex_candidate_sets(ref_ids)
+  link_maps <- if (isTRUE(prefer_linked_doi)) .litxr_bibtex_link_maps(cfg, arxiv_ids = candidates$arxiv_ids, doi_ids = candidates$doi_ids) else NULL
+  linked_doi_ids <- if (isTRUE(prefer_linked_doi) && length(candidates$arxiv_ids) && !is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
+    hits <- unname(link_maps$arxiv_to_doi[candidates$arxiv_ids])
+    hits <- as.character(hits[!is.na(hits) & nzchar(hits)])
+    unique(tolower(hits))
+  } else {
+    character()
+  }
+  scaffold_cache <- .litxr_bibtex_scaffold_cache(
+    cfg,
+    arxiv_ids = candidates$arxiv_ids,
+    doi_ids = unique(c(candidates$doi_ids, linked_doi_ids)),
+    isbn_ids = candidates$isbn_ids
+  )
 
   resolved <- .litxr_bibtex_rows_for_write(
     cfg,
@@ -895,4 +969,130 @@ write_bibtex_entries <- function(path, ref_ids, config = NULL, prefer_linked_doi
     unresolved_ref_ids = resolved$unresolved_ref_ids,
     warnings = resolved$warnings
   ))
+}
+
+.litxr_replace_bib_with_linked_doi_file <- function(input_bibtex, output_bibtex = input_bibtex, config = NULL) {
+  if (!file.exists(input_bibtex)) {
+    stop("BibTeX file not found: ", input_bibtex, call. = FALSE)
+  }
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  parsed <- .litxr_bibtex_parse_entries(input_bibtex)
+  n_entries <- length(parsed$entries)
+  if (!n_entries) {
+    writeLines(character(), output_bibtex)
+    return(list(
+      status = "ok",
+      converted_arxiv_ids = character(),
+      doi_of_converted_arxiv_ids = character(),
+      missing_linked_doi_arxiv_ids = character(),
+      doi_of_missing_linked_doi_arxiv_ids = character(),
+      suspicious_arxiv_ids = character()
+    ))
+  }
+  raw_input_ids <- .litxr_bibtex_entry_ref_ids(parsed, link_maps = NULL, prefer_linked_arxiv = FALSE)
+  raw_candidates <- .litxr_bibtex_candidate_sets(raw_input_ids)
+  link_maps <- .litxr_bibtex_link_maps(cfg, arxiv_ids = raw_candidates$arxiv_ids, doi_ids = raw_candidates$doi_ids)
+  input_ids <- .litxr_bibtex_entry_ref_ids(parsed, link_maps = link_maps, prefer_linked_arxiv = TRUE)
+  final_candidates <- .litxr_bibtex_candidate_sets(input_ids)
+  linked_doi_ids <- if (length(final_candidates$arxiv_ids) && !is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
+    hits <- unname(link_maps$arxiv_to_doi[final_candidates$arxiv_ids])
+    hits <- as.character(hits[!is.na(hits) & nzchar(hits)])
+    unique(tolower(hits))
+  } else {
+    character()
+  }
+  scaffold_cache <- .litxr_bibtex_scaffold_cache(
+    cfg,
+    arxiv_ids = final_candidates$arxiv_ids,
+    doi_ids = unique(c(final_candidates$doi_ids, linked_doi_ids)),
+    isbn_ids = final_candidates$isbn_ids
+  )
+
+  result_entries <- parsed$entries
+  unresolved_ref_ids <- rep(NA_character_, n_entries)
+  converted_arxiv_ids <- rep(NA_character_, n_entries)
+  doi_of_converted_arxiv_ids <- rep(NA_character_, n_entries)
+  missing_linked_doi_arxiv_ids <- rep(NA_character_, n_entries)
+  doi_of_missing_linked_doi_arxiv_ids <- rep(NA_character_, n_entries)
+  suspicious_arxiv_ids <- rep(NA_character_, n_entries)
+
+  identity_arxiv_ids <- if (!is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
+    as.character(names(link_maps$arxiv_to_doi))
+  } else {
+    character()
+  }
+  available_doi_ids <- if (!is.null(scaffold_cache$doi) && nrow(scaffold_cache$doi) && "doi" %in% names(scaffold_cache$doi)) {
+    as.character(scaffold_cache$doi$doi)
+  } else {
+    character()
+  }
+
+  for (i in seq_len(n_entries)) {
+    input_id <- input_ids[[i]]
+    input_type <- if (length(parsed$types) >= i) as.character(parsed$types[[i]]) else NA_character_
+    if (is.na(input_id) || !nzchar(input_id)) {
+      next
+    }
+
+    result <- .litxr_bibtex_resolve_row(
+      cfg,
+      input_id,
+      scaffold_cache = scaffold_cache,
+      link_maps = link_maps,
+      prefer_linked_doi = TRUE
+    )
+    if (is.null(result$row) || !nrow(result$row)) {
+      unresolved_ref_ids[[i]] <- input_id
+    } else {
+      row <- result$row[1L, ]
+      row$bib_key__ <- parsed$keys[[i]]
+      result_entries[[i]] <- paste(.litxr_row_to_bibtex(row), collapse = "\n")
+    }
+
+    is_arxiv_input <- grepl("^arxiv:", input_id, ignore.case = TRUE)
+    if (!is_arxiv_input) {
+      next
+    }
+    input_arxiv_bare <- .litxr_bare_arxiv_id(input_id)
+    linked_doi <- if (!is.null(link_maps$arxiv_to_doi) && length(link_maps$arxiv_to_doi)) {
+      unname(link_maps$arxiv_to_doi[input_arxiv_bare])
+    } else {
+      NA_character_
+    }
+    linked_doi <- if (length(linked_doi) && !is.na(linked_doi[[1L]]) && nzchar(linked_doi[[1L]])) as.character(linked_doi[[1L]]) else NA_character_
+    linked_doi_bare <- if (!is.na(linked_doi) && nzchar(linked_doi)) .litxr_bare_doi(doi = linked_doi) else NA_character_
+    linked_doi_present <- !is.na(linked_doi_bare) && nzchar(linked_doi_bare) && linked_doi_bare %in% available_doi_ids
+    linked_doi_known <- !is.na(linked_doi) && nzchar(linked_doi)
+    is_article_arxiv <- !is.na(input_type) && identical(input_type, "article")
+
+    if (linked_doi_present) {
+      converted_arxiv_ids[[i]] <- input_arxiv_bare
+      doi_of_converted_arxiv_ids[[i]] <- linked_doi_bare
+    } else if (linked_doi_known) {
+      missing_linked_doi_arxiv_ids[[i]] <- input_arxiv_bare
+      doi_of_missing_linked_doi_arxiv_ids[[i]] <- linked_doi_bare
+    } else if (is_article_arxiv && !(input_arxiv_bare %in% identity_arxiv_ids)) {
+      suspicious_arxiv_ids[[i]] <- input_arxiv_bare
+    }
+  }
+
+  writeLines(.litxr_format_bib_file_lines(result_entries), output_bibtex)
+
+  converted_keep <- !is.na(converted_arxiv_ids) & nzchar(converted_arxiv_ids)
+  missing_keep <- !is.na(missing_linked_doi_arxiv_ids) & nzchar(missing_linked_doi_arxiv_ids)
+  suspicious_keep <- !is.na(suspicious_arxiv_ids) & nzchar(suspicious_arxiv_ids)
+  unresolved_keep <- !is.na(unresolved_ref_ids) & nzchar(unresolved_ref_ids)
+
+  list(
+    status = "ok",
+    input_bibtex = normalizePath(input_bibtex, winslash = "/", mustWork = FALSE),
+    output_bibtex = normalizePath(output_bibtex, winslash = "/", mustWork = FALSE),
+    converted_arxiv_ids = unique(converted_arxiv_ids[converted_keep]),
+    doi_of_converted_arxiv_ids = doi_of_converted_arxiv_ids[converted_keep][!duplicated(converted_arxiv_ids[converted_keep])],
+    missing_linked_doi_arxiv_ids = unique(missing_linked_doi_arxiv_ids[missing_keep]),
+    doi_of_missing_linked_doi_arxiv_ids = doi_of_missing_linked_doi_arxiv_ids[missing_keep][!duplicated(missing_linked_doi_arxiv_ids[missing_keep])],
+    suspicious_arxiv_ids = unique(suspicious_arxiv_ids[suspicious_keep]),
+    unresolved_ref_ids = unique(unresolved_ref_ids[unresolved_keep])
+  )
 }

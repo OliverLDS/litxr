@@ -71,6 +71,21 @@
   if (!nzchar(title)) NA_character_ else title
 }
 
+.litxr_valid_crossref_journal_title <- function(title) {
+  title <- as.character(title)[[1L]]
+  if (is.na(title) || !nzchar(trimws(title))) {
+    return(FALSE)
+  }
+  title <- trimws(title)
+  if (grepl("^[0-9]+([a-z]+)?$", title, ignore.case = TRUE)) {
+    return(FALSE)
+  }
+  if (nchar(title, type = "chars") <= 2L) {
+    return(FALSE)
+  }
+  TRUE
+}
+
 .litxr_crossref_issns <- function(cr_message) {
   issn <- cr_message$ISSN
   if (is.null(issn) || !length(issn)) return(character())
@@ -88,6 +103,9 @@
 
 .litxr_match_crossref_journal <- function(cfg, cr_message) {
   journal_title <- .litxr_crossref_journal_title(cr_message)
+  if (!.litxr_valid_crossref_journal_title(journal_title)) {
+    journal_title <- NA_character_
+  }
   issns <- .litxr_crossref_issns(cr_message)
 
   for (journal in .litxr_config_collections(cfg)) {
@@ -104,6 +122,9 @@
 
 .litxr_register_crossref_journal <- function(cfg, cr_message) {
   journal_title <- .litxr_crossref_journal_title(cr_message)
+  if (!.litxr_valid_crossref_journal_title(journal_title)) {
+    journal_title <- NA_character_
+  }
   base_id <- if (is.na(journal_title) || !nzchar(journal_title)) {
     NA_character_
   } else {

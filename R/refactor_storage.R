@@ -574,6 +574,37 @@
   )
 }
 
+.litxr_read_manual_ref_identity_pairs <- function(cfg) {
+  path <- file.path(.litxr_project_log_dir(cfg), "manual_ref_identity_pairs.tsv")
+  if (!file.exists(path)) {
+    return(data.table::data.table(arxiv_id = character(), doi = character()))
+  }
+  dt <- data.table::fread(path, sep = "\t", header = TRUE, na.strings = c("", "NA"), showProgress = FALSE)
+  if (!data.table::is.data.table(dt)) {
+    stop("Manual ref identity pair log must load as a data.table: ", path, call. = FALSE)
+  }
+  if (!nrow(dt)) {
+    return(data.table::data.table(arxiv_id = character(), doi = character()))
+  }
+  if (!all(c("arxiv_id", "doi") %in% names(dt))) {
+    stop("Manual ref identity pair log must contain `arxiv_id` and `doi`: ", path, call. = FALSE)
+  }
+  dt <- data.table::data.table(
+    arxiv_id = trimws(as.character(dt$arxiv_id)),
+    doi = trimws(tolower(as.character(dt$doi)))
+  )
+  keep_nonmissing <- !is.na(dt$arxiv_id) & nzchar(dt$arxiv_id) & !is.na(dt$doi) & nzchar(dt$doi)
+  dt <- dt[keep_nonmissing, , drop = FALSE]
+  if (!nrow(dt)) {
+    return(data.table::data.table(arxiv_id = character(), doi = character()))
+  }
+  keep <- !duplicated(paste(dt$arxiv_id, dt$doi, sep = "\r"))
+  data.table::data.table(
+    arxiv_id = dt$arxiv_id[keep],
+    doi = dt$doi[keep]
+  )
+}
+
 .litxr_read_project_references_by_keys <- function(cfg, keys, columns = NULL, hydrate = FALSE, wide_projection_limit = 300L, keyed_fst_read_threshold = getOption("litxr.keyed_fst_read_threshold", 32L)) {
   read_columns <- .litxr_project_reference_lookup_columns(columns)
   refs <- .litxr_read_normalized_reference_rows_by_keys(cfg, keys, columns = read_columns)
@@ -610,6 +641,13 @@
     }
   } else {
     identities <- data.table::data.table(arxiv_id = character(), doi = character())
+  }
+  if (remove_missing) {
+    manual_identities <- .litxr_read_manual_ref_identity_pairs(cfg)
+    if (nrow(manual_identities)) {
+      identities <- data.table::rbindlist(list(identities, manual_identities), fill = TRUE)
+      identities <- identities[!duplicated(paste(identities$arxiv_id, identities$doi, sep = "\r")), ]
+    }
   }
   arxiv_rows_write <- if (nrow(arxiv_rows)) {
     data.table::data.table(

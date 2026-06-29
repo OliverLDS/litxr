@@ -10,6 +10,69 @@
   x[[1L]]
 }
 
+.litxr_nonempty_chr <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(character())
+  }
+  x <- as.character(unlist(x, use.names = FALSE))
+  x <- x[!is.na(x) & nzchar(trimws(x))]
+  unique(x)
+}
+
+.litxr_message_field_missing <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(TRUE)
+  }
+  if (is.character(x)) {
+    vals <- x[!is.na(x) & nzchar(trimws(x))]
+    return(!length(vals))
+  }
+  if (is.list(x) && length(x) == 1L && is.character(x[[1L]])) {
+    vals <- x[[1L]]
+    vals <- vals[!is.na(vals) & nzchar(trimws(vals))]
+    return(!length(vals))
+  }
+  FALSE
+}
+
+.litxr_doi_source_rank <- function(source) {
+  source <- tolower(as.character(source)[[1L]])
+  switch(
+    source,
+    crossref = 5L,
+    doi_org_html = 4L,
+    doi_org_csl = 3L,
+    datacite = 2L,
+    zenodo = 1L,
+    0L
+  )
+}
+
+.litxr_merge_doi_messages <- function(primary, fallback) {
+  if (is.null(primary)) return(fallback)
+  if (is.null(fallback)) return(primary)
+  out <- primary
+  preferred_source <- if (.litxr_doi_source_rank(primary$source) >= .litxr_doi_source_rank(fallback$source)) {
+    primary$source
+  } else {
+    fallback$source
+  }
+  preferred_url <- .litxr_first_nonempty_chr(c(primary$URL, fallback$URL))
+  fields <- c(
+    "title", "author", "issued", "container-title", "publisher",
+    "volume", "issue", "page", "abstract", "URL", "ISBN", "ISSN", "subject"
+  )
+  for (field in fields) {
+    if (.litxr_message_field_missing(out[[field]]) && !.litxr_message_field_missing(fallback[[field]])) {
+      out[[field]] <- fallback[[field]]
+    }
+  }
+  out$DOI <- .litxr_first_nonempty_chr(c(primary$DOI, fallback$DOI))
+  out$URL <- preferred_url
+  out$source <- preferred_source
+  out
+}
+
 .litxr_date_parts_from_components <- function(year = NA_integer_, month = NA_integer_, day = NA_integer_) {
   year <- suppressWarnings(as.integer(year[[1L]]))
   if (is.na(year)) {
@@ -119,6 +182,7 @@
   }
 
   list(
+    source = "datacite",
     DOI = doi,
     title = if (is.na(title)) character() else title,
     author = authors,
@@ -182,6 +246,7 @@
   }
 
   list(
+    source = "zenodo",
     DOI = doi,
     title = if (is.na(title)) character() else title,
     author = authors,
@@ -320,6 +385,7 @@
   subject <- if (!is.null(subject) && length(subject)) unique(as.character(subject)) else character()
 
   list(
+    source = "doi_org_html",
     DOI = doi,
     title = if (is.na(title)) character() else title,
     author = authors,
@@ -368,48 +434,55 @@
 
   crossref <- tryCatch(fetch_crossref_messages(doi), error = function(e) list(setNames(list(NULL), doi)))
   if (!is.null(crossref[[1L]])) {
+    crossref[[1L]]$source <- "crossref"
     return(crossref[[1L]])
   }
 
-  if (grepl("^10\\.1145/", bare_doi) || grepl("^10\\.3390/", bare_doi)) {
-    html_message <- .litxr_fetch_doi_message_from_html(bare_doi)
-    if (!is.null(html_message)) {
-      return(html_message)
-    }
-  }
+  html_message <- .litxr_fetch_doi_message_from_html(bare_doi)
 
+  zenodo_message <- NULL
   if (grepl("zenodo", bare_doi, ignore.case = TRUE)) {
     zenodo_id <- sub("^10\\.5281/zenodo\\.", "", bare_doi, ignore.case = TRUE)
     zenodo_payload <- .litxr_fetch_json_or_null(sprintf("https://zenodo.org/api/records/%s", zenodo_id))
     if (!is.null(zenodo_payload)) {
-      return(.litxr_doi_message_from_zenodo(zenodo_payload, bare_doi))
+      zenodo_message <- .litxr_doi_message_from_zenodo(zenodo_payload, bare_doi)
     }
-    zenodo_payload <- .litxr_fetch_json_or_null(sprintf(
-      "https://zenodo.org/api/records?q=%s",
-      utils::URLencode(sprintf('"%s"', bare_doi), reserved = TRUE)
-    ))
-    if (!is.null(zenodo_payload)) {
-      hit <- zenodo_payload$hits$hits[[1L]] %||% zenodo_payload$hits[[1L]]
-      if (!is.null(hit)) {
-        return(.litxr_doi_message_from_zenodo(hit, bare_doi))
+    if (is.null(zenodo_message)) {
+      zenodo_payload <- .litxr_fetch_json_or_null(sprintf(
+        "https://zenodo.org/api/records?q=%s",
+        utils::URLencode(sprintf('"%s"', bare_doi), reserved = TRUE)
+      ))
+      if (!is.null(zenodo_payload)) {
+        hit <- zenodo_payload$hits$hits[[1L]] %||% zenodo_payload$hits[[1L]]
+        if (!is.null(hit)) {
+          zenodo_message <- .litxr_doi_message_from_zenodo(hit, bare_doi)
+        }
       }
     }
   }
 
+  datacite_message <- NULL
   datacite_payload <- .litxr_fetch_json_or_null(sprintf("https://api.datacite.org/dois/%s", utils::URLencode(bare_doi, reserved = TRUE)))
   if (!is.null(datacite_payload)) {
-    return(.litxr_doi_message_from_datacite(datacite_payload, bare_doi))
+    datacite_message <- .litxr_doi_message_from_datacite(datacite_payload, bare_doi)
   }
 
+  doi_org_message <- NULL
   doi_org_payload <- .litxr_fetch_json_or_null(
     sprintf("https://doi.org/%s", utils::URLencode(bare_doi, reserved = TRUE)),
     accept = "application/vnd.citationstyles.csl+json"
   )
   if (!is.null(doi_org_payload)) {
-    return(doi_org_payload)
+    doi_org_payload$source <- "doi_org_csl"
+    doi_org_message <- doi_org_payload
   }
 
-  NULL
+  merged <- NULL
+  merged <- .litxr_merge_doi_messages(merged, html_message)
+  merged <- .litxr_merge_doi_messages(merged, doi_org_message)
+  merged <- .litxr_merge_doi_messages(merged, datacite_message)
+  merged <- .litxr_merge_doi_messages(merged, zenodo_message)
+  merged
 }
 
 .litxr_fetch_doi_messages <- function(dois) {
