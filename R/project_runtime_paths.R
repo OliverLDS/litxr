@@ -15,12 +15,20 @@
   if (!nzchar(x)) "unknown" else x
 }
 
+.litxr_project_corpus_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "corpus")
+}
+
+.litxr_project_queries_dir <- function(cfg) {
+  file.path(.litxr_project_root(cfg), "queries")
+}
+
 .litxr_project_embeddings_dir <- function(cfg) {
-  file.path(.litxr_project_root(cfg), "embeddings")
+  .litxr_project_corpus_dir(cfg)
 }
 
 .litxr_ensure_project_embeddings_dir <- function(cfg) {
-  dir_path <- .litxr_project_embeddings_dir(cfg)
+  dir_path <- .litxr_project_corpus_dir(cfg)
   if (!dir.exists(dir_path)) {
     dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
   }

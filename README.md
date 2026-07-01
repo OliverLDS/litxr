@@ -116,8 +116,8 @@ Included shell helpers:
 - `scripts/repair_arxiv_latest.R`
 - `scripts/human/build_llm_digest_interactive.sh`
 - `scripts/human/get_ref_summary.sh`
-- `scripts/report_arxiv_category_labels.R`
-- `scripts/cache_category_inquiries.R`
+- `scripts/report_arxiv_category_inquiry_set.R`
+- `scripts/cache_arxiv_category_inquiry_set.R`
 - `scripts/write_bib_by_ref_ids.sh`
 
 The arXiv repair scripts now prefer `--collection-id`; `--journal-id` still

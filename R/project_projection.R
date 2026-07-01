@@ -157,6 +157,16 @@
   if (!nrow(rows)) {
     return(rows)
   }
+  key_col <- if ("ref_id" %in% names(rows)) {
+    "ref_id"
+  } else if ("arxiv_id" %in% names(rows)) {
+    "arxiv_id"
+  } else {
+    NULL
+  }
+  if (is.null(key_col)) {
+    stop("`rows` must contain `ref_id` or `arxiv_id`.", call. = FALSE)
+  }
   fields <- unique(as.character(fields))
   fields <- fields[nzchar(fields)]
   if (!length(fields)) {
@@ -175,12 +185,26 @@
       }
     }
   }
-  json_paths <- data.table::as.data.table(json_paths)
-  if (!nrow(json_paths) || !all(c("ref_id", "json_path") %in% names(json_paths))) {
+  if (is.atomic(json_paths) && !is.null(names(json_paths))) {
+    json_paths <- data.table::data.table(ref_id = names(json_paths), json_path = as.character(json_paths))
+  } else {
+    json_paths <- data.table::as.data.table(json_paths)
+  }
+  if (!nrow(json_paths)) {
     return(rows)
   }
+  if (!("json_path" %in% names(json_paths))) {
+    return(rows)
+  }
+  if (!(key_col %in% names(json_paths))) {
+    if ("ref_id" %in% names(json_paths) && key_col != "ref_id") {
+      data.table::setnames(json_paths, "ref_id", key_col)
+    } else {
+      return(rows)
+    }
+  }
   json_paths <- json_paths[
-    !is.na(json_paths$ref_id) & nzchar(json_paths$ref_id) &
+    !is.na(json_paths[[key_col]]) & nzchar(json_paths[[key_col]]) &
       !is.na(json_paths$json_path) & nzchar(json_paths$json_path),
     ,
     drop = FALSE
@@ -188,8 +212,8 @@
   if (!nrow(json_paths)) {
     return(rows)
   }
-  json_paths <- json_paths[!duplicated(json_paths$ref_id), ]
-  hit <- match(as.character(rows$ref_id), json_paths$ref_id)
+  json_paths <- json_paths[!duplicated(json_paths[[key_col]]), ]
+  hit <- match(as.character(rows[[key_col]]), as.character(json_paths[[key_col]]))
   keep <- which(!is.na(hit))
   if (!length(keep)) {
     return(rows)

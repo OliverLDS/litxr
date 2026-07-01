@@ -65,7 +65,7 @@ if (isTRUE(parsed$show_help)) {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/cache_category_inquiries.R --inquiry PATH [--query-set-id QUERY_SET_ID]",
+      "  Rscript scripts/cache_arxiv_category_inquiry_set.R --inquiry PATH [--query-set-id QUERY_SET_ID]",
       "",
       "Options:",
       "  --inquiry PATH            YAML file defining category ids and inquiry sentences.",
@@ -75,7 +75,7 @@ if (isTRUE(parsed$show_help)) {
       "",
       "Notes:",
       "  - The script writes a persistent local inquiry embedding cache under",
-      "    project.data_root/embeddings/label_queries/.",
+      "    project.data_root/queries/embeddings/.",
       "  - Each query-set root also includes a query_set.yaml file describing",
       "    the category ids and inquiry sentences that were embedded.",
       "  - If --query-set-id is supplied, that cache is overwritten.",

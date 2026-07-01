@@ -71,6 +71,10 @@ parse_args <- function(args) {
   out
 }
 
+cleanup_temp_query_cache <- function() {
+  invisible(NULL)
+}
+
 parsed <- parse_args(args)
 show_help <- isTRUE(parsed$show_help)
 delta_only <- isTRUE(parsed$delta_only)
@@ -80,7 +84,7 @@ if (show_help) {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/report_arxiv_category_labels.R [--embed-missing] [--year-from YYYY] [--year-to YYYY] [--delta-only] [--local-inq QUERY_SET_ID] [--inquiry PATH] [--top_n 3] [--threshold 0.45]",
+      "  Rscript scripts/report_arxiv_category_inquiry_set.R [--embed-missing] [--year-from YYYY] [--year-to YYYY] [--delta-only] [--local-inq QUERY_SET_ID] [--inquiry PATH] [--top_n 3] [--threshold 0.45]",
       "",
       "Options:",
       "  --embed-missing    Run litxr_embed_collection_delta() before scoring. Default: off.",
@@ -176,10 +180,6 @@ embed_model <- "nvidia/llama-nemotron-embed-vl-1b-v2:free"
 query_set_id <- local_inq
 embed_fun <- function(texts) {
   inferencer::embed_openrouter(texts, model = embed_model)
-}
-
-cleanup_temp_query_cache <- function() {
-  invisible(NULL)
 }
 
 normalize_arxiv_ref_id <- function(x) {

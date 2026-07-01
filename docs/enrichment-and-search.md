@@ -95,7 +95,7 @@ For an older cache that only has `metadata.fst`, you can backfill the
 descriptor from a model subdirectory with:
 
 ```bash
-Rscript scripts/human/export_label_query_set_yaml.R \
+Rscript scripts/cache_arxiv_category_inquiry_set.R \
   --cache-dir /path/to/ai_category_query_set_v1/nvidia_llama_nemotron_embed_vl_1b_v2_free
 ```
 

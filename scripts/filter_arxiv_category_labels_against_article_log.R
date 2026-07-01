@@ -36,7 +36,7 @@ usage <- function() {
       "  Rscript scripts/filter_arxiv_category_labels_against_article_log.R < input.json",
       "",
       "Purpose:",
-      "  Filter the JSON output of scripts/report_arxiv_category_labels.R by",
+      "  Filter the JSON output of scripts/report_arxiv_category_inquiry_set.R by",
       "  removing refs already recorded in the article or revision logs.",
       "",
       "Input:",

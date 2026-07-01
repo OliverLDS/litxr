@@ -221,7 +221,7 @@ if (!identical(journal$remote_channel, "arxiv")) {
 }
 
 collection_ref_dir <- litxr:::.litxr_collection_ref_dir(cfg, collection_id)
-litxr:::.litxr_ensure_collection_ref_dir(cfg, collection_id)
+invisible(litxr:::.litxr_ensure_collection_ref_dir(cfg, collection_id))
 history_path <- litxr:::.litxr_collection_fetch_history_path(cfg, collection_id)
 
 page_size <- if (is.null(parsed$page_size)) {

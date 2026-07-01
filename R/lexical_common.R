@@ -3,9 +3,10 @@
     cfg <- litxr_read_config()
   }
   file.path(
-    .litxr_project_embeddings_dir(cfg),
+    .litxr_project_corpus_dir(cfg),
     "arxiv_cs_ai",
     "abstract",
+    "embeddings",
     .litxr_embedding_slug("nvidia/llama-nemotron-embed-vl-1b-v2:free"),
     "shards"
   )

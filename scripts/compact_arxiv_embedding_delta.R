@@ -95,23 +95,6 @@ provider <- parsed$provider
 
 cfg <- litxr::litxr_read_config()
 
-before <- litxr::litxr_read_embedding_state(
-  collection_id,
-  cfg,
-  field = field,
-  model = embed_model
-)
-
-log_line(sprintf(
-  "before: total=%s embedded_main=%s embedded_delta=%s embedded_unique=%s missing=%s coverage=%.6f",
-  before$records_total[[1]],
-  before$embedded_main[[1]],
-  before$embedded_delta[[1]],
-  before$embedded_unique[[1]],
-  before$missing[[1]],
-  before$coverage_pct[[1]]
-))
-
 compacted <- litxr::litxr_compact_embedding_delta(
   collection_id,
   cfg,
@@ -119,23 +102,6 @@ compacted <- litxr::litxr_compact_embedding_delta(
   model = embed_model,
   provider = provider
 )
-
-after <- litxr::litxr_read_embedding_state(
-  collection_id,
-  cfg,
-  field = field,
-  model = embed_model
-)
-
-log_line(sprintf(
-  "after: total=%s embedded_main=%s embedded_delta=%s embedded_unique=%s missing=%s coverage=%.6f",
-  after$records_total[[1]],
-  after$embedded_main[[1]],
-  after$embedded_delta[[1]],
-  after$embedded_unique[[1]],
-  after$missing[[1]],
-  after$coverage_pct[[1]]
-))
 
 log_line(sprintf(
   "compact complete: collection_id=%s field=%s model=%s rows_visible_after_compact=%s",
@@ -151,7 +117,5 @@ emit_json(list(
   field = field,
   model = embed_model,
   provider = provider,
-  before = as.list(before[1]),
-  after = as.list(after[1]),
   rows_visible_after_compact = nrow(compacted)
 ))

@@ -1344,9 +1344,10 @@ litxr_add_refs <- function(
 
 .litxr_embedding_index_paths <- function(cfg, collection_id, field, model) {
   base_dir <- file.path(
-    .litxr_project_embeddings_dir(cfg),
+    .litxr_project_corpus_dir(cfg),
     .litxr_embedding_slug(collection_id),
     .litxr_embedding_slug(field),
+    "embeddings",
     .litxr_embedding_slug(model)
   )
   list(
@@ -1371,35 +1372,18 @@ litxr_add_refs <- function(
 }
 
 .litxr_as_embedding_matrix <- function(x) {
-  if (is.data.frame(x)) {
-    x <- as.matrix(x)
-  }
   if (is.matrix(x)) {
+    if (!is.double(x)) {
+      storage.mode(x) <- "double"
+    }
+    return(x)
+  }
+  if (is.numeric(x) && is.atomic(x)) {
+    x <- matrix(x, nrow = 1L)
     storage.mode(x) <- "double"
     return(x)
   }
-  if (is.list(x) && !is.null(x$embeddings)) {
-    return(.litxr_as_embedding_matrix(x$embeddings))
-  }
-  if (is.list(x) && !is.null(x$data)) {
-    return(.litxr_as_embedding_matrix(x$data))
-  }
-  if (is.list(x) && length(x) && all(vapply(x, is.numeric, logical(1)))) {
-    out <- do.call(rbind, lapply(x, as.numeric))
-    storage.mode(out) <- "double"
-    return(out)
-  }
-  if (is.list(x) && length(x) && all(vapply(x, function(row) is.list(row) && !is.null(row$embedding), logical(1)))) {
-    out <- do.call(rbind, lapply(x, function(row) as.numeric(row$embedding)))
-    storage.mode(out) <- "double"
-    return(out)
-  }
-  if (is.numeric(x)) {
-    out <- matrix(as.numeric(x), nrow = 1L)
-    storage.mode(out) <- "double"
-    return(out)
-  }
-  stop("Unable to coerce embedding output to a numeric matrix.", call. = FALSE)
+  stop("Embedding output must already be a numeric matrix.", call. = FALSE)
 }
 
 .litxr_embedding_manifest <- function(collection_id, field, model, provider, dimension, records) {
@@ -1558,6 +1542,9 @@ litxr_add_refs <- function(
     return(existing_delta$metadata)
   }
 
+  existing_dimension <- .litxr_embedding_existing_dimension(existing, existing_delta)
+  batch_parts <- vector("list", ceiling(nrow(targets) / batch_size))
+  batch_n <- 0L
   for (start in seq(1L, nrow(targets), by = batch_size)) {
     end <- min(start + batch_size - 1L, nrow(targets))
     batch <- targets[start:end, ]
@@ -1566,7 +1553,6 @@ litxr_add_refs <- function(
       stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " texts.", call. = FALSE)
     }
 
-    existing_dimension <- .litxr_embedding_existing_dimension(existing, existing_delta)
     if (!is.na(existing_dimension) && existing_dimension != ncol(batch_matrix)) {
       stop("Embedding dimension changed from ", existing_dimension, " to ", ncol(batch_matrix), ".", call. = FALSE)
     }
@@ -1592,23 +1578,19 @@ litxr_add_refs <- function(
         records = nrow(batch_metadata)
       )
     )
-    existing_delta <- .litxr_merge_embedding_parts(
-      existing_delta,
-      list(
-        metadata = batch_metadata,
-        matrix = batch_matrix,
-        manifest = .litxr_embedding_manifest(
-          collection_id = collection_id,
-          field = field,
-          model = as.character(model),
-          provider = as.character(provider),
-          dimension = ncol(batch_matrix),
-          records = nrow(batch_metadata)
-        )
-      )
-    )
+    batch_n <- batch_n + 1L
+    batch_parts[[batch_n]] <- batch_metadata
   }
 
+  batch_parts <- batch_parts[seq_len(batch_n)]
+  if (nrow(existing_delta$metadata)) {
+    batch_parts <- c(list(existing_delta$metadata), batch_parts)
+  }
+  existing_delta <- list(
+    metadata = if (length(batch_parts)) data.table::rbindlist(batch_parts, fill = TRUE) else .litxr_empty_embedding_metadata(),
+    matrix = NULL,
+    manifest = existing_delta$manifest
+  )
   existing_delta$metadata
 }
 
@@ -1650,11 +1632,14 @@ litxr_add_refs <- function(
     ))
   }
 
-  delta <- list(
-    metadata = .litxr_empty_embedding_metadata(),
-    matrix = if (isTRUE(read_matrix)) matrix(numeric(), nrow = 0L, ncol = 0L) else NULL,
-    manifest = list()
-  )
+  metadata_parts <- vector("list", length(shard_paths))
+  if (isTRUE(read_matrix)) {
+    matrix_parts <- vector("list", length(shard_paths))
+  } else {
+    matrix_parts <- NULL
+  }
+  manifest <- list()
+  part_n <- 0L
   for (shard_path in shard_paths) {
     shard <- readRDS(shard_path)
     if (!is.list(shard) || is.null(shard$metadata) || is.null(shard$matrix)) {
@@ -1662,10 +1647,35 @@ litxr_add_refs <- function(
     }
     shard$metadata <- data.table::as.data.table(shard$metadata)
     shard$matrix <- if (isTRUE(read_matrix)) .litxr_as_embedding_matrix(shard$matrix) else NULL
-    shard$manifest <- shard$manifest %||% list()
-    delta <- .litxr_merge_embedding_parts(delta, shard)
+    if (!is.null(shard$manifest) && length(shard$manifest)) {
+      manifest <- shard$manifest
+    }
+    part_n <- part_n + 1L
+    metadata_parts[[part_n]] <- shard$metadata
+    if (isTRUE(read_matrix)) {
+      matrix_parts[[part_n]] <- shard$matrix
+    }
   }
-  delta
+
+  metadata_parts <- metadata_parts[seq_len(part_n)]
+  metadata <- data.table::rbindlist(metadata_parts, fill = TRUE)
+  keep <- if (nrow(metadata)) !duplicated(metadata$ref_id, fromLast = TRUE) else logical()
+  matrix_data <- if (isTRUE(read_matrix)) {
+    matrix_parts <- matrix_parts[seq_len(part_n)]
+    if (!length(matrix_parts)) {
+      matrix(numeric(), nrow = 0L, ncol = 0L)
+    } else {
+      combined <- do.call(rbind, matrix_parts)
+      if (nrow(combined)) combined[keep, , drop = FALSE] else combined
+    }
+  } else {
+    NULL
+  }
+  list(
+    metadata = if (nrow(metadata)) metadata[keep, ] else metadata,
+    matrix = matrix_data,
+    manifest = manifest
+  )
 }
 
 .litxr_read_embedding_parts <- function(metadata_path, matrix_path, matrix_f32_path = NULL, manifest_path, cache_dir, read_matrix = TRUE) {
@@ -1724,6 +1734,8 @@ litxr_add_refs <- function(
   storage.mode(matrix) <- "double"
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   tmp_path <- paste0(path, ".tmp")
+  estimated_bytes <- max(64 * 1024^2, as.double(nrow(matrix)) * as.double(ncol(matrix)) * 4 + 8 * 1024^2)
+  .litxr_ensure_write_headroom(path, estimated_bytes, context = "float32 matrix write")
   con <- file(tmp_path, open = "wb")
   on.exit(try(close(con), silent = TRUE), add = TRUE)
   writeBin(as.numeric(matrix), con, size = 4L, endian = "little")
@@ -1770,6 +1782,47 @@ litxr_add_refs <- function(
   invisible(path)
 }
 
+.litxr_replace_directory_atomic <- function(source_dir, target_dir) {
+  source_dir <- as.character(source_dir)[[1L]]
+  target_dir <- as.character(target_dir)[[1L]]
+  if (!nzchar(source_dir) || !dir.exists(source_dir)) {
+    stop("Source directory does not exist: ", source_dir, call. = FALSE)
+  }
+  dir.create(dirname(target_dir), recursive = TRUE, showWarnings = FALSE)
+
+  backup_dir <- file.path(
+    dirname(target_dir),
+    paste0(".", basename(target_dir), ".bak_", Sys.getpid(), "_", format(Sys.time(), "%Y%m%d%H%M%S"))
+  )
+  backup_created <- FALSE
+  swapped <- FALSE
+  on.exit({
+    if (!swapped && backup_created && dir.exists(backup_dir)) {
+      if (dir.exists(target_dir)) {
+        unlink(target_dir, recursive = TRUE, force = TRUE)
+      }
+      file.rename(backup_dir, target_dir)
+    }
+  }, add = TRUE)
+
+  if (dir.exists(target_dir)) {
+    if (!file.rename(target_dir, backup_dir)) {
+      stop("Failed to stage directory swap for: ", target_dir, call. = FALSE)
+    }
+    backup_created <- TRUE
+  }
+
+  if (!file.rename(source_dir, target_dir)) {
+    stop("Failed to atomically replace directory: ", target_dir, call. = FALSE)
+  }
+
+  swapped <- TRUE
+  if (backup_created && dir.exists(backup_dir)) {
+    unlink(backup_dir, recursive = TRUE, force = TRUE)
+  }
+  invisible(target_dir)
+}
+
 .litxr_write_yaml_atomic <- function(object, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   tmp_path <- paste0(path, ".tmp")
@@ -1814,9 +1867,69 @@ litxr_add_refs <- function(
   lines
 }
 
+.litxr_disk_free_bytes <- function(path) {
+  dir_path <- dirname(path.expand(as.character(path)[[1L]]))
+  if (!nzchar(dir_path) || !dir.exists(dir_path)) {
+    return(NA_real_)
+  }
+  out <- tryCatch(
+    system2("df", c("-Pk", dir_path), stdout = TRUE, stderr = FALSE),
+    error = function(e) character()
+  )
+  if (!length(out)) {
+    return(NA_real_)
+  }
+  fields <- strsplit(trimws(out[length(out)]), "\\s+")[[1L]]
+  if (length(fields) < 4L) {
+    return(NA_real_)
+  }
+  suppressWarnings(as.numeric(fields[[4L]]) * 1024)
+}
+
+.litxr_ensure_write_headroom <- function(path, estimated_bytes, context = NULL) {
+  estimated_bytes <- suppressWarnings(as.numeric(estimated_bytes))
+  if (is.na(estimated_bytes) || estimated_bytes < 0) {
+    estimated_bytes <- 0
+  }
+  free_bytes <- .litxr_disk_free_bytes(path)
+  if (is.na(free_bytes)) {
+    return(invisible(TRUE))
+  }
+  if (free_bytes < estimated_bytes) {
+    if (!is.null(context) && nzchar(as.character(context)[[1L]])) {
+      stop(
+        context, " requires at least ", format(estimated_bytes, scientific = FALSE),
+        " free bytes but only ", format(free_bytes, scientific = FALSE),
+        " bytes are available at ", dirname(path.expand(as.character(path)[[1L]])), ".",
+        call. = FALSE
+      )
+    }
+    stop(
+      "Need at least ", format(estimated_bytes, scientific = FALSE),
+      " free bytes but only ", format(free_bytes, scientific = FALSE),
+      " bytes are available at ", dirname(path.expand(as.character(path)[[1L]])), ".",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+.litxr_estimate_embedding_write_bytes <- function(metadata, embeddings, extra_bytes = 8 * 1024^2) {
+  estimated_bytes <- as.double(extra_bytes)
+  if (!is.null(metadata)) {
+    estimated_bytes <- estimated_bytes + as.double(object.size(metadata))
+  }
+  if (!is.null(embeddings)) {
+    estimated_bytes <- estimated_bytes + as.double(object.size(embeddings))
+  }
+  max(64 * 1024^2, estimated_bytes * 2)
+}
+
 .litxr_write_fst_atomic <- function(object, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   tmp_path <- paste0(path, ".tmp")
+  estimated_bytes <- max(64 * 1024^2, as.numeric(object.size(object)) * 2)
+  .litxr_ensure_write_headroom(path, estimated_bytes, context = "fst write")
   fst::write_fst(object, tmp_path)
   if (!file.rename(tmp_path, path)) {
     unlink(tmp_path)
@@ -1936,31 +2049,66 @@ litxr_add_refs <- function(
   )
 }
 
-.litxr_compact_embedding_index <- function(paths, collection_id, field, model, provider, overwrite = FALSE) {
+.litxr_compact_embedding_index <- function(paths, collection_id, field, model, provider, cfg = NULL, overwrite = FALSE) {
   delta <- .litxr_read_embedding_delta_parts(paths)
-  existing <- if (isTRUE(overwrite)) {
-    list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
-  } else {
-    .litxr_read_embedding_index_parts(paths)
-  }
   if (!nrow(delta$metadata)) {
-    return(existing$metadata)
+    return(.litxr_empty_embedding_metadata())
   }
-  merged <- .litxr_merge_embedding_parts(existing, delta)
-  if (!nrow(merged$metadata)) {
+  if (isTRUE(overwrite)) {
+    existing <- list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+    merged <- .litxr_merge_embedding_parts(existing, delta)
+    if (!nrow(merged$metadata)) {
+      return(merged$metadata)
+    }
+    manifest <- .litxr_embedding_manifest(
+      collection_id = collection_id,
+      field = field,
+      model = model,
+      provider = provider,
+      dimension = ncol(merged$matrix),
+      records = nrow(merged$metadata)
+    )
+    .litxr_write_embedding_index(paths, merged$metadata, merged$matrix, manifest)
+    .litxr_clear_embedding_delta(paths)
     return(merged$metadata)
   }
-  manifest <- .litxr_embedding_manifest(
-    collection_id = collection_id,
-    field = field,
-    model = model,
-    provider = provider,
-    dimension = ncol(merged$matrix),
-    records = nrow(merged$metadata)
-  )
-  .litxr_write_embedding_index(paths, merged$metadata, merged$matrix, manifest)
+
+  delta_keys <- unique(.litxr_embedding_shard_key(delta$metadata$ref_id))
+  if (!length(delta_keys)) {
+    return(.litxr_empty_embedding_metadata())
+  }
+
+  root_manifest <- if (file.exists(paths$manifest)) jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE) else list()
+  if (is.null(root_manifest$shards)) {
+    root_manifest$shards <- list()
+  }
+  root_manifest$storage_version <- 2L
+  root_manifest$matrix_format <- "float32"
+  root_manifest$shard_by <- "year"
+
+  touched_parts <- vector("list", length(delta_keys))
+  touched_n <- 0L
+  delta_key_map <- .litxr_embedding_shard_key(delta$metadata$ref_id)
+  for (shard_key in delta_keys) {
+    delta_idx <- delta_key_map == shard_key
+    shard_delta <- delta$metadata[delta_idx, ]
+    shard_delta_matrix <- if (!is.null(delta$matrix)) delta$matrix[delta_idx, , drop = FALSE] else NULL
+    existing <- .litxr_read_embedding_shard_parts(paths, shard_key, read_matrix = !is.null(delta$matrix))
+    merged <- .litxr_merge_embedding_parts(
+      existing,
+      list(metadata = shard_delta, matrix = shard_delta_matrix, manifest = existing$manifest)
+    )
+    local_manifest <- .litxr_write_embedding_shard_parts(paths, shard_key, merged$metadata, merged$matrix)
+    root_manifest$shards[[shard_key]] <- local_manifest
+    touched_n <- touched_n + 1L
+    touched_parts[[touched_n]] <- merged$metadata
+  }
+  touched_parts <- touched_parts[seq_len(touched_n)]
+  root_manifest$records <- sum(vapply(root_manifest$shards, function(x) as.integer(x$records %||% 0L), integer(1)))
+  root_manifest$dimension <- as.integer(if (length(delta$matrix)) ncol(delta$matrix) else 0L)
+  .litxr_write_json_atomic(root_manifest, paths$manifest)
   .litxr_clear_embedding_delta(paths)
-  merged$metadata
+  data.table::rbindlist(touched_parts[seq_len(touched_n)], fill = TRUE)
 }
 
 .litxr_clear_embedding_delta <- function(paths) {
@@ -2003,11 +2151,18 @@ litxr_add_refs <- function(
       return("unknown")
     }
     x <- as.character(x)
-    if (!nzchar(x)) {
+    if (!grepl("^[0-9]{4}\\.[0-9]{4,5}$", x)) {
       return("unknown")
     }
-    bucket <- sum(utf8ToInt(x)) %% 256L
-    sprintf("%02x", bucket)
+    yy <- suppressWarnings(as.integer(substr(x, 1L, 2L)))
+    if (is.na(yy)) {
+      return("unknown")
+    }
+    if (yy >= 90L) {
+      sprintf("19%02d", yy)
+    } else {
+      sprintf("20%02d", yy)
+    }
   }, character(1))
 }
 
@@ -2019,6 +2174,72 @@ litxr_add_refs <- function(
     matrix_f32 = file.path(shard_dir, "matrix.f32"),
     manifest = file.path(shard_dir, "manifest.json")
   )
+}
+
+.litxr_read_embedding_shard_parts <- function(paths, shard_key, read_matrix = TRUE) {
+  shard_paths <- .litxr_embedding_shard_paths(paths, shard_key)
+  shard_manifest <- if (file.exists(shard_paths$manifest)) jsonlite::fromJSON(shard_paths$manifest, simplifyVector = FALSE) else list()
+  metadata <- if (file.exists(shard_paths$metadata)) {
+    .litxr_normalize_embedding_metadata(fst::read_fst(shard_paths$metadata, as.data.table = TRUE))
+  } else {
+    .litxr_empty_embedding_metadata()
+  }
+  matrix_data <- if (!isTRUE(read_matrix)) {
+    NULL
+  } else if (file.exists(shard_paths$matrix_f32)) {
+    .litxr_read_float32_matrix(
+      path = shard_paths$matrix_f32,
+      nrow = nrow(metadata),
+      ncol = as.integer(shard_manifest$dimension %||% 0L),
+      context = shard_paths$dir
+    )
+  } else {
+    matrix(numeric(), nrow = 0L, ncol = as.integer(shard_manifest$dimension %||% 0L))
+  }
+  list(metadata = metadata, matrix = matrix_data, manifest = shard_manifest)
+}
+
+.litxr_write_embedding_shard_parts <- function(paths, shard_key, metadata, embeddings) {
+  shard_paths <- .litxr_embedding_shard_paths(paths, shard_key)
+  .litxr_ensure_write_headroom(
+    file.path(shard_paths$dir, "metadata.fst"),
+    .litxr_estimate_embedding_write_bytes(metadata, embeddings),
+    context = "embedding shard write"
+  )
+  parent_dir <- dirname(shard_paths$dir)
+  staging_dir <- file.path(
+    parent_dir,
+    paste0(
+      ".",
+      basename(shard_paths$dir),
+      ".staging_",
+      Sys.getpid(),
+      "_",
+      format(Sys.time(), "%Y%m%d%H%M%S")
+    )
+  )
+  if (dir.exists(staging_dir)) {
+    unlink(staging_dir, recursive = TRUE, force = TRUE)
+  }
+  dir.create(staging_dir, recursive = TRUE, showWarnings = FALSE)
+  staging_paths <- shard_paths
+  staging_paths$dir <- staging_dir
+  metadata <- .litxr_normalize_embedding_metadata(metadata)
+  shard_meta <- data.table::data.table(ref_id = as.character(metadata$ref_id))
+  shard_matrix <- embeddings
+  local_manifest <- list(
+    shard_key = shard_key,
+    ref_id_bucket = shard_key,
+    dimension = as.integer(ncol(shard_matrix)),
+    records = as.integer(nrow(shard_meta)),
+    matrix_format = "float32",
+    updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+  .litxr_write_fst_atomic(shard_meta, file.path(staging_dir, "metadata.fst"))
+  .litxr_write_float32_matrix_atomic(shard_matrix, file.path(staging_dir, "matrix.f32"))
+  .litxr_write_json_atomic(local_manifest, file.path(staging_dir, "manifest.json"))
+  .litxr_replace_directory_atomic(staging_dir, shard_paths$dir)
+  local_manifest
 }
 
 .litxr_embedding_shard_keys <- function(paths) {
@@ -2086,19 +2307,45 @@ litxr_add_refs <- function(
 }
 
 .litxr_write_embedding_sharded_index <- function(paths, metadata, embeddings, manifest) {
+  .litxr_ensure_write_headroom(
+    file.path(paths$shards_dir, "metadata.fst"),
+    .litxr_estimate_embedding_write_bytes(metadata, embeddings),
+    context = "embedding shard-tree write"
+  )
   dir.create(paths$dir, recursive = TRUE, showWarnings = FALSE)
-  if (dir.exists(paths$shards_dir)) unlink(paths$shards_dir, recursive = TRUE)
-  dir.create(paths$shards_dir, recursive = TRUE, showWarnings = FALSE)
+  staging_shards_dir <- file.path(
+    dirname(paths$shards_dir),
+    paste0(
+      ".",
+      basename(paths$shards_dir),
+      ".staging_",
+      Sys.getpid(),
+      "_",
+      format(Sys.time(), "%Y%m%d%H%M%S")
+    )
+  )
+  if (dir.exists(staging_shards_dir)) unlink(staging_shards_dir, recursive = TRUE, force = TRUE)
+  dir.create(staging_shards_dir, recursive = TRUE, showWarnings = FALSE)
+  staging_paths <- paths
+  staging_paths$shards_dir <- staging_shards_dir
 
   metadata <- .litxr_normalize_embedding_metadata(metadata)
+  .litxr_write_embedding_raw_index(paths, metadata, field = manifest$field %||% "abstract")
   shard_key <- .litxr_embedding_shard_key(metadata$ref_id)
-  split_idx <- split(seq_len(nrow(metadata)), shard_key)
+  ord <- order(shard_key)
+  metadata <- metadata[ord, ]
+  embeddings <- embeddings[ord, , drop = FALSE]
+  shard_key <- shard_key[ord]
+  shard_runs <- rle(shard_key)
   shard_manifest <- list()
-  for (key in names(split_idx)) {
-    idx <- split_idx[[key]]
-    shard_paths <- .litxr_embedding_shard_paths(paths, key)
+  start <- 1L
+  for (i in seq_along(shard_runs$lengths)) {
+    len <- shard_runs$lengths[[i]]
+    key <- shard_runs$values[[i]]
+    shard_paths <- .litxr_embedding_shard_paths(staging_paths, key)
     dir.create(shard_paths$dir, recursive = TRUE, showWarnings = FALSE)
-    shard_meta <- metadata[idx, c("ref_id", "abstract"), drop = FALSE]
+    idx <- start:(start + len - 1L)
+    shard_meta <- data.table::data.table(ref_id = as.character(metadata$ref_id[idx]))
     shard_matrix <- embeddings[idx, , drop = FALSE]
     local_manifest <- list(
       shard_key = key,
@@ -2108,17 +2355,19 @@ litxr_add_refs <- function(
       matrix_format = "float32",
       updated_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
     )
-    .litxr_write_fst_atomic(as.data.frame(shard_meta), shard_paths$metadata)
+    .litxr_write_fst_atomic(shard_meta, shard_paths$metadata)
     .litxr_write_float32_matrix_atomic(shard_matrix, shard_paths$matrix_f32)
     .litxr_write_json_atomic(local_manifest, shard_paths$manifest)
     shard_manifest[[key]] <- local_manifest
+    start <- start + len
   }
 
   manifest$storage_version <- 2L
   manifest$matrix_format <- "float32"
-  manifest$shard_by <- "ref_id_hash"
+  manifest$shard_by <- "year"
   manifest$shards <- shard_manifest
   .litxr_write_json_atomic(manifest, paths$manifest)
+  .litxr_replace_directory_atomic(staging_shards_dir, paths$shards_dir)
   if (file.exists(paths$metadata)) unlink(paths$metadata)
   if (file.exists(paths$matrix)) unlink(paths$matrix)
   if (file.exists(paths$matrix_f32)) unlink(paths$matrix_f32)

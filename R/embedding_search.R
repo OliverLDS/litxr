@@ -62,7 +62,7 @@ litxr_embed_collection_delta <- function(
 #' Build a cached embedding index for one collection field
 #'
 #' Embeds one text field from `litxr_read_collection()` in batches and caches the
-#' resulting numeric matrix under `project.data_root/embeddings/`. The embedding
+#' resulting numeric matrix under `project.data_root/corpus/`. The embedding
 #' function is user supplied so callers can use providers such as
 #' `inferencer::embed_openrouter()` or `inferencer::embed_gemini()`. Completed
 #' batches are written to append-only delta shards and compacted into the main
@@ -182,6 +182,7 @@ litxr_compact_embedding_delta <- function(
     field = field,
     model = as.character(model),
     provider = as.character(provider),
+    cfg = cfg,
     overwrite = isTRUE(overwrite)
   )
 }
@@ -433,6 +434,7 @@ litxr_build_label_query_index <- function(
   if (nrow(todo)) {
     meta_parts <- list()
     matrix_parts <- list()
+    existing_dimension <- .litxr_label_query_existing_dimension(parts)
     if (nrow(parts$metadata)) {
       meta_parts[[length(meta_parts) + 1L]] <- parts$metadata
     }
@@ -447,13 +449,11 @@ litxr_build_label_query_index <- function(
         stop("`embed_fun` returned ", nrow(batch_matrix), " embeddings for ", nrow(batch), " query sentences.", call. = FALSE)
       }
 
-      existing_dimension <- .litxr_label_query_existing_dimension(parts)
       if (!is.na(existing_dimension) && existing_dimension != ncol(batch_matrix)) {
         stop("Label query embedding dimension changed from ", existing_dimension, " to ", ncol(batch_matrix), ".", call. = FALSE)
       }
 
-      batch_meta <- data.table::copy(batch)
-      meta_parts[[length(meta_parts) + 1L]] <- batch_meta
+      meta_parts[[length(meta_parts) + 1L]] <- batch
       matrix_parts[[length(matrix_parts) + 1L]] <- batch_matrix
     }
     parts$metadata <- data.table::rbindlist(meta_parts, fill = TRUE)
@@ -763,8 +763,8 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 
 .litxr_label_query_root_paths <- function(cfg, query_set_id) {
   root_dir <- file.path(
-    .litxr_project_embeddings_dir(cfg),
-    "label_queries",
+    .litxr_project_queries_dir(cfg),
+    "embeddings",
     .litxr_embedding_slug(query_set_id)
   )
   list(
@@ -862,8 +862,8 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 
 .litxr_label_query_available_models <- function(cfg, query_set_id) {
   query_root <- file.path(
-    .litxr_project_embeddings_dir(cfg),
-    "label_queries",
+    .litxr_project_queries_dir(cfg),
+    "embeddings",
     .litxr_embedding_slug(query_set_id)
   )
   if (!dir.exists(query_root)) {
@@ -1054,12 +1054,15 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
     return(data.table::data.table())
   }
   query_categories <- as.character(query_meta$category_id)
-  category_indices <- split(seq_along(query_categories), query_categories)
-  category_ids <- names(category_indices)
-  rows <- vector("list", length(category_indices))
-  for (i in seq_along(category_indices)) {
-    category_id <- category_ids[[i]]
-    idx <- category_indices[[i]]
+  ord <- order(query_categories)
+  sorted_categories <- query_categories[ord]
+  runs <- rle(sorted_categories)
+  rows <- vector("list", length(runs$lengths))
+  start <- 1L
+  for (i in seq_along(runs$lengths)) {
+    len <- runs$lengths[[i]]
+    category_id <- runs$values[[i]]
+    idx <- ord[start:(start + len - 1L)]
     category_scores <- score_matrix[, idx, drop = FALSE]
     values <- list(
       ref_id = as.character(corpus_meta$ref_id),
@@ -1074,6 +1077,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
       values[["score_top_k_mean"]] <- .litxr_top_k_mean_rows(category_scores, top_k)
     }
     rows[[i]] <- data.table::as.data.table(values)
+    start <- start + len
   }
   data.table::rbindlist(rows, fill = TRUE)
 }
@@ -1099,9 +1103,9 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
 
 .litxr_collect_embedding_score_parts <- function(collection_id, cfg, field, model, target_ref_ids, query_meta, query_matrix, aggregations, top_k, chunk_size, include_query_scores) {
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
-  target_ref_keys <- unique(vapply(as.character(target_ref_ids), .litxr_llm_digest_index_key, character(1)))
-  target_ref_keys <- target_ref_keys[!is.na(target_ref_keys) & nzchar(target_ref_keys)]
-  if (!length(target_ref_keys)) {
+  target_ref_ids <- unique(as.character(target_ref_ids))
+  target_ref_ids <- target_ref_ids[!is.na(target_ref_ids) & nzchar(target_ref_ids)]
+  if (!length(target_ref_ids)) {
     out <- data.table::data.table()
     return(list(category_scores = out, query_scores = out))
   }
@@ -1119,13 +1123,12 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   }
 
   if (.litxr_embedding_has_shards(paths)) {
-    shard_keys <- .litxr_score_target_shard_keys(target_ref_keys, .litxr_embedding_shard_keys(paths))
+    shard_keys <- .litxr_score_target_shard_keys(target_ref_ids, .litxr_embedding_shard_keys(paths))
     shard_keys <- shard_keys[nzchar(shard_keys)]
     for (key in shard_keys) {
       shard <- .litxr_read_embedding_shard_part(paths, key, read_matrix = TRUE)
       if (!nrow(shard$metadata) || !nrow(shard$matrix)) next
-      shard_keys <- vapply(as.character(shard$metadata$ref_id), .litxr_llm_digest_index_key, character(1))
-      keep <- shard_keys %in% target_ref_keys
+      keep <- as.character(shard$metadata$ref_id) %in% target_ref_ids
       if (!any(keep)) next
       shard_meta <- shard$metadata[keep, ]
       shard_matrix <- shard$matrix[keep, , drop = FALSE]
@@ -1146,8 +1149,7 @@ litxr_cosine_similarity <- function(query_vec, embedding_matrix) {
   } else {
     corpus <- litxr_read_embedding_index(collection_id, cfg, field = field, model = model)
     if (nrow(corpus$metadata) && nrow(corpus$matrix)) {
-      corpus_keys <- vapply(as.character(corpus$metadata$ref_id), .litxr_llm_digest_index_key, character(1))
-      keep <- corpus_keys %in% target_ref_keys
+      keep <- as.character(corpus$metadata$ref_id) %in% target_ref_ids
       corpus_meta <- corpus$metadata[keep, ]
       corpus_matrix <- corpus$matrix[keep, , drop = FALSE]
       .litxr_assert_unit_normalized_matrix(corpus_matrix, context = "embedding score corpus")

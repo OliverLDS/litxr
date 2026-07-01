@@ -7,6 +7,14 @@
 - Hardened DOI fallback ingestion and added focused DOI fallback regression
   coverage.
 
+# litxr 0.1.8.2
+
+- Continued the embedding compaction hardening work by hoisting disk-space
+  guards before shard metadata writes and staging shard-tree swaps.
+- Renamed the category inquiry cache/report scripts to reflect inquiry-set
+  semantics and removed obsolete wrapper scripts.
+- Added narrow raw-abstract repair tooling for the arXiv abstract corpus.
+
 # litxr 0.1.8
 
 - Added scaffolded lexical search modules for shard discovery, keyword/category
@@ -353,7 +361,7 @@
 - Expanded the interactive digest prompt with a full citation-logic
   `logic_type` vocabulary, explicit tag-deduplication guidance, and
   `anchor_ref_id` guidance for detected arXiv ids or DOIs.
-- Updated `scripts/report_arxiv_category_labels.R` to exclude arXiv ids already
+- Updated `scripts/report_arxiv_category_inquiry_set.R` to exclude arXiv ids already
   present in the blog article record log, including comma-separated grouped ids.
 
 # litxr 0.0.8.4
@@ -432,7 +440,7 @@
   ChatGPT handoff and local JSON ingestion.
 - Added `scripts/get_ref_summary.sh` to print a local abstract plus any
   existing research schema in markdown-style form.
-- Added `scripts/cache_category_inquiries.R` to build persistent local inquiry
+- Added `scripts/cache_arxiv_category_inquiry_set.R` to build persistent local inquiry
   embedding caches from YAML files.
 - Added `scripts/write_bib_by_ref_ids.sh` for ref-id-based BibTeX file creation
   and append/overwrite workflows.
@@ -446,7 +454,7 @@
 # litxr 0.0.7.3
 
 - Renamed the category-label reporting script to
-  `scripts/report_arxiv_category_labels.R` and fixed its per-category filtering
+  `scripts/report_arxiv_category_inquiry_set.R` and fixed its per-category filtering
   and reporting order.
 - Made the category-label reporting script reject unknown CLI flags, use cached
   local inquiry embeddings by default, and support `--local-inq` plus

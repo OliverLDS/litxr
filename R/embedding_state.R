@@ -20,8 +20,7 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
     stop("`model` must be supplied and non-empty.", call. = FALSE)
   }
 
-  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
-  collection_ref_ids <- unique(as.character(targets$ref_id[!is.na(targets$ref_id) & nzchar(targets$ref_id)]))
+  collection_ref_ids <- .litxr_embedding_target_ref_ids_from_thin_ref_stores(cfg, collection_id)
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
   main <- .litxr_read_embedding_index_parts(paths, read_matrix = FALSE)
@@ -44,6 +43,53 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
     missing = length(missing_ref_ids),
     coverage_pct = if (length(collection_ref_ids)) length(embedded_in_collection) / length(collection_ref_ids) else NA_real_
   )
+}
+
+.litxr_embedding_target_ref_ids_from_thin_ref_stores <- function(cfg, collection_id) {
+  collection_index <- .litxr_collection_index_for_id(cfg, collection_id)
+  if (is.na(collection_index) || collection_index < 1L) {
+    stop("Collection not found in config: ", collection_id, call. = FALSE)
+  }
+
+  arxiv_rows <- .litxr_read_fst_table_safe(
+    .litxr_ref_arxiv_path(cfg),
+    columns = c("arxiv_id", "collection_index")
+  )
+  doi_rows <- .litxr_read_fst_table_safe(
+    .litxr_ref_doi_path(cfg),
+    columns = c("doi", "collection_index")
+  )
+
+  ref_ids <- character()
+  if (nrow(arxiv_rows) && "arxiv_id" %in% names(arxiv_rows)) {
+    arxiv_rows <- arxiv_rows[
+      !is.na(arxiv_rows$collection_index) &
+        arxiv_rows$collection_index == collection_index &
+        !is.na(arxiv_rows$arxiv_id) &
+        nzchar(arxiv_rows$arxiv_id),
+      ,
+      drop = FALSE
+    ]
+    if (nrow(arxiv_rows)) {
+      ref_ids <- c(ref_ids, vapply(arxiv_rows$arxiv_id, .litxr_bare_arxiv_id, character(1)))
+    }
+  }
+  if (nrow(doi_rows) && "doi" %in% names(doi_rows)) {
+    doi_rows <- doi_rows[
+      !is.na(doi_rows$collection_index) &
+        doi_rows$collection_index == collection_index &
+        !is.na(doi_rows$doi) &
+        nzchar(doi_rows$doi),
+      ,
+      drop = FALSE
+    ]
+    if (nrow(doi_rows)) {
+      ref_ids <- c(ref_ids, vapply(doi_rows$doi, .litxr_bare_doi, character(1)))
+    }
+  }
+
+  ref_ids <- unique(ref_ids[!is.na(ref_ids) & nzchar(ref_ids)])
+  ref_ids
 }
 
 .litxr_read_fst_table_safe <- function(path, columns = NULL) {
@@ -194,8 +240,7 @@ litxr_diagnose_embedding_cache <- function(collection_id, config = NULL, field =
     stop("`model` must be supplied and non-empty.", call. = FALSE)
   }
 
-  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
-  collection_ref_ids <- unique(as.character(targets$ref_id[!is.na(targets$ref_id) & nzchar(targets$ref_id)]))
+  collection_ref_ids <- .litxr_embedding_target_ref_ids_from_thin_ref_stores(cfg, collection_id)
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
   manifest <- if (file.exists(paths$manifest)) jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE) else list()
@@ -515,4 +560,206 @@ litxr_migrate_embedding_metadata_files <- function(
     rewritten <- c(rewritten, path)
   }
   unique(rewritten)
+}
+
+.litxr_embedding_raw_metadata_path <- function(cfg, collection_id, field = "abstract") {
+  file.path(
+    .litxr_project_corpus_dir(cfg),
+    .litxr_embedding_slug(collection_id),
+    .litxr_embedding_slug(field),
+    "raw",
+    "metadata.fst"
+  )
+}
+
+.litxr_repair_embedding_raw_metadata_index <- function(collection_id, config = NULL, field = "abstract") {
+  cfg <- if (is.character(config)) litxr_read_config(config) else config
+  if (is.null(cfg)) cfg <- litxr_read_config()
+  field <- as.character(field)[[1L]]
+  if (!nzchar(field)) {
+    field <- "abstract"
+  }
+
+  collection_index <- .litxr_collection_index_for_id(cfg, collection_id)
+  if (is.na(collection_index) || collection_index < 1L) {
+    stop("Collection not found in config: ", collection_id, call. = FALSE)
+  }
+
+  raw_path <- .litxr_embedding_raw_metadata_path(cfg, collection_id, field = field)
+  ref_path <- .litxr_ref_arxiv_path(cfg)
+  collection_ref_dir <- .litxr_collection_ref_dir(cfg, collection_id)
+  result <- list(
+    raw_path = raw_path,
+    added_arxiv_ids = character(),
+    updated_arxiv_ids = character(),
+    raw_only_arxiv_ids = character(),
+    ref_only_arxiv_ids = character(),
+    changed = FALSE,
+    total = 0L
+  )
+
+  normalize_arxiv_ids <- function(x) {
+    x <- as.character(x)
+    keep <- !is.na(x) & nzchar(x)
+    if (any(keep)) {
+      x[keep] <- trimws(x[keep])
+      x[keep] <- sub("^arxiv:", "", x[keep], ignore.case = TRUE)
+      x[keep] <- sub("v[0-9]+$", "", x[keep])
+    }
+    x[!keep] <- NA_character_
+    x
+  }
+
+  raw_columns <- if (file.exists(raw_path)) {
+    tryCatch(fst::metadata_fst(raw_path)$columnNames, error = function(e) NULL)
+  } else {
+    NULL
+  }
+  if (is.null(raw_columns) || !length(raw_columns)) {
+    raw_rows <- data.table::data.table(arxiv_id = character())
+    raw_id_col <- "arxiv_id"
+  } else {
+    raw_id_col <- if ("arxiv_id" %in% raw_columns) {
+      "arxiv_id"
+    } else if ("ref_id" %in% raw_columns) {
+      "ref_id"
+    } else {
+      stop("Raw metadata cache must contain `arxiv_id` or `ref_id`: ", raw_path, call. = FALSE)
+    }
+    raw_cols <- intersect(c(raw_id_col, field), raw_columns)
+    raw_rows <- fst::read_fst(raw_path, as.data.table = TRUE, columns = raw_cols)
+    if (!(raw_id_col %in% names(raw_rows))) {
+      stop("Raw metadata cache is missing key column `", raw_id_col, "`: ", raw_path, call. = FALSE)
+    }
+    if (raw_id_col != "arxiv_id") {
+      data.table::setnames(raw_rows, raw_id_col, "arxiv_id")
+    }
+  }
+  if (!nrow(raw_rows)) {
+    raw_ids <- character()
+  } else {
+    raw_rows$arxiv_id <- normalize_arxiv_ids(raw_rows$arxiv_id)
+    raw_rows <- raw_rows[!is.na(raw_rows$arxiv_id) & nzchar(raw_rows$arxiv_id), , drop = FALSE]
+    raw_rows <- raw_rows[!duplicated(raw_rows$arxiv_id, fromLast = TRUE), , drop = FALSE]
+    raw_ids <- as.character(raw_rows$arxiv_id)
+  }
+  result$total <- length(raw_ids)
+
+  ref_rows <- .litxr_read_fst_table_safe(
+    ref_path,
+    columns = c("arxiv_id", "collection_index")
+  )
+  if (!nrow(ref_rows) || !("arxiv_id" %in% names(ref_rows))) {
+    return(result)
+  }
+  ref_rows <- ref_rows[
+    !is.na(ref_rows$collection_index) &
+      ref_rows$collection_index == collection_index &
+      !is.na(ref_rows$arxiv_id) &
+      nzchar(ref_rows$arxiv_id),
+    ,
+    drop = FALSE
+  ]
+  if (!nrow(ref_rows)) {
+    return(result)
+  }
+  ref_rows$arxiv_id <- normalize_arxiv_ids(ref_rows$arxiv_id)
+  ref_rows <- ref_rows[!is.na(ref_rows$arxiv_id) & nzchar(ref_rows$arxiv_id), , drop = FALSE]
+  ref_rows <- ref_rows[!duplicated(ref_rows$arxiv_id, fromLast = TRUE), , drop = FALSE]
+  if (!nrow(ref_rows)) {
+    return(result)
+  }
+  ref_ids <- unique(as.character(ref_rows$arxiv_id))
+
+  raw_only_ids <- setdiff(raw_ids, ref_ids)
+  if (length(raw_only_ids)) {
+    stop(
+      "Raw embedding metadata contains arXiv id(s) not present in ref_arxiv.fst for collection ",
+      collection_id,
+      ": ",
+      paste(raw_only_ids, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  if (setequal(raw_ids, ref_ids)) {
+    return(result)
+  }
+  missing_from_raw <- setdiff(ref_ids, raw_ids)
+  if (!length(missing_from_raw)) {
+    return(result)
+  }
+
+  ref_rows <- .litxr_read_fst_table_safe(
+    ref_path,
+    columns = c("arxiv_id", "collection_index", "json_filename")
+  )
+  if (!nrow(ref_rows) || !("arxiv_id" %in% names(ref_rows)) || !("json_filename" %in% names(ref_rows))) {
+    return(result)
+  }
+  ref_rows <- ref_rows[
+    !is.na(ref_rows$collection_index) &
+      ref_rows$collection_index == collection_index &
+      !is.na(ref_rows$arxiv_id) &
+      nzchar(ref_rows$arxiv_id) &
+      as.character(ref_rows$arxiv_id) %in% missing_from_raw,
+    ,
+    drop = FALSE
+  ]
+  if (!nrow(ref_rows)) {
+    return(result)
+  }
+  ref_rows$arxiv_id <- normalize_arxiv_ids(ref_rows$arxiv_id)
+  ref_rows <- ref_rows[!is.na(ref_rows$arxiv_id) & nzchar(ref_rows$arxiv_id), , drop = FALSE]
+  ref_rows <- ref_rows[!duplicated(ref_rows$arxiv_id, fromLast = TRUE), , drop = FALSE]
+  if (!nrow(ref_rows)) {
+    return(result)
+  }
+  json_paths <- file.path(collection_ref_dir, as.character(ref_rows$json_filename))
+  names(json_paths) <- as.character(ref_rows$arxiv_id)
+  json_paths <- json_paths[!is.na(names(json_paths)) & nzchar(names(json_paths)) & !is.na(json_paths) & nzchar(json_paths)]
+  if (!length(json_paths)) {
+    return(result)
+  }
+
+  hydrated <- .litxr_hydrate_rows_from_json_paths(
+    data.table::data.table(arxiv_id = as.character(ref_rows$arxiv_id)),
+    json_paths,
+    fields = field
+  )
+  if (!nrow(hydrated) || !(field %in% names(hydrated))) {
+    return(result)
+  }
+  hydrated_ids <- as.character(hydrated$arxiv_id)
+  hydrated_values <- as.character(hydrated[[field]])
+  missing_hydrated <- hydrated_ids[is.na(hydrated_values) | !nzchar(hydrated_values)]
+  if (length(missing_hydrated)) {
+    stop(
+      "Unable to hydrate raw abstract(s) for arXiv id(s): ",
+      paste(missing_hydrated, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  add_rows <- data.table::data.table(arxiv_id = hydrated_ids, abstract = hydrated_values)
+  if (nrow(raw_rows)) {
+    raw_rows <- data.table::rbindlist(list(raw_rows, add_rows), fill = TRUE)
+  } else {
+    raw_rows <- add_rows
+  }
+
+  keep_cols <- unique(c("arxiv_id", field))
+  raw_rows <- raw_rows[, intersect(keep_cols, names(raw_rows)), with = FALSE]
+  raw_rows <- raw_rows[!is.na(raw_rows$arxiv_id) & nzchar(raw_rows$arxiv_id), , drop = FALSE]
+  raw_rows <- raw_rows[!duplicated(raw_rows$arxiv_id, fromLast = TRUE), , drop = FALSE]
+  raw_rows <- raw_rows[order(match(raw_rows$arxiv_id, ref_ids)), , drop = FALSE]
+  fst::write_fst(raw_rows, raw_path)
+
+  result$added_arxiv_ids <- hydrated_ids
+  result$updated_arxiv_ids <- character()
+  result$raw_only_arxiv_ids <- raw_only_ids
+  result$ref_only_arxiv_ids <- missing_from_raw
+  result$changed <- TRUE
+  result$total <- nrow(raw_rows)
+  result
 }
