@@ -65,7 +65,7 @@ if (isTRUE(parsed$show_help)) {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/cache_arxiv_category_inquiry_set.R --inquiry PATH [--query-set-id QUERY_SET_ID]",
+      "  Rscript scripts/cache_arxiv_embedding_inquiry_set.R --inquiry PATH [--query-set-id QUERY_SET_ID]",
       "",
       "Options:",
       "  --inquiry PATH            YAML file defining category ids and inquiry sentences.",

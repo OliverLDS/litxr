@@ -7,6 +7,13 @@
 - Hardened DOI fallback ingestion and added focused DOI fallback regression
   coverage.
 
+# litxr 0.1.8.3
+
+- Fixed the digest summary wrapper so it resolves the current on-disk digest
+  file before falling back to the digest index bootstrap path.
+- Renamed the human summary wrapper to `scripts/report_ref_summary.sh` and
+  kept the digest template call namespace-local.
+
 # litxr 0.1.8.2
 
 - Continued the embedding compaction hardening work by hoisting disk-space

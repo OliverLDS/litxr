@@ -34,6 +34,7 @@
 #' @param years Optional subset of years to include.
 #' @param index_dir Output directory for the BM25 index.
 #' @param lowercase Whether normalization lowercases text.
+#' @param input_already_normalized Whether shard text is already normalized.
 #' @param overwrite Whether an existing index directory may be replaced.
 #' @param min_df Minimum document frequency to retain a term.
 #' @param max_df_prop Maximum document-frequency proportion to retain a term.
@@ -48,6 +49,7 @@ litxr_bm25_build_index <- function(
   years = NULL,
   index_dir,
   lowercase = TRUE,
+  input_already_normalized = FALSE,
   overwrite = FALSE,
   min_df = 1L,
   max_df_prop = 1.0,
@@ -96,7 +98,7 @@ litxr_bm25_build_index <- function(
     if (anyDuplicated(shard$doc_id)) {
       stop("Duplicated `doc_id` detected within shard: ", shard_paths[[i]], call. = FALSE)
     }
-    tokens <- litxr_lexical_tokenize(shard$text)
+    tokens <- litxr_lexical_tokenize(shard$text, normalize = !isTRUE(input_already_normalized))
     dl <- lengths(tokens)
     doc_int <- doc_offset + seq_len(nrow(shard))
     docs_parts[[length(docs_parts) + 1L]] <- data.table::data.table(

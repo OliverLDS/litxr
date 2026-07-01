@@ -23,6 +23,8 @@ litxr_lexical_normalize_text(
 with spaces.}
 
 \item{keep_symbols}{Symbols preserved during punctuation cleanup.}
+
+\item{normalize}{Whether to normalize text before tokenization.}
 }
 \value{
 Normalized character vector.

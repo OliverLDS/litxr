@@ -11,6 +11,7 @@ litxr_bm25_build_index(
   years = NULL,
   index_dir,
   lowercase = TRUE,
+  input_already_normalized = FALSE,
   overwrite = FALSE,
   min_df = 1L,
   max_df_prop = 1,
@@ -29,6 +30,8 @@ litxr_bm25_build_index(
 \item{index_dir}{Output directory for the BM25 index.}
 
 \item{lowercase}{Whether normalization lowercases text.}
+
+\item{input_already_normalized}{Whether shard text is already normalized.}
 
 \item{overwrite}{Whether an existing index directory may be replaced.}
 

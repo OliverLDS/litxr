@@ -732,7 +732,7 @@ litxr_migrate_embedding_metadata_files <- function(
   }
   hydrated_ids <- as.character(hydrated$arxiv_id)
   hydrated_values <- as.character(hydrated[[field]])
-  missing_hydrated <- hydrated_ids[is.na(hydrated_values) | !nzchar(hydrated_values)]
+  missing_hydrated <- hydrated_ids[is.na(hydrated_values) | !nzchar(trimws(hydrated_values))]
   if (length(missing_hydrated)) {
     stop(
       "Unable to hydrate raw abstract(s) for arXiv id(s): ",

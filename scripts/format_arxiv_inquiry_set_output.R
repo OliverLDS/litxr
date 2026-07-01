@@ -36,10 +36,10 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/format_arxiv_category_inquiry_set_output.R [--format md|ids] < input.json",
+      "  Rscript scripts/format_arxiv_inquiry_set_output.R [--format md|ids] < input.json",
       "",
       "Purpose:",
-      "  Convert the JSON output of scripts/report_arxiv_category_inquiry_set.R",
+      "  Convert the JSON output of scripts/report_arxiv_embedding_inquiry_set.R",
       "  into human-readable markdown or a flat JSON array of arXiv ids.",
       "",
       "Input:",

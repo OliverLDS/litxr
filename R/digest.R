@@ -155,14 +155,21 @@
 }
 
 .litxr_llm_digest_current_path <- function(cfg, ref_id) {
+  direct_path <- .litxr_llm_digest_path(cfg, ref_id)
+  if (file.exists(direct_path)) {
+    return(direct_path)
+  }
   row <- .litxr_llm_digest_index_lookup(cfg, ref_id)
   if (!is.null(row) && nrow(row)) {
     json_filename <- as.character(row$json_filename[[1L]])
     if (!is.na(json_filename) && nzchar(json_filename)) {
-      return(file.path(.litxr_project_llm_dir(cfg), basename(json_filename)))
+      indexed_path <- file.path(.litxr_project_llm_dir(cfg), basename(json_filename))
+      if (file.exists(indexed_path)) {
+        return(indexed_path)
+      }
     }
   }
-  .litxr_llm_digest_path(cfg, ref_id)
+  direct_path
 }
 
 litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {

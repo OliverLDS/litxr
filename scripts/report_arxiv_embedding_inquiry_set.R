@@ -84,7 +84,7 @@ if (show_help) {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/report_arxiv_category_inquiry_set.R [--embed-missing] [--year-from YYYY] [--year-to YYYY] [--delta-only] [--local-inq QUERY_SET_ID] [--inquiry PATH] [--top_n 3] [--threshold 0.45]",
+      "  Rscript scripts/report_arxiv_embedding_inquiry_set.R [--embed-missing] [--year-from YYYY] [--year-to YYYY] [--delta-only] [--local-inq QUERY_SET_ID] [--inquiry PATH] [--top_n 3] [--threshold 0.45]",
       "",
       "Options:",
       "  --embed-missing    Run litxr_embed_collection_delta() before scoring. Default: off.",

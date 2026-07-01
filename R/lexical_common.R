@@ -147,6 +147,7 @@ litxr_lexical_read_shard <- function(
 #' Applies lightweight Unicode-aware normalization for lexical matching.
 #'
 #' @param x Character vector.
+#' @param normalize Whether to normalize text before tokenization.
 #' @param lowercase Whether to lowercase text.
 #' @param normalize_unicode Whether to normalize Unicode.
 #' @param collapse_hyphen Whether to replace hyphens, slashes, and underscores
@@ -192,8 +193,14 @@ litxr_lexical_normalize_text <- function(
 #'
 #' @return List of character vectors.
 #' @export
-litxr_lexical_tokenize <- function(x) {
-  x <- litxr_lexical_normalize_text(x, collapse_hyphen = FALSE, keep_symbols = c("+", "#", ".", "-"))
+litxr_lexical_tokenize <- function(x, normalize = TRUE) {
+  x <- as.character(x)
+  x[is.na(x)] <- ""
+  if (isTRUE(normalize)) {
+    x <- litxr_lexical_normalize_text(x, collapse_hyphen = FALSE, keep_symbols = c("+", "#", ".", "-"))
+  } else {
+    x <- enc2utf8(x)
+  }
   if (!length(x)) {
     return(list())
   }

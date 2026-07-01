@@ -55,6 +55,7 @@ usage <- function() {
       "  - Compares bare arXiv ids in corpus/<collection>/abstract/raw/metadata.fst",
       "    against ref_arxiv.fst for that collection.",
       "  - Rehydrates only missing raw rows from the collection JSON files.",
+      "  - Writes bare arXiv ids and raw abstracts to the raw metadata fst.",
       "  - Errors if raw metadata contains arXiv ids not present in ref_arxiv.fst.",
       "  - Does not touch embedding shards or compaction state.",
       sep = "\n"

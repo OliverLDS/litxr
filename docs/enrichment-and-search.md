@@ -95,7 +95,7 @@ For an older cache that only has `metadata.fst`, you can backfill the
 descriptor from a model subdirectory with:
 
 ```bash
-Rscript scripts/cache_arxiv_category_inquiry_set.R \
+Rscript scripts/cache_arxiv_embedding_inquiry_set.R \
   --cache-dir /path/to/ai_category_query_set_v1/nvidia_llama_nemotron_embed_vl_1b_v2_free
 ```
 
@@ -295,7 +295,7 @@ The prompt text is assembled from Markdown fragments under
 `inst/prompts/llm_digest_v4/fragments/`, while the shell wrapper remains a thin
 orchestration layer.
 
-To inspect a reference quickly, use `scripts/human/get_ref_summary.sh`. By default it
+To inspect a reference quickly, use `scripts/report_ref_summary.sh`. By default it
 prints only the key schema sections. Pass `--complete` or `--report complete`
 to render the full digest.
 

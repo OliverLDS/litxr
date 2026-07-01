@@ -4,7 +4,7 @@
 \alias{litxr_lexical_tokenize}
 \title{Tokenize lexical text}
 \usage{
-litxr_lexical_tokenize(x)
+litxr_lexical_tokenize(x, normalize = TRUE)
 }
 \arguments{
 \item{x}{Character vector.}

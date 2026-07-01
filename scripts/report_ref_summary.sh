@@ -7,9 +7,9 @@ script_dir="${0:A:h}"
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   cat <<'EOF'
 Usage:
-  scripts/human/get_ref_summary.sh --arxiv-id ARXIV_ID [--report key|complete]
-  scripts/human/get_ref_summary.sh --doi DOI [--report key|complete]
-  scripts/human/get_ref_summary.sh --isbn ISBN [--report key|complete]
+  scripts/report_ref_summary.sh --arxiv-id ARXIV_ID [--report key|complete]
+  scripts/report_ref_summary.sh --doi DOI [--report key|complete]
+  scripts/report_ref_summary.sh --isbn ISBN [--report key|complete]
 
 Options:
   --arxiv-id ID  Strict arXiv id lookup. Use a bare arXiv id such as 2202.01677.
@@ -251,7 +251,7 @@ if (is.na(abstract) || !nzchar(trimws(abstract))) {
 digest_ref_id <- ref_id
 digest <- tryCatch(litxr::litxr_read_llm_digest(digest_ref_id, cfg), error = function(e) NULL)
 if (is.null(digest)) {
-  digest <- litxr::litxr_llm_digest_template(ref_id, schema_version = "v4")
+  digest <- litxr:::litxr_llm_digest_template(ref_id, schema_version = "v4")
   digest$summary <- NA_character_
   digest$motivation <- NA_character_
   digest$research_questions <- character()

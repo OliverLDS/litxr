@@ -19,6 +19,34 @@
   file.path(.litxr_project_root(cfg), "corpus")
 }
 
+.litxr_project_corpus_field_dir <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_dir(cfg), as.character(collection_id)[[1L]], as.character(field)[[1L]])
+}
+
+.litxr_project_corpus_field_raw_dir <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_field_dir(cfg, collection_id, field), "raw")
+}
+
+.litxr_project_corpus_field_raw_metadata_path <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_field_raw_dir(cfg, collection_id, field), "metadata.fst")
+}
+
+.litxr_project_corpus_field_lexical_dir <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_field_dir(cfg, collection_id, field), "lexical")
+}
+
+.litxr_project_corpus_field_lexical_metadata_path <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_field_lexical_dir(cfg, collection_id, field), "metadata.fst")
+}
+
+.litxr_project_corpus_field_lexical_postings_path <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_field_lexical_dir(cfg, collection_id, field), "postings.fst")
+}
+
+.litxr_project_corpus_field_lexical_vocab_path <- function(cfg, collection_id, field) {
+  file.path(.litxr_project_corpus_field_lexical_dir(cfg, collection_id, field), "vocab.fst")
+}
+
 .litxr_project_queries_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "queries")
 }

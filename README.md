@@ -115,16 +115,16 @@ Included shell helpers:
 - `scripts/repair_arxiv_range.R`
 - `scripts/repair_arxiv_latest.R`
 - `scripts/human/build_llm_digest_interactive.sh`
-- `scripts/human/get_ref_summary.sh`
-- `scripts/report_arxiv_category_inquiry_set.R`
-- `scripts/cache_arxiv_category_inquiry_set.R`
+- `scripts/report_ref_summary.sh`
+- `scripts/report_arxiv_embedding_inquiry_set.R`
+- `scripts/cache_arxiv_embedding_inquiry_set.R`
 - `scripts/write_bib_by_ref_ids.sh`
 
 The arXiv repair scripts now prefer `--collection-id`; `--journal-id` still
 works as a compatibility alias.
 Range repair writes fetched pages to a small delta index during the run and
 compacts that delta into the full collection index once at the end by default.
-`scripts/human/get_ref_summary.sh` prints a key research-schema summary by default;
+`scripts/report_ref_summary.sh` prints a key research-schema summary by default;
 use `--complete` for the full digest rendering.
 The interactive digest prompt is built by `litxr_llm_digest_prompt()` from
 package fragments under `inst/prompts/`. New interactive prompts use schema
