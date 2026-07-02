@@ -151,7 +151,7 @@ if (!is.null(json_raw) && nzchar(json_raw) && file.exists(json_path)) {
 result <- tryCatch(
   {
     cfg <- litxr::litxr_read_config()
-    existing <- litxr::litxr_read_llm_digest(ref_id, cfg)
+    existing <- litxr:::litxr_read_llm_digest(ref_id, cfg)
     existing_revision <- if (is.null(existing) || is.null(existing$digest_revision)) {
       NA_integer_
     } else {
@@ -191,7 +191,7 @@ result <- tryCatch(
       keep_history = TRUE,
       bump_revision = identical(mode, "revise")
     )
-    written <- litxr::litxr_read_llm_digest(ref_id, cfg)
+    written <- litxr:::litxr_read_llm_digest(ref_id, cfg)
     written_revision <- if (is.null(written) || is.null(written$digest_revision)) {
       NA_integer_
     } else {

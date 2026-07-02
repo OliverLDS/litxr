@@ -114,7 +114,7 @@ Included shell helpers:
 
 - `scripts/repair_arxiv_range.R`
 - `scripts/repair_arxiv_latest.R`
-- `scripts/human/build_llm_digest_interactive.sh`
+- `scripts/run_llm_digest_interactive.sh`
 - `scripts/report_ref_summary.sh`
 - `scripts/report_arxiv_embedding_inquiry_set.R`
 - `scripts/cache_arxiv_embedding_inquiry_set.R`

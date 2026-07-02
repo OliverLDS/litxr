@@ -5,7 +5,7 @@ set -eu
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   cat <<'EOF'
 Usage:
-  scripts/human/enrich_arxiv_with_doi.sh --arxiv-id ARXIV_ID --doi DOI
+  scripts/add_ref_identity_pair.sh --arxiv-id ARXIV_ID --doi DOI
 
 Options:
   --arxiv-id ID  Bare arXiv id or canonical arXiv ref_id.

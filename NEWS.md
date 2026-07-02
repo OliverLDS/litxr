@@ -1,3 +1,10 @@
+# litxr 0.1.8.4
+
+- Added an explicit thin digest-store sync script for `index/llm_digest.fst`
+  instead of bootstrapping that index from reader paths.
+- Kept digest summary and ingest wrappers on the internal digest reader so the
+  report path no longer depends on an exported status helper.
+
 # litxr 0.1.8.1
 
 - Fixed the linked-DOI BibTeX replacement path so arXiv-keyed entries keep

@@ -275,12 +275,12 @@ Current reasons:
 
 For manual schema-v4 extraction with ChatGPT, use:
 
-- `scripts/human/build_llm_digest_interactive.sh`
+- `scripts/run_llm_digest_interactive.sh`
 
 Example:
 
 ```sh
-scripts/human/build_llm_digest_interactive.sh \
+scripts/run_llm_digest_interactive.sh \
   --ref-id arxiv:2505.07087
 ```
 

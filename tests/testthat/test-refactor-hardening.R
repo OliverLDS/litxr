@@ -125,7 +125,7 @@ test_that("refactor hardening paths work through identity/entity layer", {
 
   diag_script <- find_script("scripts", "diagnose_refactor_store.R")
   migrate_script <- find_script("scripts", "sync_thin_ref_stores.R")
-  human_enrich_script <- find_script("scripts", "human", "enrich_arxiv_with_doi.sh")
+  human_enrich_script <- find_script("scripts", "add_ref_identity_pair.sh")
   expect_silent(parse(file = diag_script))
   expect_silent(parse(file = migrate_script))
   expect_equal(system2("zsh", c("-n", human_enrich_script)), 0L)

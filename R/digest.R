@@ -71,7 +71,7 @@
 .litxr_read_llm_digest_index <- function(cfg) {
   path <- .litxr_project_llm_digest_index_path(cfg)
   if (!file.exists(path)) {
-    return(.litxr_bootstrap_llm_digest_index(cfg))
+    return(.litxr_empty_llm_digest_index())
   }
   rows <- tryCatch(
     fst::read_fst(path, as.data.table = TRUE),
@@ -80,7 +80,7 @@
   rows <- data.table::as.data.table(rows)
   required <- c("ref_id", "json_filename", "history_dir")
   if (!nrow(rows) || !all(required %in% names(rows))) {
-    return(.litxr_bootstrap_llm_digest_index(cfg))
+    return(.litxr_empty_llm_digest_index())
   }
   rows <- rows[, required, with = FALSE]
   rows$ref_id <- vapply(rows$ref_id, .litxr_llm_digest_index_key, character(1))

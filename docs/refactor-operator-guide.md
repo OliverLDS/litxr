@@ -37,7 +37,7 @@ Practical effect:
 ### arXiv and DOI linking
 
 For linking flows such as `litxr_add_ref_identity_pair()` and
-`scripts/human/enrich_arxiv_with_doi.sh`:
+`scripts/add_ref_identity_pair.sh`:
 
 - do not rewrite canonical surface `ref_id` values
 - append only the arXiv/DOI pair to `ref_identity_map.fst`
