@@ -1,7 +1,18 @@
 # litxr 0.1.8.5
 
-- Maintenance release bump for the current thin-index, digest, embedding, and
-  lexical workflow state.
+- Expanded the thin-index and cached-digest workflow so schema refreshes and
+  digest ingestion stay on the thin `llm_digest` index instead of old bootstrap
+  readers.
+- Narrowed BibTeX linked-DOI resolution to batch-local ids and kept the
+  replacement/export path key-stable while preloading the needed thin lookup
+  caches once per run.
+- Refined arXiv/DOI collection sync and thin-store refresh helpers to follow
+  the shared `ref/` and `log/` layout with incremental cutoff logs.
+- Continued the embedding and lexical inquiry cleanup by trimming wide
+  metadata hydration, tightening raw-abstract repair, and keeping keyword/BM25
+  search on tokenized lexical caches.
+- Added and reorganized wrapper scripts and supporting docs around the thin
+  digest, BibTeX, embedding, and lexical workflows.
 
 # litxr 0.1.8.4
 
@@ -9,15 +20,6 @@
   instead of bootstrapping that index from reader paths.
 - Kept digest summary and ingest wrappers on the internal digest reader so the
   report path no longer depends on an exported status helper.
-
-# litxr 0.1.8.1
-
-- Fixed the linked-DOI BibTeX replacement path so arXiv-keyed entries keep
-  their original BibTeX keys while being rewritten with DOI-backed fields.
-- Narrowed BibTeX link and scaffold resolution to the ids present in the
-  current `.bib` batch instead of preloading broad identity/scaffold tables.
-- Hardened DOI fallback ingestion and added focused DOI fallback regression
-  coverage.
 
 # litxr 0.1.8.3
 
@@ -33,6 +35,15 @@
 - Renamed the category inquiry cache/report scripts to reflect inquiry-set
   semantics and removed obsolete wrapper scripts.
 - Added narrow raw-abstract repair tooling for the arXiv abstract corpus.
+
+# litxr 0.1.8.1
+
+- Fixed the linked-DOI BibTeX replacement path so arXiv-keyed entries keep
+  their original BibTeX keys while being rewritten with DOI-backed fields.
+- Narrowed BibTeX link and scaffold resolution to the ids present in the
+  current `.bib` batch instead of preloading broad identity/scaffold tables.
+- Hardened DOI fallback ingestion and added focused DOI fallback regression
+  coverage.
 
 # litxr 0.1.8
 
