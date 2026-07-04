@@ -1,3 +1,8 @@
+# litxr 0.1.8.5
+
+- Maintenance release bump for the current thin-index, digest, embedding, and
+  lexical workflow state.
+
 # litxr 0.1.8.4
 
 - Added an explicit thin digest-store sync script for `index/llm_digest.fst`
