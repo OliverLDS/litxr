@@ -68,7 +68,7 @@ litxr_migrate_refactor_indexes()
 
 This helper:
 
-- optionally rebuilds selected collection projection indexes from `ref_json/`
+- optionally rebuilds selected collection JSON stores from `ref/<collection_id>/`
 - refreshes project projection caches from collection state
 - rebuilds `ref_identity_map.fst`, `entities.fst`, `entity_collections.fst`, and
   `entity_status.fst`

@@ -46,6 +46,28 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
 }
 
 .litxr_embedding_target_ref_ids_from_thin_ref_stores <- function(cfg, collection_id) {
+  raw_path <- .litxr_embedding_raw_metadata_path(cfg, collection_id, field = "abstract")
+  if (file.exists(raw_path)) {
+    raw_columns <- tryCatch(fst::metadata_fst(raw_path)$columnNames, error = function(e) NULL)
+    raw_id_col <- if (!is.null(raw_columns) && "arxiv_id" %in% raw_columns) {
+      "arxiv_id"
+    } else if (!is.null(raw_columns) && "ref_id" %in% raw_columns) {
+      "ref_id"
+    } else {
+      NULL
+    }
+    if (!is.null(raw_id_col)) {
+      raw_rows <- .litxr_read_fst_table_safe(raw_path, columns = c(raw_id_col))
+      if (nrow(raw_rows) && raw_id_col %in% names(raw_rows)) {
+        ref_ids <- unique(as.character(raw_rows[[raw_id_col]]))
+        ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
+        if (length(ref_ids)) {
+          return(ref_ids)
+        }
+      }
+    }
+  }
+
   collection_index <- .litxr_collection_index_for_id(cfg, collection_id)
   if (is.na(collection_index) || collection_index < 1L) {
     stop("Collection not found in config: ", collection_id, call. = FALSE)
@@ -71,7 +93,7 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
       drop = FALSE
     ]
     if (nrow(arxiv_rows)) {
-      ref_ids <- c(ref_ids, vapply(arxiv_rows$arxiv_id, .litxr_bare_arxiv_id, character(1)))
+      ref_ids <- c(ref_ids, as.character(arxiv_rows$arxiv_id))
     }
   }
   if (nrow(doi_rows) && "doi" %in% names(doi_rows)) {
@@ -84,7 +106,7 @@ litxr_read_embedding_state <- function(collection_id, config = NULL, field = "ab
       drop = FALSE
     ]
     if (nrow(doi_rows)) {
-      ref_ids <- c(ref_ids, vapply(doi_rows$doi, .litxr_bare_doi, character(1)))
+      ref_ids <- c(ref_ids, as.character(doi_rows$doi))
     }
   }
 
@@ -580,13 +602,11 @@ litxr_migrate_embedding_metadata_files <- function(
     field <- "abstract"
   }
 
-  collection_index <- .litxr_collection_index_for_id(cfg, collection_id)
-  if (is.na(collection_index) || collection_index < 1L) {
-    stop("Collection not found in config: ", collection_id, call. = FALSE)
-  }
-
   raw_path <- .litxr_embedding_raw_metadata_path(cfg, collection_id, field = field)
-  ref_path <- .litxr_ref_arxiv_path(cfg)
+  ref_path <- file.path(
+    .litxr_project_index_dir(cfg),
+    paste0("ref_arxiv_", sub("^arxiv_", "", as.character(collection_id)[[1L]]), ".fst")
+  )
   collection_ref_dir <- .litxr_collection_ref_dir(cfg, collection_id)
   result <- list(
     raw_path = raw_path,
@@ -645,17 +665,12 @@ litxr_migrate_embedding_metadata_files <- function(
   }
   result$total <- length(raw_ids)
 
-  ref_rows <- .litxr_read_fst_table_safe(
-    ref_path,
-    columns = c("arxiv_id", "collection_index")
-  )
+  ref_rows <- .litxr_read_fst_table_safe(ref_path, columns = c("arxiv_id", "json_filename"))
   if (!nrow(ref_rows) || !("arxiv_id" %in% names(ref_rows))) {
     return(result)
   }
   ref_rows <- ref_rows[
-    !is.na(ref_rows$collection_index) &
-      ref_rows$collection_index == collection_index &
-      !is.na(ref_rows$arxiv_id) &
+    !is.na(ref_rows$arxiv_id) &
       nzchar(ref_rows$arxiv_id),
     ,
     drop = FALSE
@@ -674,9 +689,9 @@ litxr_migrate_embedding_metadata_files <- function(
   raw_only_ids <- setdiff(raw_ids, ref_ids)
   if (length(raw_only_ids)) {
     stop(
-      "Raw embedding metadata contains arXiv id(s) not present in ref_arxiv.fst for collection ",
+      "Raw embedding metadata contains arXiv id(s) not present in ref_arxiv_",
       collection_id,
-      ": ",
+      ".fst: ",
       paste(raw_only_ids, collapse = ", "),
       call. = FALSE
     )
@@ -692,15 +707,13 @@ litxr_migrate_embedding_metadata_files <- function(
 
   ref_rows <- .litxr_read_fst_table_safe(
     ref_path,
-    columns = c("arxiv_id", "collection_index", "json_filename")
+    columns = c("arxiv_id", "json_filename")
   )
   if (!nrow(ref_rows) || !("arxiv_id" %in% names(ref_rows)) || !("json_filename" %in% names(ref_rows))) {
     return(result)
   }
   ref_rows <- ref_rows[
-    !is.na(ref_rows$collection_index) &
-      ref_rows$collection_index == collection_index &
-      !is.na(ref_rows$arxiv_id) &
+    !is.na(ref_rows$arxiv_id) &
       nzchar(ref_rows$arxiv_id) &
       as.character(ref_rows$arxiv_id) %in% missing_from_raw,
     ,
@@ -753,6 +766,7 @@ litxr_migrate_embedding_metadata_files <- function(
   raw_rows <- raw_rows[!is.na(raw_rows$arxiv_id) & nzchar(raw_rows$arxiv_id), , drop = FALSE]
   raw_rows <- raw_rows[!duplicated(raw_rows$arxiv_id, fromLast = TRUE), , drop = FALSE]
   raw_rows <- raw_rows[order(match(raw_rows$arxiv_id, ref_ids)), , drop = FALSE]
+  dir.create(dirname(raw_path), recursive = TRUE, showWarnings = FALSE)
   fst::write_fst(raw_rows, raw_path)
 
   result$added_arxiv_ids <- hydrated_ids

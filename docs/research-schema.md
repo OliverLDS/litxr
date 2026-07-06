@@ -317,7 +317,8 @@ External AI agents can use these layers by:
 
 - reading canonical references by `ref_id`
 - reading markdown from `project.data_root/md/`
-- reading and writing digests under `project.data_root/llm/`
+- reading and writing digests under `project.data_root/digest/llm/`
+- reading digest history under `project.data_root/digest/llm_history/`
 - reading and writing findings/statistics under `project.data_root/findings/`
 
 `litxr` provides the storage, validation, indexing, and compaction layer. It

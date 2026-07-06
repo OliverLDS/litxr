@@ -4,37 +4,35 @@
 
 ## Collection-Local Storage
 
-Each collection uses its `local_path` with these folders:
+Each collection uses its `local_path` as a direct JSON store:
 
-- `ref_json/`: one normalized metadata JSON per reference from the reference source
-- `index/`: fast collection-level `fst` indexes
-- `fulltxt_md/`: full article text converted to markdown
-- `llm_json/`: collection-local LLM JSON outputs when needed
+- `ref/<collection_id>/`: one normalized metadata JSON per reference from the
+  source feed
 
-Today, `ref_json/` and `index/` are the core local-storage layers. Full-text
-markdown can live under `fulltxt_md/`. Raw PDF or HTML files are not treated as
-durable collection-local storage.
+Collection-local JSON files live directly under the collection folder. Current
+code does not rely on `ref_json/`, `fulltxt_md/`, or `llm_json/` subfolders
+inside each collection folder.
 
 ## Project-Level Storage
 
 Under `project.data_root/`:
 
-- `ref_arxiv.fst`: authoritative arXiv payload table
-- `ref_doi.fst`: authoritative DOI payload table
-- `ref_local_pending.fst`: unresolved local bibliographic input
-- `index/ref_identity_map.fst`: narrow identity routing output used only when a
-  runtime identity view is needed
-- `log/<collection>_collection_fetch_history.tsv`: collection-level fetch history
-- `embeddings/`: cached embedding metadata, matrices, and manifests
-- `llm/`: project-level structured digests keyed by `ref_id`
+- `index/ref_identity_map.fst`: canonical arXiv-to-DOI link table
+- `index/ref_arxiv.fst`: project-level arXiv payload table
+- `index/ref_arxiv_<collection>.fst`: collection-local arXiv payload table
+- `index/ref_doi.fst`: project-level DOI payload table
+- `index/ref_isbn.fst`: project-level ISBN payload table
+- `index/llm_digest.fst`: thin digest index
+- `log/`: collection fetch logs, thin-sync logs, and manual update logs
+- `corpus/`: raw corpus, lexical indexes, and embedding caches
+- `queries/`: embedding and lexical inquiry caches
+- `digest/llm/`: current digest JSON files
+- `digest/llm_history/`: digest history JSON files
 - `md/`: project-level markdown keyed by `ref_id`
 
-The authoritative bibliographic stores are `ref_arxiv.fst`, `ref_doi.fst`, and
-`ref_local_pending.fst`. Any wide compatibility view over entities or
-collections is runtime-only and should not be treated as a durable project file.
-The old `references.fst`, `reference_collections.fst`, `entities.fst`,
-`entity_collections.fst`, and `enrichment_status.fst` durable projection files
-are not part of the target storage model.
+The collection-local arXiv index files are the preferred lookup target for
+collection-sensitive workflows. The project-level `ref_arxiv.fst` remains a
+thin project store for global tasks and compatibility views.
 
 ## Sync APIs
 
@@ -93,8 +91,7 @@ Helpers:
 `scripts/fetch_arxiv_by_collection.R` records successful day-level fetches in
 `log/<collection>_collection_fetch_history.tsv` and skips already completed days
 unless `--force` is used. It writes fetched pages directly into the collection
-JSON store. There is no durable `references_delta.fst` or project-wide
-compatibility projection in the target model.
+JSON store.
 
 Use `litxr_sync_thin_ref_stores_from_json()` when the thin project stores need
 to be rebuilt or incrementally updated from the normalized collection JSON
@@ -143,12 +140,6 @@ refs <- data.frame(
 
 litxr_add_refs(refs, collection_id = "manual_books", config = cfg)
 ```
-
-Known limitation:
-
-- arXiv sync stores DOI strings when present, but it does not yet run a
-  second DOI-enrichment pass to fetch richer publication metadata. See
-  [doi-enrichment-design.md](./doi-enrichment-design.md).
 
 ## BibTeX Export
 

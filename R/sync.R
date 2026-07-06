@@ -1455,7 +1455,50 @@ litxr_add_refs <- function(
   }
 
   paths <- .litxr_embedding_index_paths(cfg, collection_id, field, model)
-  targets <- .litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+  raw_path <- .litxr_embedding_raw_metadata_path(cfg, collection_id, field = field)
+  if (!file.exists(raw_path)) {
+    return(list(
+      targets = data.table::data.table(),
+      paths = paths,
+      existing = list(metadata = .litxr_empty_embedding_metadata(), matrix = NULL, manifest = list()),
+      delta = list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+    ))
+  }
+
+  raw_columns <- tryCatch(fst::metadata_fst(raw_path)$columnNames, error = function(e) NULL)
+  raw_id_col <- if (!is.null(raw_columns) && "arxiv_id" %in% raw_columns) {
+    "arxiv_id"
+  } else if (!is.null(raw_columns) && "ref_id" %in% raw_columns) {
+    "ref_id"
+  } else {
+    NULL
+  }
+  if (is.null(raw_id_col)) {
+    return(list(
+      targets = data.table::data.table(),
+      paths = paths,
+      existing = list(metadata = .litxr_empty_embedding_metadata(), matrix = NULL, manifest = list()),
+      delta = list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+    ))
+  }
+  raw_cols <- intersect(c(raw_id_col, field), raw_columns)
+  raw_targets <- fst::read_fst(raw_path, as.data.table = TRUE, columns = raw_cols)
+  if (!nrow(raw_targets) || !(raw_id_col %in% names(raw_targets))) {
+    return(list(
+      targets = data.table::data.table(),
+      paths = paths,
+      existing = list(metadata = .litxr_empty_embedding_metadata(), matrix = NULL, manifest = list()),
+      delta = list(metadata = .litxr_empty_embedding_metadata(), matrix = matrix(numeric(), nrow = 0L, ncol = 0L), manifest = list())
+    ))
+  }
+  if (!(field %in% names(raw_targets))) {
+    raw_targets[[field]] <- NA_character_
+  }
+  targets <- data.table::data.table(
+    ref_id = as.character(raw_targets[[raw_id_col]]),
+    litxr_embedding_text__ = as.character(raw_targets[[field]])
+  )
+  targets <- targets[!is.na(targets$ref_id) & nzchar(targets$ref_id), ]
   if (!nrow(targets)) {
     return(list(
       targets = data.table::data.table(),
@@ -1483,37 +1526,11 @@ litxr_add_refs <- function(
     }
     targets <- targets[seq_len(min(nrow(targets), limit)), ]
   }
-  records <- .litxr_hydrate_rows_from_json_paths(
-    targets[, c("ref_id", "json_filename", "collection_id", "json_path"), with = FALSE],
-    targets[, c("ref_id", "json_path"), with = FALSE],
-    fields = field
-  )
-  if (!nrow(records)) {
-    return(list(
-      targets = data.table::data.table(),
-      paths = paths,
-      existing = existing,
-      delta = delta
-    ))
-  }
-  if (!(field %in% names(records))) {
-    stop("Field not found in collection records: ", field, call. = FALSE)
-  }
-  records <- data.table::as.data.table(records)
-  records <- records[!is.na(records$ref_id) & nzchar(records$ref_id), ]
-  if (!nrow(records)) {
-    return(list(
-      targets = data.table::data.table(),
-      paths = paths,
-      existing = existing,
-      delta = delta
-    ))
-  }
-  text <- as.character(records[[field]])
+  text <- as.character(targets[["litxr_embedding_text__"]])
   text[is.na(text)] <- ""
   text <- trimws(text)
   keep <- nzchar(text)
-  targets <- records[keep, ]
+  targets <- targets[keep, , drop = FALSE]
   targets[["litxr_embedding_text__"]] <- text[keep]
 
   list(targets = targets, paths = paths, existing = existing, delta = delta)

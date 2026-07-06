@@ -123,7 +123,7 @@ Future digests should include metadata such as:
 Continue to support a fast current-digest path:
 
 ```text
-project.data_root/llm/<slug>.json
+project.data_root/digest/llm/<slug>.json
 ```
 
 This remains the default read target for:
@@ -137,13 +137,13 @@ This remains the default read target for:
 Add a parallel history store:
 
 ```text
-project.data_root/llm_history/<ref_id>/<timestamp>__rev003__v3.json
+project.data_root/digest/llm_history/<ref_id>/<timestamp>__rev003__v3.json
 ```
 
 Example:
 
 ```text
-project.data_root/llm_history/arxiv_2505_07087/2026-05-01T00-00-00Z__rev003__v3.json
+project.data_root/digest/llm_history/arxiv_2505_07087/2026-05-01T00-00-00Z__rev003__v3.json
 ```
 
 This gives:

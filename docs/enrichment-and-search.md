@@ -17,10 +17,12 @@ Project-level readers:
 
 ## Embedding Search
 
-Embedding indexes are cached under `project.data_root/embeddings/` and keyed by
-collection, source text field, and exact embedding model. The package does not
-choose a provider; pass an embedding function so corpus and query embeddings use
-the same model.
+Embedding indexes are cached under
+`project.data_root/corpus/<collection_id>/<field>/embeddings/` and keyed by
+collection, source text field, and exact embedding model. Query-set embeddings
+live under `project.data_root/queries/embeddings/`. The package does not choose
+a provider; pass an embedding function so corpus and query embeddings use the
+same model.
 
 Example:
 
@@ -86,11 +88,10 @@ The intended pattern is:
    `litxr_score_collection_categories()`.
 4. Apply threshold rules with `litxr_label_collection_by_category()`.
 
-Cached category-query embedding roots now include a `query_set.yaml` file
-at `project.data_root/embeddings/label_queries/<query_set_id>/query_set.yaml`.
-It shows the category ids and inquiry sentences used to build the cache, so
-the semantic meaning of the inquiries is visible without opening the original
-source YAML.
+Cached category-query embedding roots now include a `query_set.yaml` file at
+`project.data_root/queries/embeddings/<query_set_id>/query_set.yaml`. It shows
+the category ids and inquiry sentences used to build the cache, so the semantic
+meaning of the inquiries is visible without opening the original source YAML.
 For an older cache that only has `metadata.fst`, you can backfill the
 descriptor from a model subdirectory with:
 
@@ -152,7 +153,7 @@ before digest generation.
 
 ## LLM Digest Contract
 
-Each digest is one JSON file under `project.data_root/llm/`.
+Each digest is one JSON file under `project.data_root/digest/llm/`.
 
 Interactive prompt default: schema `v4`.
 
@@ -302,7 +303,7 @@ to render the full digest.
 Use `--mode revise` when a local digest already exists and you want ChatGPT to
 improve that digest rather than start from scratch. Revised digests bump
 `digest_revision` and archive the prior current digest under
-`project.data_root/llm_history/`.
+`project.data_root/digest/llm_history/`.
 
 For the revision-aware digest design and future extension points, see
 [llm-digest-revision-design.md](./llm-digest-revision-design.md).

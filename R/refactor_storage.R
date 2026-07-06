@@ -694,6 +694,36 @@
   }
 
   arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows_write, "arxiv_id", remove_missing = remove_missing)
+  if (nrow(arxiv_rows)) {
+    arxiv_collection_indices <- unique(as.integer(arxiv_rows$collection_index))
+    arxiv_collection_indices <- arxiv_collection_indices[!is.na(arxiv_collection_indices) & arxiv_collection_indices >= 1L]
+    if (length(arxiv_collection_indices)) {
+      collections <- .litxr_config_collections(cfg)
+      for (collection_index in arxiv_collection_indices) {
+        if (collection_index > length(collections)) {
+          next
+        }
+        collection_id <- as.character(collections[[collection_index]]$collection_id %||% collections[[collection_index]]$journal_id %||% NA_character_)
+        if (is.na(collection_id) || !nzchar(collection_id)) {
+          next
+        }
+        collection_rows <- arxiv_rows[arxiv_rows$collection_index == collection_index, c("arxiv_id", "json_filename"), with = FALSE]
+        if (!nrow(collection_rows)) {
+          next
+        }
+        collection_path <- file.path(
+          .litxr_project_index_dir(cfg),
+          paste0("ref_arxiv_", sub("^arxiv_", "", collection_id), ".fst")
+        )
+        .litxr_upsert_scaffold_rows(
+          collection_path,
+          collection_rows,
+          "arxiv_id",
+          remove_missing = remove_missing
+        )
+      }
+    }
+  }
   doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows_write, "doi", remove_missing = remove_missing)
   isbn_store <- .litxr_upsert_scaffold_rows(.litxr_ref_isbn_path(cfg), isbn_rows_write, "isbn", remove_missing = remove_missing)
   if (remove_missing || nrow(identities)) {
