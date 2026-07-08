@@ -12,8 +12,7 @@ args <- commandArgs(trailingOnly = TRUE)
 parse_args <- function(args) {
   out <- list(
     show_help = FALSE,
-    delta_only = FALSE,
-    embed_missing = FALSE,
+    collection_id = "arxiv_cs_ai",
     year_from = NULL,
     year_to = NULL,
     inquiry = NULL,
@@ -34,21 +33,13 @@ parse_args <- function(args) {
       i <- i + 1L
       next
     }
-    if (identical(key, "--embed-missing")) {
-      out$embed_missing <- TRUE
-      i <- i + 1L
-      next
-    }
-    if (identical(key, "--delta-only")) {
-      out$delta_only <- TRUE
-      i <- i + 1L
-      next
-    }
     if (i == length(args)) {
       stop("Missing value for ", key, call. = FALSE)
     }
     value <- args[[i + 1L]]
-    if (identical(key, "--year-from")) {
+    if (identical(key, "--collection-id")) {
+      out$collection_id <- value
+    } else if (identical(key, "--year-from")) {
       out$year_from <- value
     } else if (identical(key, "--year-to")) {
       out$year_to <- value
@@ -77,22 +68,20 @@ cleanup_temp_query_cache <- function() {
 
 parsed <- parse_args(args)
 show_help <- isTRUE(parsed$show_help)
-delta_only <- isTRUE(parsed$delta_only)
-embed_missing <- isTRUE(parsed$embed_missing)
+collection_id <- as.character(parsed$collection_id)[[1L]]
 
 if (show_help) {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/report_arxiv_embedding_inquiry_set.R [--embed-missing] [--year-from YYYY] [--year-to YYYY] [--delta-only] [--local-inq QUERY_SET_ID] [--inquiry PATH] [--top_n 3] [--threshold 0.45]",
+      "  Rscript scripts/report_arxiv_embedding_inquiry_set.R [--collection-id arxiv_cs_ai] [--year-from YYYY] [--year-to YYYY] [--local-inq QUERY_SET_ID] [--inquiry PATH] [--top_n 3] [--threshold 0.45]",
       "",
       "Options:",
-      "  --embed-missing    Run litxr_embed_collection_delta() before scoring. Default: off.",
+      "  --collection-id ID  Collection id to score. Default: arxiv_cs_ai.",
       "  --year-from YYYY   Restrict scoring to refs with year >= YYYY.",
       "  --year-to YYYY     Restrict scoring to refs with year <= YYYY.",
       "  --inquiry PATH     YAML file defining category ids and inquiry sentences for this run.",
       "  --local-inq ID     Cached local inquiry/query-set id to use when --inquiry is not supplied.",
-      "  --delta-only       Score only the pending embedding delta shards instead of the full compacted corpus.",
       "  --top_n N          Keep only the top N refs per category by score. Default: 3.",
       "  --top-n N          Equivalent to --top_n.",
       "  --threshold X      Keep only refs with score >= X. Default: 0.45.",
@@ -104,8 +93,6 @@ if (show_help) {
       "    rank_in_category <= top_n and score_max >= threshold.",
       "  - Default values are top_n = 3 and threshold = 0.45.",
       "  - Use --output-format json for machine-readable category output.",
-      "  - By default, the script does not call litxr_embed_collection_delta().",
-      "    Use --embed-missing when you want to embed uncovered corpus refs first.",
       "  - Without --inquiry, the script uses the cached query set id",
       "    from --local-inq, defaulting to ai_category_query_set_v1.",
       "  - With --inquiry, the script builds a temporary query embedding cache for this run",
@@ -152,6 +139,9 @@ if (!(output_format %in% c("md", "json"))) {
 }
 if (is.na(local_inq) || !nzchar(local_inq)) {
   stop("`--local-inq` must be non-empty.", call. = FALSE)
+}
+if (is.na(collection_id) || !nzchar(collection_id)) {
+  stop("`--collection-id` must be non-empty.", call. = FALSE)
 }
 if (!is.null(inquiry_path)) {
   inquiry_path <- normalizePath(inquiry_path, winslash = "/", mustWork = FALSE)
@@ -226,64 +216,30 @@ if (!is.null(inquiry_path)) {
   )
 }
 
-if (isTRUE(embed_missing)) {
-  litxr::litxr_embed_collection_delta(
-    "arxiv_cs_ai",
-    cfg,
-    field = "abstract",
-    embed_fun = embed_fun,
-    model = embed_model,
-    provider = "openrouter",
-    batch_size = 64,
-    limit = 640L
-  )
-}
-
-ref_ids <- NULL
+selected_targets <- litxr:::.litxr_embedding_target_rows_from_thin_ref_stores(cfg, collection_id)
+ref_ids <- unique(as.character(selected_targets$ref_id))
+ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
 if (!is.null(year_from) || !is.null(year_to)) {
-  index_path <- litxr:::.litxr_ref_arxiv_path(cfg)
-  index_columns <- fst::metadata_fst(index_path)$columnNames
-  if (!("arxiv_id" %in% index_columns)) {
-    stop("Collection index is missing `arxiv_id`: ", index_path, call. = FALSE)
-  }
-  read_columns <- intersect(c("arxiv_id"), index_columns)
-  refs <- fst::read_fst(index_path, columns = read_columns, as.data.table = TRUE)
-  refs$year <- suppressWarnings(as.integer(2000L + as.integer(substr(refs$arxiv_id, 1L, 2L))))
-  keep <- rep(TRUE, nrow(refs))
+  years <- suppressWarnings(as.integer(paste0("20", substr(ref_ids, 1L, 2L))))
+  keep <- rep(TRUE, length(ref_ids))
   if (!is.null(year_from)) {
-    keep <- keep & !is.na(refs$year) & refs$year >= year_from
+    keep <- keep & !is.na(years) & years >= year_from
   }
   if (!is.null(year_to)) {
-    keep <- keep & !is.na(refs$year) & refs$year <= year_to
+    keep <- keep & !is.na(years) & years <= year_to
   }
-  if (nrow(refs)) {
-    ref_ids <- unique(as.character(refs$arxiv_id[keep & !is.na(refs$arxiv_id) & nzchar(refs$arxiv_id)]))
-  } else {
-    ref_ids <- character()
-  }
+  ref_ids <- unique(ref_ids[keep])
 }
 
-scores <- if (isTRUE(delta_only)) {
-  litxr::litxr_score_collection_categories_delta(
-    "arxiv_cs_ai",
-    query_set_id = query_set_id,
-    config = cfg,
-    field = "abstract",
-    model = embed_model,
-    aggregations = "max",
-    ref_ids = ref_ids
-  )
-} else {
-  litxr::litxr_score_collection_categories(
-    "arxiv_cs_ai",
-    query_set_id = query_set_id,
-    config = cfg,
-    field = "abstract",
-    model = embed_model,
-    aggregations = "max",
-    ref_ids = ref_ids
-  )
-}
+scores <- litxr::litxr_score_collection_categories(
+  collection_id,
+  query_set_id = query_set_id,
+  config = cfg,
+  field = "abstract",
+  model = embed_model,
+  aggregations = "max",
+  ref_ids = ref_ids
+)
 
 if (!nrow(scores)) {
   cleanup_temp_query_cache()
@@ -338,7 +294,6 @@ if (!nrow(selected)) {
         selection_rule = list(
           top_n = top_n,
           threshold = threshold,
-          delta_only = delta_only,
           year_from = year_from,
           year_to = year_to,
           local_inq = local_inq,
@@ -357,9 +312,8 @@ if (!nrow(selected)) {
   quit(save = "no", status = 0)
 }
 
-selected_paths <- litxr:::.litxr_embedding_target_rows_from_thin_ref_stores(cfg, "arxiv_cs_ai")
-selected_paths <- selected_paths[
-  as.character(selected_paths$ref_id) %in% unique(as.character(selected$ref_id)),
+selected_paths <- selected_targets[
+  as.character(ref_id) %in% unique(as.character(selected$ref_id)),
   c("ref_id", "json_path"),
   with = FALSE
 ]
@@ -396,7 +350,6 @@ if (identical(output_format, "json")) {
       selection_rule = list(
         top_n = top_n,
         threshold = threshold,
-        delta_only = delta_only,
         year_from = year_from,
         year_to = year_to,
         local_inq = local_inq,

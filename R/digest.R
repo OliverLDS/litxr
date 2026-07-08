@@ -189,11 +189,6 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history =
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
-  refs <- .litxr_read_normalized_reference_rows_by_keys(cfg, .litxr_expand_reference_keys(ref_id))
-  if (nrow(refs) && !(ref_id %in% refs$ref_id)) {
-    warning("Reference id not found in canonical store: ", ref_id, call. = FALSE)
-  }
-
   existing <- litxr_read_llm_digest(ref_id, cfg)
   payload <- .litxr_normalize_llm_digest_for_write(digest, ref_id = ref_id)
   if (identical(.litxr_llm_digest_schema_version(payload), "v2") || identical(.litxr_llm_digest_schema_version(payload), "v3") || identical(.litxr_llm_digest_schema_version(payload), "v4")) {
@@ -242,7 +237,6 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history =
     json_filename = basename(path),
     history_dir = if (isTRUE(keep_history) && !is.null(existing)) basename(.litxr_llm_history_ref_dir(cfg, ref_id)) else NULL
   )
-  .litxr_update_enrichment_status_ref(cfg, ref_id)
   invisible(path)
 }
 

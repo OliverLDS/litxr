@@ -47,18 +47,6 @@ parse_args <- function(args) {
   out
 }
 
-.normalize_ref_id_input <- function(ref_id) {
-  ref_id <- as.character(ref_id)
-  if (!length(ref_id) || is.na(ref_id[[1]])) {
-    return(ref_id)
-  }
-  ref_id <- trimws(ref_id[[1]])
-  if (grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", ref_id)) {
-    return(paste0("arxiv:", ref_id))
-  }
-  ref_id
-}
-
 usage <- function() {
   cat(
     paste(
@@ -67,7 +55,7 @@ usage <- function() {
       "",
       "Options:",
       "  --ref-id REF_ID     Canonical litxr ref_id to build a digest prompt for.",
-      "                      Bare arXiv ids like 2510.22085 are also accepted and normalized to arxiv:2510.22085.",
+      "                      Bare arXiv ids like 2510.22085 are accepted as-is.",
       "  --mode MODE         Either `create` or `revise`. Default: create",
       "  --prompt-version V  Prompt template version metadata to include.",
       "                      Default: v4.0",
@@ -102,7 +90,7 @@ if (is.null(parsed$ref_id) || !nzchar(parsed$ref_id)) {
   stop("`--ref-id` is required.", call. = FALSE)
 }
 
-ref_id <- .normalize_ref_id_input(parsed$ref_id)
+ref_id <- trimws(as.character(parsed$ref_id)[[1L]])
 mode <- tolower(trimws(as.character(parsed$mode)))
 if (!(mode %in% c("create", "revise"))) {
   stop("`--mode` must be either `create` or `revise`.", call. = FALSE)

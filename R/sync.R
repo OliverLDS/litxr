@@ -889,8 +889,21 @@ litxr_add_refs <- function(
   }
 
   rows <- lapply(collections, function(collection) {
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    out <- .litxr_read_journal_records_by_keys(local_path, keys)
+    if (identical(collection$remote_channel, "arxiv")) {
+      out <- .litxr_read_collection_records_for_collection(cfg, collection)
+      if (nrow(out)) {
+        key_cols <- intersect(c("ref_id", "source_id", "doi"), names(out))
+        if (length(key_cols)) {
+          key_mask <- Reduce(`|`, lapply(key_cols, function(col) as.character(out[[col]]) %in% keys))
+          out <- out[key_mask, ]
+        } else {
+          out <- out[0, ]
+        }
+      }
+    } else {
+      local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+      out <- .litxr_read_journal_records_by_keys(local_path, keys)
+    }
     if (!nrow(out)) {
       return(out)
     }
@@ -2394,8 +2407,7 @@ litxr_add_refs <- function(
 
 .litxr_refresh_project_index_for_collection <- function(cfg, collection_id, repair_collection_index = TRUE) {
   journal <- .litxr_get_journal(cfg, collection_id)
-  local_path <- .litxr_resolve_local_path(cfg, journal$local_path)
-  records <- .litxr_read_collection_records_from_json(local_path)
+  records <- .litxr_read_collection_records_for_collection(cfg, journal)
   projection <- .litxr_project_references_from_collection_records(records)
   links <- .litxr_project_reference_links_from_collection_records(records, journal)
 

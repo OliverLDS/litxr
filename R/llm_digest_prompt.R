@@ -97,8 +97,9 @@
   doi <- if (!is.null(ref) && "doi" %in% names(ref)) .litxr_prompt_scalar(ref$doi) else NA_character_
   linked_arxiv_ref_id <- if (!is.null(ref) && "linked_arxiv_ref_id" %in% names(ref)) .litxr_prompt_scalar(ref$linked_arxiv_ref_id) else NA_character_
 
-  if (startsWith(ref_id, "arxiv:")) {
+  if (startsWith(ref_id, "arxiv:") || grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", ref_id)) {
     arxiv_id <- sub("^arxiv:", "", ref_id)
+    arxiv_id <- sub("v[0-9]+$", "", arxiv_id)
     return(paste(c(
       "ArXiv-specific hint:",
       sprintf("- HTML full text: https://arxiv.org/html/%s", arxiv_id),

@@ -5,6 +5,35 @@
   )
 }
 
+.litxr_read_collection_records_for_collection <- function(cfg, collection, modified_after = NULL) {
+  collection_id <- as.character(collection$collection_id %||% collection$journal_id)[[1L]]
+  if (!nzchar(collection_id)) {
+    return(data.table::data.table())
+  }
+
+  if (identical(collection$remote_channel, "arxiv")) {
+    index_path <- .litxr_ref_arxiv_collection_path(cfg, collection_id)
+    if (!file.exists(index_path)) {
+      return(data.table::data.table())
+    }
+    index_rows <- .litxr_read_fst_table_safe(index_path, columns = c("arxiv_id", "json_filename"))
+    if (!nrow(index_rows) || !("json_filename" %in% names(index_rows))) {
+      return(data.table::data.table())
+    }
+    json_files <- unique(as.character(index_rows$json_filename))
+    json_files <- json_files[!is.na(json_files) & nzchar(json_files)]
+    if (!length(json_files)) {
+      return(data.table::data.table())
+    }
+    collection_ref_dir <- .litxr_collection_ref_dir(cfg, collection_id)
+    json_paths <- file.path(collection_ref_dir, json_files)
+    return(.litxr_read_collection_records_from_json(collection_ref_dir, json_files = json_paths, modified_after = modified_after))
+  }
+
+  local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
+  .litxr_read_collection_records_from_json(local_path, modified_after = modified_after)
+}
+
 .litxr_collection_index_for_local_path <- function(cfg, local_path) {
   collections <- .litxr_config_collections(cfg)
   if (!length(collections)) {
@@ -317,10 +346,7 @@
       break
     }
     collection_id <- as.character(collection$collection_id %||% collection$journal_id)
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    if (!length(local_path) || is.na(local_path[[1]]) || !nzchar(local_path[[1]])) {
-      next
-    }
+    collection_rows <- .litxr_read_collection_records_for_collection(cfg, collection)
     ref_ids <- if (nrow(links) && all(c("collection_id", "ref_id") %in% names(links))) {
       unique(as.character(links$ref_id[as.character(links$collection_id) == collection_id]))
     } else {
@@ -328,6 +354,9 @@
     }
     ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(ref_ids)]
     if (!length(ref_ids)) {
+      next
+    }
+    if (!nrow(collection_rows)) {
       next
     }
     batch_idx <- which(unresolved & out$ref_id %in% ref_ids)

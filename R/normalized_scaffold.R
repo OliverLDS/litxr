@@ -10,6 +10,17 @@
   file.path(.litxr_project_index_dir(cfg), "ref_isbn.fst")
 }
 
+.litxr_ref_arxiv_collection_path <- function(cfg, collection_id) {
+  collection_id <- as.character(collection_id)[[1L]]
+  if (is.na(collection_id) || !nzchar(collection_id)) {
+    return(NA_character_)
+  }
+  file.path(
+    .litxr_project_index_dir(cfg),
+    paste0("ref_arxiv_", sub("^arxiv_", "", collection_id), ".fst")
+  )
+}
+
 .litxr_bare_arxiv_id <- function(ref_id = NULL, source_id = NULL, arxiv_versioned = NULL) {
   candidates <- c(source_id, arxiv_versioned, ref_id)
   candidates <- as.character(candidates)
@@ -310,6 +321,51 @@
 
   cfg <- if (is.character(cfg)) litxr_read_config(cfg) else cfg
   if (is.null(cfg)) cfg <- litxr_read_config()
+  bare_keys <- unique(c(
+    keys,
+    sub("^arxiv:", "", keys, ignore.case = TRUE),
+    sub("^doi:", "", keys, ignore.case = TRUE),
+    sub("^isbn:", "", keys, ignore.case = TRUE)
+  ))
+  bare_keys <- bare_keys[!is.na(bare_keys) & nzchar(bare_keys)]
+  thin_locations <- tryCatch(
+    .litxr_ref_json_locations_from_thin_stores(cfg, bare_keys),
+    error = function(e) data.table::data.table()
+  )
+  if (nrow(thin_locations) && "json_path" %in% names(thin_locations)) {
+    read_columns <- .litxr_project_reference_lookup_columns(columns)
+    thin_locations <- thin_locations[!is.na(thin_locations$json_path) & file.exists(thin_locations$json_path), ]
+    thin_locations <- thin_locations[!duplicated(thin_locations$json_path), ]
+    thin_rows <- lapply(seq_len(nrow(thin_locations)), function(i) {
+      values <- .litxr_storage_payload_as_list(thin_locations$json_path[[i]], fields = read_columns)
+      row <- data.table::as.data.table(values)
+      if (!("collection_id" %in% names(row)) && "collection_id" %in% names(thin_locations)) {
+        row$collection_id <- thin_locations$collection_id[[i]]
+      }
+      if (!("json_filename" %in% names(row)) && "json_filename" %in% names(thin_locations)) {
+        row$json_filename <- thin_locations$json_filename[[i]]
+      }
+      row
+    })
+    thin_rows <- thin_rows[vapply(thin_rows, nrow, integer(1)) > 0L]
+    if (length(thin_rows)) {
+      out <- data.table::rbindlist(thin_rows, fill = TRUE)
+      key_cols <- intersect(c("ref_id", "source_id", "doi"), names(out))
+      if (length(key_cols)) {
+        key_mask <- Reduce(`|`, lapply(key_cols, function(col) as.character(out[[col]]) %in% keys | as.character(out[[col]]) %in% bare_keys))
+        out <- out[key_mask, ]
+      }
+      if (nrow(out)) {
+        out <- out[!duplicated(as.character(out$ref_id)), ]
+        if (!is.null(columns) && length(columns)) {
+          keep <- intersect(unique(as.character(columns)), names(out))
+          out <- out[, keep, with = FALSE]
+        }
+        return(out)
+      }
+    }
+  }
+
   out <- .litxr_authoritative_project_records(cfg)
   if (!nrow(out)) {
     return(data.table::data.table())

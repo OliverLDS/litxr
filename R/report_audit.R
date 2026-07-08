@@ -179,9 +179,8 @@
 .litxr_audit_reference_cache_state <- function(cfg) {
   collections <- .litxr_config_collections(cfg)
   collection_rows <- lapply(collections, function(collection) {
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    cached_main <- tryCatch(.litxr_read_collection_records_from_json(local_path), error = function(e) data.table::data.table())
-    authoritative <- tryCatch(.litxr_read_collection_records_from_json(local_path), error = function(e) data.table::data.table())
+    cached_main <- tryCatch(.litxr_read_collection_records_for_collection(cfg, collection), error = function(e) data.table::data.table())
+    authoritative <- tryCatch(.litxr_read_collection_records_for_collection(cfg, collection), error = function(e) data.table::data.table())
     cached_ref_ids <- if (is.null(cached_main) || !nrow(cached_main)) character() else unique(as.character(cached_main$ref_id))
     auth_ids <- if (!nrow(authoritative)) character() else unique(as.character(authoritative$ref_id))
     data.table::data.table(

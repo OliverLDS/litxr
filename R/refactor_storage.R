@@ -49,8 +49,7 @@
   }
 
   refs_list <- lapply(collections, function(collection) {
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_collection_records_from_json(local_path)
+    records <- .litxr_read_collection_records_for_collection(cfg, collection)
     .litxr_project_references_from_collection_records(records)
   })
   refs_list <- refs_list[vapply(refs_list, nrow, integer(1)) > 0L]
@@ -79,8 +78,7 @@
   }
 
   links_list <- lapply(collections, function(collection) {
-    local_path <- .litxr_resolve_local_path(cfg, collection$local_path)
-    records <- .litxr_read_collection_records_from_json(local_path)
+    records <- .litxr_read_collection_records_for_collection(cfg, collection)
     .litxr_project_reference_links_from_collection_records(records, collection)
   })
   links_list <- links_list[vapply(links_list, nrow, integer(1)) > 0L]
