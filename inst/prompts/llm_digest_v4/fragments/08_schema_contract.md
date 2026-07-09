@@ -53,7 +53,7 @@ Structured extraction fields:
   - rows: array of row objects preserving the table's structured values.
   - notes: table notes, caveats, or extraction limitations.
 - research_target_github_links: GitHub repositories that are the paper's research target or artifact. Use an empty array for incidental links or when no such repository exists. Each object must include:
-  - url: the detected https://github.com/... URL.
+  - url: the detected https://github.com/..., https://gist.github.com/..., or https://github.gatech.edu/... URL.
   - category_tags: short tags describing what the repository is about, such as model, framework, system, dataset, benchmark, mechanism, package, implementation, or evaluation target.
   - research_role: how the repository functions in the paper.
   - description: concise description of the repository.

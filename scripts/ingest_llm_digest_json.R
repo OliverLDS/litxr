@@ -11,6 +11,7 @@ parse_args <- function(args) {
     show_help = FALSE,
     ref_id = NULL,
     json_path = "~/Downloads/litxr_schema.json",
+    json_path_provided = FALSE,
     json_raw = NULL,
     mode = "create",
     prompt_version = "v4.0"
@@ -35,6 +36,7 @@ parse_args <- function(args) {
       out$ref_id <- value
     } else if (identical(key, "--json-path")) {
       out$json_path <- value
+      out$json_path_provided <- TRUE
     } else if (identical(key, "--json-raw")) {
       out$json_raw <- value
     } else if (identical(key, "--mode")) {
@@ -130,13 +132,18 @@ if (isTRUE(parsed$show_help)) {
   quit(save = "no", status = 0L)
 }
 
+if (!is.null(parsed$json_raw) && nzchar(parsed$json_raw)) {
+  parsed$json_path <- NULL
+  parsed$json_path_provided <- FALSE
+}
+
 if (is.null(parsed$ref_id) || !nzchar(parsed$ref_id)) {
   usage()
   stop("`--ref-id` is required.", call. = FALSE)
 }
 
 ref_id <- .normalize_ref_id_input(parsed$ref_id)
-json_path <- path.expand(as.character(parsed$json_path))
+json_path <- if (is.null(parsed$json_path)) NULL else path.expand(as.character(parsed$json_path))
 json_raw <- parsed$json_raw
 mode <- tolower(trimws(as.character(parsed$mode)))
 if (!(mode %in% c("create", "revise"))) {
@@ -150,7 +157,7 @@ if (utils::compareVersion(pkg_version, "0.0.8.6") < 0) {
     call. = FALSE
   )
 }
-if (!is.null(json_raw) && nzchar(json_raw) && file.exists(json_path)) {
+if (isTRUE(parsed$json_path_provided) && !is.null(json_raw) && nzchar(json_raw) && !is.null(json_path) && file.exists(json_path)) {
   warning("Both `--json-path` and `--json-raw` were provided; `--json-raw` will be used.", call. = FALSE)
 }
 

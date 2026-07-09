@@ -839,8 +839,8 @@ litxr_validate_paper_type <- function(x) {
     url <- link$url
     if (is.list(url) && length(url)) url <- url[[1]]
     url <- as.character(url %||% NA_character_)
-    if (!length(url) || is.na(url[[1]]) || !nzchar(trimws(url[[1]])) || !grepl("^https://(gist\\.)?github\\.com/", url[[1]])) {
-      stop("Each `research_target_github_links$url` must be a non-empty https://github.com/ or https://gist.github.com/ URL.", call. = FALSE)
+    if (!length(url) || is.na(url[[1]]) || !nzchar(trimws(url[[1]])) || !grepl("^https://((gist\\.)?github\\.com|github\\.gatech\\.edu)/", url[[1]])) {
+      stop("Each `research_target_github_links$url` must be a non-empty https://github.com/, https://gist.github.com/, or https://github.gatech.edu/ URL.", call. = FALSE)
     }
     tags <- link$category_tags
     if (is.list(tags)) tags <- unlist(tags, use.names = FALSE)

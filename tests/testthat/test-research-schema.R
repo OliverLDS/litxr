@@ -147,6 +147,9 @@ digest_template_v4$evidence_shape <- list(
   limitations = c("Fixture-only evidence.")
 )
 stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v4))))
+gatech_github_v4 <- digest_template_v4
+gatech_github_v4$research_target_github_links[[1]]$url <- "https://github.gatech.edu/jfaile3/dl-7643-finalproject-sentinel-stocks"
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(gatech_github_v4))))
 bad_v4 <- digest_template_v4
 bad_v4$evidence_shape$evidence_mode <- "bad_mode"
 stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v4), silent = TRUE), "try-error"))
