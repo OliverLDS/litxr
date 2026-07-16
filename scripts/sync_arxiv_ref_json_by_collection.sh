@@ -5,9 +5,31 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
 sync_start_time="$(date '+%Y-%m-%d %H:%M:%S')"
 
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/sync_arxiv_ref_json_by_collection.sh --collection COLLECTION_ID [--start YYYY-MM-DD --end YYYY-MM-DD]
+
+Options:
+  --collection ID    arXiv-backed collection id to sync.
+  --start DATE       Inclusive start date for arXiv submittedDate filtering.
+  --end DATE         Inclusive end date for arXiv submittedDate filtering.
+  --page-size N      Page size for arXiv API calls.
+  --sleep-seconds S  Delay between arXiv requests.
+  --search-query Q   Override the configured arXiv search query.
+  --force            Re-run days already recorded in the collection history.
+  -h, --help         Show this help message.
+
+Behavior:
+  - Fetches arXiv ref JSON files for the requested collection.
+  - If new JSON files are written, runs scripts/sync_thin_ref_stores.R with
+    --json-mtime-after set to the wrapper start time.
+EOF
+}
+
 for arg in "$@"; do
   if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
-    Rscript "$script_dir/fetch_arxiv_by_collection.R" --help
+    usage
     exit 0
   fi
 done
