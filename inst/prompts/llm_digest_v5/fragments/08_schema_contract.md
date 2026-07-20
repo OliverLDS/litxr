@@ -1,40 +1,69 @@
-Schema-v5 extends schema-v4. Keep every existing V4 key and value type unchanged.
+Schema-v5 retains the complete schema-v4 contract plus one optional field: `formulas`.
 
-The V4 synthesis contract remains mandatory: summary, motivation,
-research_questions, paper_structure, methods, research_data,
-identification_strategy, main_variables, key_findings, limitations,
-theoretical_mechanism, empirical_setting, descriptive_statistics_summary,
-standardized_findings_summary, contribution_type, ranked_contributions,
-likely_reader_misconceptions, business_relevance_pathway, evidence_strength,
-evidence_shape, keywords, notes, tables, research_target_github_links,
-anchor_references, and citation_logic_nodes retain their V4 meanings.
-In particular, identification_strategy: how the paper supports its empirical or causal claim through design, comparison, triangulation, benchmark protocol, or the reason no causal identification is claimed.
+Core metadata:
+- schema_version: must be "v5".
+- ref_id: the reference id from the prompt metadata.
+- digest_revision, extraction_mode, prompt_version, and model_hint: keep the template values.
+- paper_type: one canonical paper nature from the accepted vocabulary.
 
-Required V4 nested shapes and enums:
+Core analysis:
+- summary, motivation, research_questions, paper_structure, methods, key_findings, limitations,
+  theoretical_mechanism, keywords, and notes retain their schema-v4 meanings.
 
-- ranked_contributions is an array of objects, never an array of strings. Every item must have exactly the required keys `rank` (positive integer), `contribution_type` (string), `contribution` (non-empty string), and `reason` (string). Example: `{ "rank": 1, "contribution_type": "method", "contribution": "Introduces the method.", "reason": "It is the paper's central technical contribution." }`.
-- evidence_shape is an object with `evidence_mode`, `evidence_basis`, `inference_type`, `strength_level`, and `limitations`.
-- evidence_shape.evidence_mode must be exactly one of: `empirical_quantitative`, `empirical_qualitative`, `experimental`, `simulation`, `benchmark`, `theoretical_model`, `conceptual_argument`, `methodological_demonstration`, `review_synthesis`, `policy_analysis`, `descriptive`, `none`, `unknown`.
-- evidence_shape.inference_type must be exactly one of: `causal`, `associational`, `predictive`, `descriptive`, `mechanistic`, `formal`, `interpretive`, `comparative`, `normative`, `synthetic`, `not_applicable`, `unknown`.
-- evidence_shape.strength_level must be exactly one of: `very_low`, `low`, `medium`, `high`, `very_high`, `not_applicable`, `unknown`.
-- Do not combine enum values into new tokens such as `benchmark_and_execution_validation` or `descriptive_comparative`. Choose the one best-fitting canonical value, and put any nuance in evidence_basis or limitations.
+Empirical fields:
+- research_data: data sources, sample period, sample region, unit of observation, numeric
+  sample_size when it is a real count, and sample_size_note for narrative or ambiguous context.
+- identification_strategy: how the paper supports its empirical or causal claim through design,
+  comparison logic, triangulation, qualitative process tracing, benchmark protocol, or the reason
+  no causal identification is claimed.
+- main_variables: dependent, independent, control, and mechanism variables. Use empty arrays when
+  not applicable.
+- empirical_setting, descriptive_statistics_summary, and standardized_findings_summary retain
+  their schema-v4 meanings.
 
-source_detail is optional source-grounded detail. When present it must contain:
+Contribution and evidence:
+- contribution_type: unordered contribution labels. Prefer theory_building, theory_testing,
+  conceptual_framework, empirical_evidence, causal_evidence, measurement, method, algorithm,
+  benchmark, system_architecture, replication, literature_synthesis, policy_implication,
+  business_implication, research_agenda, or other.
+- ranked_contributions: an array of objects, never strings. Every object contains rank,
+  contribution_type, contribution, and reason.
+- evidence_strength: short legacy strength assessment.
+- evidence_shape: general evidence description. evidence_mode must be empirical_quantitative,
+  empirical_qualitative, experimental, simulation, benchmark, theoretical_model,
+  conceptual_argument, methodological_demonstration, review_synthesis, policy_analysis,
+  descriptive, none, or unknown. inference_type must be causal, associational, predictive,
+  descriptive, mechanistic, formal, interpretive, comparative, normative, synthetic,
+  not_applicable, or unknown. strength_level must be very_low, low, medium, high, very_high,
+  not_applicable, or unknown.
 
-- schema_version: `v5`.
-- coverage: equations, benchmark_tables, precise_wording, and methodological_disputes; each is complete, partial, or not_applicable.
-- evidence_items: reusable source-located evidence objects. Every item must contain `evidence_id`, `claim`, `evidence_type`, `source_locator`, `conditions`, `limitation`, and `supports_v4`. `evidence_type` must be one of `theorem`, `experiment`, `ablation`, `benchmark`, `case_study`, or `author_limit`. Every quantitative claim must be represented here or in a benchmark table with a source locator and conditions.
-- equation_cards: every item must contain `equation_id`, `latex`, `display_name`, `source_locator`, `symbols`, `assumptions`, `role_in_argument`, `plain_language_interpretation`, `supports_v4`, and `drafting_guidance`. Use source_locator fields section, page, label, table, figure, equation, and appendix. Put equation numbers in label.
-- benchmark_tables: every item must contain `table_id`, `title`, `source_locator`, `task_or_dataset`, `metric_definitions`, `experimental_conditions`, `columns`, `rows`, `author_reported_takeaway`, `digest_interpretation_boundary`, and `supports_v4`. Preserve columns, rows, metrics, conditions, and scope boundaries structurally. Use the legacy V4 tables field only as a concise projection where useful; do not replace its compatible shape.
-- wording_cards: every item must contain `wording_id`, `purpose`, `short_verbatim_excerpt`, `max_excerpt_words`, `faithful_paraphrase`, `why_precision_matters`, `source_locator`, and `supports_v4`. Short excerpts only, never more than 25 words. Prefer faithful_paraphrase in prose.
-- methodological_disputes: every item must contain `dispute_id`, `question`, `paper_position`, `alternative_position_or_interpretation`, `source_of_alternative`, `evidence_for_paper_position`, `evidence_for_alternative`, `conditions_that_change_the_answer`, `unresolved_point`, `editorial_rule`, and `supports_v4`.
-- unresolved_detail_gaps: short statements of source detail that remains unavailable.
-- safe_for_digest_only_drafting: false whenever relevant coverage is partial or the needed equation, proof, table, or methodological nuance is not captured.
+Reader and business fields:
+- likely_reader_misconceptions: common ways a reader might misunderstand or overgeneralize the
+  paper.
+- business_relevance_pathway: concrete pathways connecting the contribution to decisions,
+  operations, governance, product design, market strategy, risk management, or workflows.
 
-Every item in evidence_items, equation_cards, benchmark_tables, wording_cards, and methodological_disputes must include `supports_v4` as a non-empty array of objects, never as a string. Every supports_v4 item must contain `field`, naming an existing V4 field. For generated V5 digests, always use field-only support references and omit `item_index`; for example: `"supports_v4": [{"field": "summary"}]`. Do not emit item_index.
+Structured extraction fields:
+- tables: an array of table objects. Use [] when no table can be represented reliably. Each table
+  object includes table_id, title, source_location, columns, rows, and notes.
+- research_target_github_links: GitHub repositories that are the paper's research target or
+  artifact. Use [] unless applicable. Each object includes url, category_tags, research_role,
+  description, and evidence_context. Accepted URLs begin with https://github.com/,
+  https://gist.github.com/, or https://github.gatech.edu/.
 
-Build source_detail in dependency order: create evidence_items first and assign stable evidence_id values, then create methodological_disputes. Every id in methodological_disputes.evidence_for_paper_position and methodological_disputes.evidence_for_alternative must exactly equal an existing evidence_items[].evidence_id. Example: if an evidence item has `"evidence_id": "evidence_1"`, a dispute may use `"evidence_for_paper_position": ["evidence_1"]`. If no valid evidence_items id supports either side of a dispute, return `"methodological_disputes": []`; do not use prose, claims, or invented ids as evidence references.
+Inline retrieval blocks:
+- anchor_references: up to three prior works that anchor, motivate, compare with, or frame the
+  paper.
+- citation_logic_nodes: reusable citation-ready semantic claims this paper can support in future
+  writing.
 
-Use evidence_items as the primary reusable evidence layer. Preserve negative results, ablations, appendix caveats, and scope boundaries when they materially qualify a V4 claim. For large appendix sweeps, mark a benchmark table secondary while preserving machine-readable rows only when they are useful for future drafting.
+Formula extraction:
+- formulas is an optional array of formula objects. Use [] when the paper has no formula worth
+  preserving or when the source does not support a reliable extraction. Every formula object must
+  contain formula_id, latex, display_name, source_location, symbols,
+  plain_language_interpretation, and assumptions.
+- formula_id is a short unique id, for example equation_1. symbols is an array of objects, each
+  with symbol and meaning. assumptions is an array of conditions or scope limits.
 
-Before returning JSON, validate the V5 detail layer yourself: every populated detail-array item has every required key; every supports_v4 item is an object with a valid V4 field and no item_index; every methodological-dispute evidence reference exactly matches an evidence_items evidence_id. If any requirement cannot be met from the source, leave that optional detail array empty.
+Do not include source_detail, evidence cards, benchmark-table copies, wording cards,
+methodological disputes, coverage declarations, cross-links, or drafting-safety flags.

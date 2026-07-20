@@ -1,3 +1,13 @@
+# litxr 0.1.8.7
+
+- Simplified schema-v5 to the complete schema-v4 contract plus an optional
+  `formulas` array with a minimal, self-contained formula shape.
+- Removed the V5 `source_detail` layer and its evidence-card, benchmark-table,
+  wording-card, methodological-dispute, coverage, cross-reference, and
+  drafting-safety requirements.
+- Moved V5 prompt and ingest defaults to `v5.1` so generated JSON follows the
+  reduced contract.
+
 # litxr 0.1.8.6
 
 - Added schema-v5 LLM digests as a backward-compatible expansion of the

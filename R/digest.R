@@ -597,8 +597,8 @@ litxr_validate_llm_digest <- function(digest) {
       .litxr_validate_research_target_github_links(digest$research_target_github_links)
       .litxr_validate_evidence_shape(digest$evidence_shape)
     }
-    if (identical(schema_version, "v5") && "source_detail" %in% names(digest)) {
-      .litxr_validate_source_detail(digest$source_detail, digest)
+    if (identical(schema_version, "v5")) {
+      .litxr_validate_formulas(digest$formulas)
     }
     if ("anchor_references" %in% names(digest)) {
       .litxr_validate_inline_llm_table_field(

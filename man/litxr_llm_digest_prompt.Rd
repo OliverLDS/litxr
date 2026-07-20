@@ -9,7 +9,7 @@ litxr_llm_digest_prompt(
   config = NULL,
   mode = c("create", "revise"),
   schema_version = "v5",
-  prompt_version = "v5.0",
+  prompt_version = "v5.1",
   return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")
 )
 }

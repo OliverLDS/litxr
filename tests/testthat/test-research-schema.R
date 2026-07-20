@@ -87,10 +87,10 @@ stopifnot(identical(
   )
 ))
 stopifnot(identical(schema_release_info$schema_version, "v5"))
-stopifnot(identical(schema_release_info$prompt_version, "v5.0"))
+stopifnot(identical(schema_release_info$prompt_version, "v5.1"))
 stopifnot(identical(schema_release_info$schema_release_date, "2026-07-20"))
-stopifnot(identical(schema_release_info$schema_release_tag, "v0.1.8.6"))
-stopifnot(grepl("source-grounded detail", schema_release_info$schema_release_notes, fixed = TRUE))
+stopifnot(identical(schema_release_info$schema_release_tag, "v0.1.8.7"))
+stopifnot(grepl("optional", schema_release_info$schema_release_notes, fixed = TRUE))
 
 digest_template <- litxr::litxr_llm_digest_template("doi:10.1000/v2")
 stopifnot(identical(digest_template$schema_version, "v2"))
@@ -153,67 +153,23 @@ bad_v4 <- digest_template_v4
 bad_v4$evidence_shape$evidence_mode <- "bad_mode"
 stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v4), silent = TRUE), "try-error"))
 
-digest_template_v5_theory <- litxr::litxr_llm_digest_template("doi:10.1000/v5-theory", schema_version = "v5")
-stopifnot(identical(digest_template_v5_theory$schema_version, "v5"))
-stopifnot(all(names(digest_template_v4) %in% names(digest_template_v5_theory)))
-digest_template_v5_theory$key_findings <- "The objective has a bounded optimum under the stated assumptions."
-digest_template_v5_theory$theoretical_mechanism <- "The objective penalizes deviations from the constrained estimator."
-digest_template_v5_theory$source_detail$coverage$equations <- "complete"
-digest_template_v5_theory$source_detail$evidence_items <- list(list(
-  evidence_id = "evidence_1",
-  claim = "The objective has a bounded optimum.",
-  evidence_type = "theorem",
-  source_locator = list(section = "3.2", page = "5", label = "Theorem 1"),
-  conditions = c("Convex objective", "Bounded feasible set"),
-  limitation = "The result depends on the stated regularity assumptions.",
-  supports_v4 = list(list(field = "key_findings", item_index = 1L))
-))
-digest_template_v5_theory$source_detail$equation_cards <- list(list(
-  equation_id = "eq_1",
+digest_template_v5 <- litxr::litxr_llm_digest_template("doi:10.1000/v5", schema_version = "v5")
+stopifnot(identical(digest_template_v5$schema_version, "v5"))
+stopifnot(all(names(digest_template_v4) %in% names(digest_template_v5)))
+stopifnot(identical(digest_template_v5$formulas, list()))
+digest_template_v5$formulas <- list(list(
+  formula_id = "equation_1",
   latex = "\\\\min_\\\\theta L(\\\\theta)",
   display_name = "Constrained objective",
-  source_locator = list(section = "3.2", page = "5", label = "(4)"),
-  symbols = list(list(symbol = "theta", meaning = "model parameter", domain_or_shape = "R^p")),
-  assumptions = c("The feasible set is bounded."),
-  role_in_argument = "Defines the estimator used in the theorem.",
+  source_location = "Section 3.2, Equation 4, page 5",
+  symbols = list(list(symbol = "theta", meaning = "model parameter")),
   plain_language_interpretation = "The estimator minimizes loss subject to the stated constraints.",
-  supports_v4 = list(list(field = "theoretical_mechanism")),
-  drafting_guidance = list(safe_to_explain_without_rendering = TRUE, required_caveat = "State the regularity assumptions.")
+  assumptions = c("The feasible set is bounded.")
 ))
-stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v5_theory))))
-
-digest_template_v5_experiment <- litxr::litxr_llm_digest_template("doi:10.1000/v5-experiment", schema_version = "v5")
-digest_template_v5_experiment$key_findings <- "The method improves accuracy on the reported benchmark."
-digest_template_v5_experiment$source_detail$coverage$benchmark_tables <- "complete"
-digest_template_v5_experiment$source_detail$evidence_items <- list(list(
-  evidence_id = "evidence_1",
-  claim = "The method improves accuracy from 72.4 to 74.1 on the reported workload.",
-  evidence_type = "benchmark",
-  source_locator = list(section = "4.1", page = "7", label = "Table 2"),
-  conditions = c("Reported hardware", "Listed test split"),
-  limitation = "The result is limited to the listed workload and hardware.",
-  supports_v4 = list(list(field = "key_findings", item_index = 1L))
-))
-digest_template_v5_experiment$source_detail$benchmark_tables <- list(list(
-  table_id = "table_2",
-  title = "Primary benchmark",
-  source_locator = list(section = "4.1", page = "7", label = "Table 2"),
-  task_or_dataset = "Fixture benchmark",
-  metric_definitions = list(list(metric = "accuracy", direction = "higher_is_better")),
-  experimental_conditions = list(model = "Fixture model", hardware = "Fixture hardware", data_split = "test", inference_or_training_budget = "reported budget"),
-  columns = c("model", "accuracy"),
-  rows = list(list(row_id = "table_2_r1", values = list(model = "Baseline", accuracy = 72.4)), list(row_id = "table_2_r2", values = list(model = "Method", accuracy = 74.1))),
-  author_reported_takeaway = "The method improves reported accuracy.",
-  digest_interpretation_boundary = "Do not generalize beyond the listed workload.",
-  supports_v4 = list(list(field = "key_findings", item_index = 1L))
-))
-stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v5_experiment))))
-bad_v5_duplicate_evidence <- digest_template_v5_experiment
-bad_v5_duplicate_evidence$source_detail$evidence_items <- rep(bad_v5_duplicate_evidence$source_detail$evidence_items, 2L)
-stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v5_duplicate_evidence), silent = TRUE), "try-error"))
-legacy_v5_without_source_detail <- litxr::litxr_llm_digest_template("doi:10.1000/v5-optional", schema_version = "v5")
-legacy_v5_without_source_detail$source_detail <- NULL
-stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(legacy_v5_without_source_detail))))
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v5))))
+bad_v5_formula <- digest_template_v5
+bad_v5_formula$formulas[[1]]$source_location <- NULL
+stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v5_formula), silent = TRUE), "try-error"))
 
 legacy_v4 <- litxr::litxr_llm_digest_template("doi:10.1000/v4-legacy", schema_version = "v4")
 legacy_v4$tables <- NULL
@@ -276,22 +232,12 @@ stopifnot(grepl("likely_reader_misconceptions", prompt_create, fixed = TRUE))
 stopifnot(grepl("business_relevance_pathway", prompt_create, fixed = TRUE))
 stopifnot(grepl("ranked_contributions", prompt_create, fixed = TRUE))
 stopifnot(grepl("evidence_shape", prompt_create, fixed = TRUE))
-stopifnot(grepl("array of objects, never an array of strings", prompt_create, fixed = TRUE))
-stopifnot(grepl("benchmark_and_execution_validation", prompt_create, fixed = TRUE))
-stopifnot(grepl("descriptive_comparative", prompt_create, fixed = TRUE))
-stopifnot(grepl("evidence_id`, `claim`, `evidence_type`, `source_locator`, `conditions`, `limitation`, and `supports_v4`", prompt_create, fixed = TRUE))
-stopifnot(grepl("supports_v4` as a non-empty array of objects, never as a string", prompt_create, fixed = TRUE))
-stopifnot(grepl("Every supports_v4 item must contain `field`", prompt_create, fixed = TRUE))
-stopifnot(grepl("always use field-only support references and omit `item_index`", prompt_create, fixed = TRUE))
-stopifnot(grepl("Prefer a valid minimal source_detail", prompt_create, fixed = TRUE))
-stopifnot(grepl("Before returning JSON, validate the V5 detail layer yourself", prompt_create, fixed = TRUE))
-stopifnot(grepl("Build source_detail in dependency order: create evidence_items first", prompt_create, fixed = TRUE))
-stopifnot(grepl("must exactly equal an existing evidence_items[].evidence_id", prompt_create, fixed = TRUE))
-stopifnot(grepl("return `\"methodological_disputes\": []`", prompt_create, fixed = TRUE))
+stopifnot(grepl("ranked_contributions: an array of objects", prompt_create, fixed = TRUE))
+stopifnot(grepl("research_target_github_links: GitHub repositories", prompt_create, fixed = TRUE))
+stopifnot(grepl("formula_id, latex, display_name, source_location, symbols", prompt_create, fixed = TRUE))
+stopifnot(grepl("Do not include source_detail", prompt_create, fixed = TRUE))
 stopifnot(grepl("tables", prompt_create, fixed = TRUE))
 stopifnot(grepl("research_target_github_links", prompt_create, fixed = TRUE))
-stopifnot(grepl("source_detail", prompt_create, fixed = TRUE))
-stopifnot(grepl("supports_v4", prompt_create, fixed = TRUE))
 stopifnot(grepl("research target or artifact", prompt_create, fixed = TRUE))
 stopifnot(!grepl("{{", prompt_create, fixed = TRUE))
 

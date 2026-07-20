@@ -62,14 +62,15 @@ maps common identities, and falls back to `unknown` for missing or empty values.
 Legacy labels such as `review`, `dataset`, `policy_report`, and `book` remain
 accepted for backward compatibility.
 
-## Digest Schema V4
+## Digest Schemas V4 And V5
 
-Schema `v4` is the current schema for new interactive LLM digest prompts. It
-extends `v3` without breaking `v1`, `v2`, or `v3` reads.
+Schema `v4` defines the base structured digest contract. Schema `v5` retains
+every V4 field and adds one optional `formulas` array. New interactive prompts
+use V5.
 
 Required top-level fields:
 
-- `schema_version`: must be `v4`.
+- `schema_version`: must be `v4` or `v5`.
 - `ref_id`: canonical litxr reference id.
 - `digest_revision`: positive integer revision counter.
 - `derived_from_revision`: optional previous revision.
@@ -141,6 +142,12 @@ identification is claimed.
 - `strength_level`: one of `very_low`, `low`, `medium`, `high`,
   `very_high`, `not_applicable`, `unknown`.
 - `limitations`: short evidence limitations.
+
+For schema `v5`, `formulas` is optional and defaults to `[]`. Each retained
+formula contains `formula_id`, `latex`, `display_name`, `source_location`,
+`symbols` (objects with `symbol` and `meaning`),
+`plain_language_interpretation`, and `assumptions`. V5 does not include a
+source-detail, evidence-card, or drafting-safety layer.
 
 ## Digest Schema V2/V3
 

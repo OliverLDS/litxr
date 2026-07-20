@@ -11,7 +11,7 @@ parse_args <- function(args) {
     show_help = FALSE,
     ref_id = NULL,
     mode = "create",
-    prompt_version = "v5.0",
+    prompt_version = "v5.1",
     return_format = "download_json_file"
   )
   i <- 1L
@@ -51,14 +51,14 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/build_llm_digest_prompt.R --ref-id REF_ID [--mode create|revise] [--prompt-version v5.0] [--return-format download_json_file|inline_raw_json|markdown_fenced_json]",
+      "  Rscript scripts/build_llm_digest_prompt.R --ref-id REF_ID [--mode create|revise] [--prompt-version v5.1] [--return-format download_json_file|inline_raw_json|markdown_fenced_json]",
       "",
       "Options:",
       "  --ref-id REF_ID     Canonical litxr ref_id to build a digest prompt for.",
       "                      Bare arXiv ids like 2510.22085 are accepted as-is.",
       "  --mode MODE         Either `create` or `revise`. Default: create",
       "  --prompt-version V  Prompt template version metadata to include.",
-      "                      Default: v5.0",
+      "                      Default: v5.1",
       "  --return-format F   Expected returned format from the external LLM.",
       "                      `download_json_file` asks for a downloadable",
       "                      litxr_schema.json file.",

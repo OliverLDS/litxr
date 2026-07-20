@@ -177,7 +177,7 @@
 #'
 #' @return A single character string containing the full prompt.
 #' @export
-litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "revise"), schema_version = "v5", prompt_version = "v5.0", return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")) {
+litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "revise"), schema_version = "v5", prompt_version = "v5.1", return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")) {
   ref_id <- as.character(ref_id)
   if (!length(ref_id) || is.na(ref_id[[1]]) || !nzchar(ref_id[[1]])) {
     stop("`ref_id` is required.", call. = FALSE)

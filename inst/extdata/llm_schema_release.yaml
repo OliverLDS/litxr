@@ -1,7 +1,8 @@
 schema_version: v5
-prompt_version: v5.0
+prompt_version: v5.1
 schema_release_date: 2026-07-20
-schema_release_tag: v0.1.8.6
+schema_release_tag: v0.1.8.7
 schema_release_notes: >
-  Added optional source-grounded detail cards to schema-v5 digests while
-  retaining the complete schema-v4 surface unchanged.
+  Defines schema-v5 as the complete schema-v4 surface plus the optional
+  formulas array. Source-detail cards and their cross-reference contract are
+  not part of schema-v5.
