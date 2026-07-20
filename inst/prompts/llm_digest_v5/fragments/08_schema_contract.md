@@ -31,6 +31,6 @@ source_detail is optional source-grounded detail. When present it must contain:
 - unresolved_detail_gaps: short statements of source detail that remains unavailable.
 - safe_for_digest_only_drafting: false whenever relevant coverage is partial or the needed equation, proof, table, or methodological nuance is not captured.
 
-Every item in evidence_items, equation_cards, benchmark_tables, wording_cards, and methodological_disputes must include supports_v4. Each supports_v4 object names an existing V4 field. Include item_index only when grounding an ordered V4 array, such as key_findings or ranked_contributions. Do not include item_index for scalar fields such as theoretical_mechanism.
+Every item in evidence_items, equation_cards, benchmark_tables, wording_cards, and methodological_disputes must include `supports_v4` as a non-empty array of objects, never as a string. Every supports_v4 item must contain `field`, naming an existing V4 field. Example: `"supports_v4": [{"field": "key_findings", "item_index": 1}]`. Include `item_index` only when grounding an ordered V4 array, such as key_findings or ranked_contributions. Do not include item_index for scalar fields such as theoretical_mechanism.
 
 Use evidence_items as the primary reusable evidence layer. Preserve negative results, ablations, appendix caveats, and scope boundaries when they materially qualify a V4 claim. For large appendix sweeps, mark a benchmark table secondary while preserving machine-readable rows only when they are useful for future drafting.

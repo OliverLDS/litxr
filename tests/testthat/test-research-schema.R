@@ -280,6 +280,8 @@ stopifnot(grepl("array of objects, never an array of strings", prompt_create, fi
 stopifnot(grepl("benchmark_and_execution_validation", prompt_create, fixed = TRUE))
 stopifnot(grepl("descriptive_comparative", prompt_create, fixed = TRUE))
 stopifnot(grepl("evidence_id`, `claim`, `evidence_type`, `source_locator`, `conditions`, `limitation`, and `supports_v4`", prompt_create, fixed = TRUE))
+stopifnot(grepl("supports_v4` as a non-empty array of objects, never as a string", prompt_create, fixed = TRUE))
+stopifnot(grepl("Every supports_v4 item must contain `field`", prompt_create, fixed = TRUE))
 stopifnot(grepl("tables", prompt_create, fixed = TRUE))
 stopifnot(grepl("research_target_github_links", prompt_create, fixed = TRUE))
 stopifnot(grepl("source_detail", prompt_create, fixed = TRUE))
