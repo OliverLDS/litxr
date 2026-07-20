@@ -258,81 +258,6 @@ litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history =
   invisible(path)
 }
 
-litxr_build_llm_digest <- function(ref_id, builder, config = NULL, overwrite = FALSE, write = TRUE) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-
-  if (!is.function(builder)) {
-    stop("`builder` must be a function.", call. = FALSE)
-  }
-
-  existing <- litxr_read_llm_digest(ref_id, cfg)
-  if (!is.null(existing) && !isTRUE(overwrite)) {
-    stop("LLM digest already exists for ref_id: ", ref_id, ". Set `overwrite = TRUE` to replace it.", call. = FALSE)
-  }
-
-  refs <- litxr_read_references(cfg)
-  ref_match <- refs[refs$ref_id == ref_id, ]
-  if (nrow(ref_match)) {
-    ref_match <- ref_match[1L, ]
-  }
-  if (!nrow(ref_match)) {
-    stop("Reference id not found in canonical store: ", ref_id, call. = FALSE)
-  }
-
-  markdown <- litxr_read_md(ref_id, cfg)
-  if (is.null(markdown)) {
-    stop("Markdown not found for ref_id: ", ref_id, call. = FALSE)
-  }
-
-  template <- litxr_llm_digest_template(ref_id)
-  built <- builder(ref = ref_match[1, ], markdown = markdown, template = template)
-  if (is.null(built) || !is.list(built)) {
-    stop("`builder` must return a named list of digest fields.", call. = FALSE)
-  }
-
-  payload <- .litxr_normalize_llm_digest_for_write(built, ref_id = ref_id)
-  litxr_validate_llm_digest(payload)
-
-  if (isTRUE(write)) {
-    litxr_write_llm_digest(ref_id, payload, cfg)
-  }
-  payload
-}
-
-litxr_build_llm_digests <- function(builder, config = NULL, ref_ids = NULL, overwrite = FALSE, limit = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-
-  targets <- if (!is.null(ref_ids) && length(ref_ids)) {
-    unique(as.character(ref_ids))
-  } else {
-    status <- litxr_read_enrichment_status(cfg)
-    status <- status[status$has_md & (overwrite | !status$has_llm_digest), ]
-    status$ref_id
-  }
-
-  if (!length(targets)) {
-    return(list())
-  }
-
-  if (!is.null(limit)) {
-    targets <- targets[seq_len(min(length(targets), as.integer(limit)))]
-  }
-
-  out <- stats::setNames(vector("list", length(targets)), targets)
-  for (i in seq_along(targets)) {
-    out[[i]] <- litxr_build_llm_digest(
-      ref_id = targets[[i]],
-      builder = builder,
-      config = cfg,
-      overwrite = overwrite,
-      write = TRUE
-    )
-  }
-  out
-}
-
 #' Read an LLM digest
 #'
 #' @param ref_id Reference identifier.
@@ -583,26 +508,6 @@ litxr_read_llm_digest_history <- function(ref_id, config = NULL, include_current
   })
   revisions$digest <- digests
   revisions
-}
-
-litxr_write_md <- function(ref_id, text, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_ensure_project_md_dir(cfg)
-  path <- .litxr_md_path(cfg, ref_id)
-  writeLines(as.character(text), path, useBytes = TRUE)
-  .litxr_update_enrichment_status_ref(cfg, ref_id)
-  invisible(path)
-}
-
-litxr_read_md <- function(ref_id, config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  path <- .litxr_md_path(cfg, ref_id)
-  if (!file.exists(path)) {
-    return(NULL)
-  }
-  paste(readLines(path, warn = FALSE), collapse = "\n")
 }
 
 #' Validate an LLM digest

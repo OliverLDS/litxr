@@ -1108,28 +1108,7 @@ stopifnot(any(llm_all$ref_id == "isbn:9780262046305"))
 llm_found <- litxr::litxr_find_llm(query = "searchable", collection_id = "manual_books", config = cfg_manual)
 stopifnot(any(llm_found$ref_id == "isbn:9780262046305"))
 
-md_path <- litxr::litxr_write_md(
-  "isbn:9780262046305",
-  "# Manual Book\n\nThis markdown captures the full-text derivative.",
-  config = cfg_manual
-)
-stopifnot(file.exists(md_path))
-md_text <- litxr::litxr_read_md("isbn:9780262046305", cfg_manual)
-stopifnot(grepl("full-text derivative", md_text, fixed = TRUE))
-
 stopifnot(isTRUE(litxr::litxr_validate_llm_digest(llm_one)))
-
-litxr:::.litxr_refresh_normalized_reference_scaffold(
-  cfg_manual,
-  records = manual_read,
-  refresh_entity_indexes = TRUE
-)
-
-status <- litxr::litxr_read_enrichment_status(cfg_manual)
-status_one <- status[status$ref_id == "isbn:9780262046305", ]
-stopifnot(nrow(status_one) == 1L)
-stopifnot(isTRUE(status_one$has_md[[1]]))
-stopifnot(isTRUE(status_one$has_llm_digest[[1]]))
 
 entity_build <- litxr::litxr_build_entity_indexes(cfg_manual)
 stopifnot("ref_identity_map_path" %in% names(entity_build))
@@ -1138,56 +1117,9 @@ stopifnot(!("entities_path" %in% names(entity_build)))
 stopifnot(!("entity_collections_path" %in% names(entity_build)))
 stopifnot(!("entity_status_path" %in% names(entity_build)))
 
-builder_fun <- function(ref, markdown, template) {
-  list(
-    summary = paste("Built from", ref$title[[1]]),
-    motivation = "Test builder path.",
-    research_questions = c("What is the manual workflow?"),
-    methods = c("Structured parsing"),
-    key_findings = c("Builder writes a digest."),
-    limitations = c("Mock builder only."),
-    keywords = c("builder", "test"),
-    notes = markdown
-  )
-}
-builder_ref_id <- "isbn:9780262046305"
-builder_md_path <- litxr::litxr_write_md(
-  builder_ref_id,
-  "# Manual Book\n\nThis markdown captures the full-text derivative.",
-  config = cfg_manual
-)
-stopifnot(file.exists(builder_md_path))
-built_one <- litxr::litxr_build_llm_digest(
-  builder_ref_id,
-  builder = builder_fun,
-  config = cfg_manual,
-  overwrite = TRUE
-)
-stopifnot(identical(built_one$motivation, "Test builder path."))
-rebuilt_digest <- litxr::litxr_read_llm_digest(builder_ref_id, cfg_manual)
-stopifnot(identical(rebuilt_digest$digest_revision, 2L))
-history_rows <- litxr::litxr_list_llm_digest_revisions(builder_ref_id, cfg_manual)
-stopifnot(nrow(history_rows) >= 2L)
-stopifnot(any(!history_rows$is_current))
-stopifnot(any(history_rows$digest_revision == 1L))
-history_payloads <- litxr::litxr_read_llm_digest_history(builder_ref_id, cfg_manual)
-stopifnot("digest" %in% names(history_payloads))
-stopifnot(any(vapply(history_payloads$digest, function(x) identical(x$digest_revision, 1L), logical(1))))
-
-built_batch <- litxr::litxr_build_llm_digests(
-  builder = builder_fun,
-  config = cfg_manual,
-  ref_ids = builder_ref_id,
-  overwrite = TRUE
-)
-stopifnot(identical(names(built_batch), builder_ref_id))
-
-orphan_md_path <- file.path(litxr:::.litxr_project_md_dir(cfg_manual), "orphan_identity.md")
-writeLines("orphan", orphan_md_path)
 entity_audit <- litxr::litxr_audit_entity_indexes(cfg_manual, oversized_mb = 0.0001)
 stopifnot(is.list(entity_audit))
 stopifnot(all(c("identity_splits", "ambiguous_identity_joins", "orphan_artifacts", "index_health", "thin_index_health", "compatibility_projection_health") %in% names(entity_audit)))
-stopifnot(any(entity_audit$orphan_artifacts$path == orphan_md_path))
 stopifnot(any(entity_audit$index_health$status %in% c("ok", "oversized")))
 
 manual_refs2 <- data.table::data.table(

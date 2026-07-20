@@ -79,10 +79,9 @@ Read and export:
 
 Enrichment:
 
-- `litxr_write_md()`
-- `litxr_build_llm_digest()`
-- `litxr_build_llm_digests()`
-- `litxr_read_enrichment_status()`
+- `litxr_llm_digest_prompt()`
+- `litxr_read_llm_digest()`
+- `litxr_write_llm_digest()`
 - `litxr_list_enrichment_candidates()`
 
 ## Project Layout
@@ -102,7 +101,6 @@ Project-level canonical data lives under `project.data_root/`, including:
 - `index/entity_status.fst`
 - `index/references.fst`
 - `index/reference_collections.fst`
-- `index/enrichment_status.fst`
 - `index/sync_state.fst`
 - `embeddings/`
 - `md/`

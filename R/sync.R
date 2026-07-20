@@ -271,19 +271,6 @@ litxr_repair_journal <- function(
 }
 
 
-#' Read project-level enrichment status
-#'
-#' @param config Optional parsed config list or a direct config path. When
-#'   omitted, `litxr` reads `LITXR_DATA_ROOT`.
-#'
-#' @return `data.table` with one row per reference and enrichment flags.
-#' @export
-litxr_read_enrichment_status <- function(config = NULL) {
-  cfg <- if (is.character(config)) litxr_read_config(config) else config
-  if (is.null(cfg)) cfg <- litxr_read_config()
-  .litxr_read_enrichment_status_index(cfg)
-}
-
 #' List enrichment candidates and exclusion reasons
 #'
 #' Combines the canonical reference store, collection memberships, and

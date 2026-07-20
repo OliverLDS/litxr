@@ -570,11 +570,6 @@
   file.path(.litxr_project_md_dir(cfg), paste0(.litxr_record_slug(data.table::data.table(ref_id = ref_id, doi = NA_character_)), ".md"))
 }
 
-.litxr_enrichment_status_index_path <- function(cfg) {
-  file.path(.litxr_project_index_dir(cfg), "enrichment_status.fst")
-}
-
-
 .litxr_records_date_range <- function(records) {
   if (is.null(records) || !nrow(records)) {
     return(list(from = NA_character_, to = NA_character_))

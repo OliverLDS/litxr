@@ -1,5 +1,24 @@
 Schema-v5 extends schema-v4. Keep every existing V4 key and value type unchanged.
 
+The V4 synthesis contract remains mandatory: summary, motivation,
+research_questions, paper_structure, methods, research_data,
+identification_strategy, main_variables, key_findings, limitations,
+theoretical_mechanism, empirical_setting, descriptive_statistics_summary,
+standardized_findings_summary, contribution_type, ranked_contributions,
+likely_reader_misconceptions, business_relevance_pathway, evidence_strength,
+evidence_shape, keywords, notes, tables, research_target_github_links,
+anchor_references, and citation_logic_nodes retain their V4 meanings.
+In particular, identification_strategy: how the paper supports its empirical or causal claim through design, comparison, triangulation, benchmark protocol, or the reason no causal identification is claimed.
+
+Required V4 nested shapes and enums:
+
+- ranked_contributions is an array of objects, never an array of strings. Every item must have exactly the required keys `rank` (positive integer), `contribution_type` (string), `contribution` (non-empty string), and `reason` (string). Example: `{ "rank": 1, "contribution_type": "method", "contribution": "Introduces the method.", "reason": "It is the paper's central technical contribution." }`.
+- evidence_shape is an object with `evidence_mode`, `evidence_basis`, `inference_type`, `strength_level`, and `limitations`.
+- evidence_shape.evidence_mode must be exactly one of: `empirical_quantitative`, `empirical_qualitative`, `experimental`, `simulation`, `benchmark`, `theoretical_model`, `conceptual_argument`, `methodological_demonstration`, `review_synthesis`, `policy_analysis`, `descriptive`, `none`, `unknown`.
+- evidence_shape.inference_type must be exactly one of: `causal`, `associational`, `predictive`, `descriptive`, `mechanistic`, `formal`, `interpretive`, `comparative`, `normative`, `synthetic`, `not_applicable`, `unknown`.
+- evidence_shape.strength_level must be exactly one of: `very_low`, `low`, `medium`, `high`, `very_high`, `not_applicable`, `unknown`.
+- Do not combine enum values into new tokens such as `benchmark_and_execution_validation` or `descriptive_comparative`. Choose the one best-fitting canonical value, and put any nuance in evidence_basis or limitations.
+
 source_detail is optional source-grounded detail. When present it must contain:
 
 - schema_version: `v5`.

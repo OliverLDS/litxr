@@ -12,7 +12,9 @@ Instructions:
 6. {{return_format_instruction}}
 7. Do not add keys beyond this schema. Use null, empty strings, or empty arrays for unavailable information; do not guess.
 8. The accepted paper_type vocabulary is: {{paper_type_vocab}}.
-9. This extraction is in `{{mode}}` mode with prompt_version `{{prompt_version}}`.
+9. `ranked_contributions` is an array of objects, never an array of strings. Every object must contain `rank`, `contribution_type`, `contribution`, and `reason`.
+10. `evidence_shape.evidence_mode`, `evidence_shape.inference_type`, and `evidence_shape.strength_level` must use only the enum values stated in the schema contract below; do not invent compound values.
+11. This extraction is in `{{mode}}` mode with prompt_version `{{prompt_version}}`.
 
 Return JSON matching this schema exactly:
 {{template_json}}

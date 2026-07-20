@@ -240,7 +240,30 @@ prompt_ref <- data.table::data.table(
   doi = NA_character_,
   year = 2025L
 )
-litxr:::.litxr_refresh_normalized_reference_scaffold(cfg, records = prompt_ref, refresh_entity_indexes = TRUE)
+arxiv_fixture_dir <- file.path(dirname(config_path), "ref", "arxiv_cs_ai")
+dir.create(arxiv_fixture_dir, recursive = TRUE, showWarnings = FALSE)
+jsonlite::write_json(
+  list(
+    ref_id = "arxiv:2501.00001",
+    source = "arxiv",
+    source_id = "2501.00001",
+    arxiv_id_versioned = "2501.00001v1",
+    arxiv_version = "1",
+    title = "Prompt Builder Test Paper",
+    abstract = "Prompt builder abstract.",
+    doi = NULL,
+    year = 2025L
+  ),
+  file.path(arxiv_fixture_dir, "arxiv_2501_00001.json"),
+  auto_unbox = TRUE,
+  null = "null"
+)
+arxiv_sync <- litxr::litxr_sync_thin_ref_stores_from_json(
+  config = cfg,
+  collection_ids = "arxiv_cs_ai"
+)
+stopifnot(identical(arxiv_sync$mode, "incremental"))
+stopifnot(identical(arxiv_sync$diffs$ref_arxiv$added, 1L))
 prompt_create <- litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "create")
 stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create, fixed = TRUE))
 stopifnot(grepl("https://arxiv.org/pdf/2501.00001", prompt_create, fixed = TRUE))
@@ -253,6 +276,9 @@ stopifnot(grepl("likely_reader_misconceptions", prompt_create, fixed = TRUE))
 stopifnot(grepl("business_relevance_pathway", prompt_create, fixed = TRUE))
 stopifnot(grepl("ranked_contributions", prompt_create, fixed = TRUE))
 stopifnot(grepl("evidence_shape", prompt_create, fixed = TRUE))
+stopifnot(grepl("array of objects, never an array of strings", prompt_create, fixed = TRUE))
+stopifnot(grepl("benchmark_and_execution_validation", prompt_create, fixed = TRUE))
+stopifnot(grepl("descriptive_comparative", prompt_create, fixed = TRUE))
 stopifnot(grepl("tables", prompt_create, fixed = TRUE))
 stopifnot(grepl("research_target_github_links", prompt_create, fixed = TRUE))
 stopifnot(grepl("source_detail", prompt_create, fixed = TRUE))
@@ -270,7 +296,29 @@ prompt_ref_doi <- data.table::data.table(
   linked_arxiv_ref_id = "arxiv:2501.00001",
   year = 2025L
 )
-litxr:::.litxr_refresh_normalized_reference_scaffold(cfg, records = data.table::rbindlist(list(prompt_ref, prompt_ref_doi), fill = TRUE), refresh_entity_indexes = TRUE)
+doi_fixture_dir <- file.path(dirname(config_path), "ref", "journal_of_finance")
+dir.create(doi_fixture_dir, recursive = TRUE, showWarnings = FALSE)
+jsonlite::write_json(
+  list(
+    ref_id = "doi:10.1000/prompt-doi",
+    source = "crossref",
+    source_id = "10.1000/prompt-doi",
+    doi = "10.1000/prompt-doi",
+    linked_arxiv_ref_id = "arxiv:2501.00001",
+    title = "Prompt Builder DOI Test Paper",
+    abstract = "Prompt builder DOI abstract.",
+    year = 2025L
+  ),
+  file.path(doi_fixture_dir, "10_1000_prompt_doi.json"),
+  auto_unbox = TRUE,
+  null = "null"
+)
+doi_sync <- litxr::litxr_sync_thin_ref_stores_from_json(
+  config = cfg,
+  collection_ids = "journal_of_finance"
+)
+stopifnot(identical(doi_sync$mode, "incremental"))
+stopifnot(identical(doi_sync$diffs$ref_doi$added, 1L))
 prompt_create_doi <- litxr::litxr_llm_digest_prompt("doi:10.1000/prompt-doi", cfg, mode = "create")
 stopifnot(grepl("linked_arxiv_ref_id: arxiv:2501.00001", prompt_create_doi, fixed = TRUE))
 stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create_doi, fixed = TRUE))
@@ -641,7 +689,6 @@ litxr::litxr_add_refs(
   config = cfg
 )
 
-litxr::litxr_write_md("doi:10.1000/a", "Example markdown", cfg)
 litxr::litxr_write_llm_digest(
   "doi:10.1000/a",
   list(

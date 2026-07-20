@@ -141,21 +141,11 @@ labels <- litxr_label_collection_by_category(
 For repeated category searches, keep the collection embedding index and the
 query-set embedding index on the same `model`.
 
-## Markdown
-
-Project-level markdown helpers:
-
-- `litxr_write_md(ref_id, text, config = ...)`
-- `litxr_read_md(ref_id, config = ...)`
-
-This is the current place to store extracted or manually prepared article text
-before digest generation.
-
 ## LLM Digest Contract
 
 Each digest is one JSON file under `project.data_root/digest/llm/`.
 
-Interactive prompt default: schema `v4`.
+Interactive prompt default: schema `v5`.
 
 Package template default: schema `v2`, retained for backward compatibility in
 programmatic code.
@@ -228,49 +218,6 @@ Schema `v3` digests may carry optional inline `anchor_references` and
 `business_relevance_pathway`, `tables`, `research_target_github_links`, and
 `evidence_shape`. The same anchor and citation-node information can also be
 stored as separate project-level tables under `project.data_root/findings/`.
-
-## Building Digests
-
-Single-reference build:
-
-```r
-builder_fun <- function(ref, markdown, template) {
-  template$summary <- paste("Draft summary for", ref$title[[1]])
-  template$motivation <- "Replace with your extraction logic."
-  template$research_questions <- c("Question 1")
-  template$methods <- c("Method 1")
-  template$key_findings <- c("Finding 1")
-  template$limitations <- c("Limitation 1")
-  template$keywords <- c("keyword")
-  template
-}
-
-litxr_build_llm_digest(ref_id, builder = builder_fun, config = cfg)
-```
-
-## Candidate Inspection
-
-Use `litxr_list_enrichment_candidates()` to see what is ready and why other
-references are excluded.
-
-Example:
-
-```r
-litxr_list_enrichment_candidates(cfg, collection_id = "journal_of_finance")
-```
-
-Output flags:
-
-- `has_md`
-- `has_llm_digest`
-- `eligible`
-- `reason`
-
-Current reasons:
-
-- `ready`
-- `missing_md`
-- `digest_exists`
 
 ## Interactive Digest Workflow
 
