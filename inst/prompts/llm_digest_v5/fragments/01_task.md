@@ -14,7 +14,8 @@ Instructions:
 8. The accepted paper_type vocabulary is: {{paper_type_vocab}}.
 9. `ranked_contributions` is an array of objects, never an array of strings. Every object must contain `rank`, `contribution_type`, `contribution`, and `reason`.
 10. `evidence_shape.evidence_mode`, `evidence_shape.inference_type`, and `evidence_shape.strength_level` must use only the enum values stated in the schema contract below; do not invent compound values.
-11. This extraction is in `{{mode}}` mode with prompt_version `{{prompt_version}}`.
+11. Prefer a valid minimal source_detail over speculative detail: leave any optional source_detail array empty unless every required field and cross-reference can be supplied from the source.
+12. This extraction is in `{{mode}}` mode with prompt_version `{{prompt_version}}`.
 
 Return JSON matching this schema exactly:
 {{template_json}}
