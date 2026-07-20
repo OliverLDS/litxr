@@ -1,3 +1,19 @@
+# litxr 0.1.8.6
+
+- Added schema-v5 LLM digests as a backward-compatible expansion of the
+  complete schema-v4 surface.
+- Added the optional `source_detail` layer for source-grounded evidence,
+  equations, benchmark tables, precise wording, methodological disputes,
+  coverage declarations, and drafting-safety status.
+- Added V5 validation for unique evidence ids, source locators, V4 support
+  links, bounded wording excerpts, and evidence references from disputes and
+  result collections.
+- Moved new interactive digest prompts and ingest defaults to `v5.0` while
+  retaining V3/V4 prompt and digest compatibility.
+- Exported the digest template, read, write, and validation APIs for
+  installed-package callers, and added theory-heavy and experiment-heavy V5
+  fixtures.
+
 # litxr 0.1.8.5
 
 - Expanded the thin-index and cached-digest workflow so schema refreshes and

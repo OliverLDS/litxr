@@ -1,7 +1,7 @@
-schema_version: v4
-prompt_version: v4.0
-schema_release_date: 2026-06-13
-schema_release_tag: v0.0.8.10
+schema_version: v5
+prompt_version: v5.0
+schema_release_date: 2026-07-20
+schema_release_tag: v0.1.8.6
 schema_release_notes: >
-  Added tables and research_target_github_links to schema-v4 digests and
-  updated the active prompt contract to extract those fields.
+  Added optional source-grounded detail cards to schema-v5 digests while
+  retaining the complete schema-v4 surface unchanged.

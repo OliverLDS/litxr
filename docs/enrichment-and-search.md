@@ -274,7 +274,7 @@ Current reasons:
 
 ## Interactive Digest Workflow
 
-For manual schema-v4 extraction with ChatGPT, use:
+For manual schema-v5 extraction with ChatGPT, use:
 
 - `scripts/run_llm_digest_interactive.sh`
 
@@ -293,7 +293,8 @@ dumped directly to the terminal.
 
 Prompt generation itself is package-owned through `litxr_llm_digest_prompt()`.
 The prompt text is assembled from Markdown fragments under
-`inst/prompts/llm_digest_v4/fragments/`, while the shell wrapper remains a thin
+`inst/prompts/llm_digest_v5/fragments/`. V5 inherits unchanged V4 prompt
+fragments and overrides the task and schema contract, while the shell wrapper remains a thin
 orchestration layer.
 
 To inspect a reference quickly, use `scripts/report_ref_summary.sh`. By default it

@@ -6,13 +6,13 @@ script_dir="${0:A:h}"
 repo_root="${script_dir:A:h}"
 script_root="${repo_root}/scripts"
 json_path_default="~/Downloads/litxr_schema.json"
-prompt_version_default="v4.0"
+prompt_version_default="v5.0"
 return_format_default="download_json_file"
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run_llm_digest_interactive.sh --ref-id REF_ID [--json_path ~/Downloads/litxr_schema.json] [--prompt-version v4.0] [--return-format download_json_file|inline_raw_json]
+  scripts/run_llm_digest_interactive.sh --ref-id REF_ID [--json_path ~/Downloads/litxr_schema.json] [--prompt-version v5.0] [--return-format download_json_file|inline_raw_json]
 
 Options:
   --ref-id REF_ID       Canonical litxr ref_id to build or revise.
@@ -20,7 +20,7 @@ Options:
   --json_path PATH      Downloaded JSON path to ingest.
                         Default: ~/Downloads/litxr_schema.json
   --prompt-version V    Prompt template version metadata to include.
-                        Default: v4.0
+                        Default: v5.0
   --return-format MODE  Prompt return mode for the upstream prompt.
                         Default asks for a downloadable JSON file.
                         `inline_raw_json` asks for raw JSON to be pasted from

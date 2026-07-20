@@ -251,7 +251,7 @@ if (is.na(abstract) || !nzchar(trimws(abstract))) {
 digest_ref_id <- ref_id
 digest <- tryCatch(litxr:::litxr_read_llm_digest(digest_ref_id, cfg), error = function(e) NULL)
 if (is.null(digest)) {
-  digest <- litxr:::litxr_llm_digest_template(ref_id, schema_version = "v4")
+  digest <- litxr:::litxr_llm_digest_template(ref_id, schema_version = "v5")
   digest$summary <- NA_character_
   digest$motivation <- NA_character_
   digest$research_questions <- character()

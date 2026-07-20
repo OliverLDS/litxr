@@ -8,8 +8,8 @@ litxr_llm_digest_prompt(
   ref_id,
   config = NULL,
   mode = c("create", "revise"),
-  schema_version = "v4",
-  prompt_version = "v4.0",
+  schema_version = "v5",
+  prompt_version = "v5.0",
   return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")
 )
 }
@@ -20,8 +20,8 @@ litxr_llm_digest_prompt(
 
 \item{mode}{Either \code{"create"} or \code{"revise"}.}
 
-\item{schema_version}{Digest schema version. Supported values are \code{"v3"}
-and \code{"v4"}.}
+\item{schema_version}{Digest schema version. Supported values are \code{"v3"},
+\code{"v4"}, and \code{"v5"}.}
 
 \item{prompt_version}{Prompt-template version metadata to include in the
 prompt.}

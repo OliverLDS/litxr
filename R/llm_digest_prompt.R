@@ -1,4 +1,4 @@
-.litxr_prompt_fragment_root <- function(schema_version = "v4") {
+.litxr_prompt_fragment_root <- function(schema_version = "v5") {
   root <- system.file(
     "prompts",
     paste0("llm_digest_", schema_version),
@@ -16,6 +16,9 @@
 
 .litxr_read_prompt_fragment <- function(root, file_name) {
   path <- file.path(root, "fragments", file_name)
+  if (!file.exists(path) && basename(root) == "llm_digest_v5") {
+    path <- file.path(dirname(root), "llm_digest_v4", "fragments", file_name)
+  }
   if (!file.exists(path)) {
     stop("Prompt fragment not found: ", path, call. = FALSE)
   }
@@ -51,7 +54,7 @@
   rendered
 }
 
-.litxr_select_llm_digest_prompt_fragments <- function(mode = "create", schema_version = "v4") {
+.litxr_select_llm_digest_prompt_fragments <- function(mode = "create", schema_version = "v5") {
   fragments <- c(
     "01_task.md",
     "02_source_lookup.md",
@@ -61,7 +64,7 @@
     "06_research_data.md",
     "07_field_semantics.md"
   )
-  if (identical(schema_version, "v4")) {
+  if (schema_version %in% c("v4", "v5")) {
     fragments <- c(fragments, "08_schema_contract.md")
   }
   if (identical(mode, "revise")) {
@@ -165,8 +168,8 @@
 #' @param ref_id Canonical reference identifier.
 #' @param config Optional parsed config list or config path.
 #' @param mode Either `"create"` or `"revise"`.
-#' @param schema_version Digest schema version. Supported values are `"v3"`
-#'   and `"v4"`.
+#' @param schema_version Digest schema version. Supported values are `"v3"`,
+#'   `"v4"`, and `"v5"`.
 #' @param prompt_version Prompt-template version metadata to include in the
 #'   prompt.
 #' @param return_format Expected response format from the external LLM. Either
@@ -174,14 +177,14 @@
 #'
 #' @return A single character string containing the full prompt.
 #' @export
-litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "revise"), schema_version = "v4", prompt_version = "v4.0", return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")) {
+litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "revise"), schema_version = "v5", prompt_version = "v5.0", return_format = c("download_json_file", "inline_raw_json", "markdown_fenced_json")) {
   ref_id <- as.character(ref_id)
   if (!length(ref_id) || is.na(ref_id[[1]]) || !nzchar(ref_id[[1]])) {
     stop("`ref_id` is required.", call. = FALSE)
   }
   ref_id <- ref_id[[1]]
-  if (!(schema_version %in% c("v3", "v4"))) {
-    stop("Only `schema_version = \"v3\"` or `\"v4\"` is supported by `litxr_llm_digest_prompt()`.", call. = FALSE)
+  if (!(schema_version %in% c("v3", "v4", "v5"))) {
+    stop("Only `schema_version = \"v3\"`, `\"v4\"`, or `\"v5\"` is supported by `litxr_llm_digest_prompt()`.", call. = FALSE)
   }
   mode <- match.arg(mode)
   return_format <- match.arg(return_format)

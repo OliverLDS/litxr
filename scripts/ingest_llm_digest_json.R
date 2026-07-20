@@ -14,7 +14,7 @@ parse_args <- function(args) {
     json_path_provided = FALSE,
     json_raw = NULL,
     mode = "create",
-    prompt_version = "v4.0"
+    prompt_version = "v5.0"
   )
   i <- 1L
 
@@ -103,7 +103,7 @@ usage <- function() {
   cat(
     paste(
       "Usage:",
-      "  Rscript scripts/ingest_llm_digest_json.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json | --json-raw RAW_JSON] [--mode create|revise] [--prompt-version v4.0]",
+      "  Rscript scripts/ingest_llm_digest_json.R --ref-id REF_ID [--json-path ~/Downloads/litxr_schema.json | --json-raw RAW_JSON] [--mode create|revise] [--prompt-version v5.0]",
       "",
       "Options:",
       "  --ref-id REF_ID     Ref id to ingest for.",
@@ -115,7 +115,7 @@ usage <- function() {
       "                      raw JSON instead of a downloadable file.",
       "  --mode MODE         Either `create` or `revise`. Default: create",
       "  --prompt-version V  Prompt template version metadata to store on ingest.",
-      "                      Default: v4.0",
+      "                      Default: v5.0",
       "  -h, --help          Show this help message.",
       "",
       "Output:",

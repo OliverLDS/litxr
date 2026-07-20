@@ -172,10 +172,18 @@
   direct_path
 }
 
+#' Create an LLM digest template
+#'
+#' @param ref_id Reference identifier stored in the digest.
+#' @param schema_version Digest schema version from `"v2"` through `"v5"`.
+#'
+#' @return A named list matching the requested digest schema.
+#' @export
 litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {
-  if (!identical(schema_version, "v2") && !identical(schema_version, "v3") && !identical(schema_version, "v4")) {
-    stop("Only `schema_version = \"v2\"`, `\"v3\"`, or `\"v4\"` is supported for new templates in the current package version.", call. = FALSE)
+  if (!(schema_version %in% c("v2", "v3", "v4", "v5"))) {
+    stop("Only `schema_version = \"v2\"`, `\"v3\"`, `\"v4\"`, or `\"v5\"` is supported for new templates in the current package version.", call. = FALSE)
   }
+  if (identical(schema_version, "v5")) return(.litxr_llm_digest_template_v5(ref_id))
   if (identical(schema_version, "v4")) {
     return(.litxr_llm_digest_template_v4(ref_id))
   }
@@ -185,13 +193,23 @@ litxr_llm_digest_template <- function(ref_id, schema_version = "v2") {
   .litxr_llm_digest_template_v2(ref_id)
 }
 
+#' Write an LLM digest
+#'
+#' @param ref_id Reference identifier.
+#' @param digest Named digest list.
+#' @param config Optional config object or path.
+#' @param keep_history Whether to retain prior revisions.
+#' @param bump_revision Whether to increment the digest revision.
+#'
+#' @return The path of the written digest JSON file.
+#' @export
 litxr_write_llm_digest <- function(ref_id, digest, config = NULL, keep_history = TRUE, bump_revision = TRUE) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
   existing <- litxr_read_llm_digest(ref_id, cfg)
   payload <- .litxr_normalize_llm_digest_for_write(digest, ref_id = ref_id)
-  if (identical(.litxr_llm_digest_schema_version(payload), "v2") || identical(.litxr_llm_digest_schema_version(payload), "v3") || identical(.litxr_llm_digest_schema_version(payload), "v4")) {
+  if (.litxr_llm_digest_schema_version(payload) %in% c("v2", "v3", "v4", "v5")) {
     if (is.null(existing)) {
       existing_revision <- 0L
     } else if (!identical(.litxr_llm_digest_schema_version(existing), .litxr_llm_digest_schema_version(payload))) {
@@ -315,6 +333,13 @@ litxr_build_llm_digests <- function(builder, config = NULL, ref_ids = NULL, over
   out
 }
 
+#' Read an LLM digest
+#'
+#' @param ref_id Reference identifier.
+#' @param config Optional config object or path.
+#'
+#' @return A named digest list, or `NULL` when no current digest exists.
+#' @export
 litxr_read_llm_digest <- function(ref_id, config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
@@ -580,6 +605,12 @@ litxr_read_md <- function(ref_id, config = NULL) {
   paste(readLines(path, warn = FALSE), collapse = "\n")
 }
 
+#' Validate an LLM digest
+#'
+#' @param digest Named digest list.
+#'
+#' @return Invisibly `TRUE` when the digest is valid.
+#' @export
 litxr_validate_llm_digest <- function(digest) {
   schema_version <- .litxr_llm_digest_schema_version(digest)
   required <- .litxr_llm_digest_required_fields(schema_version)
@@ -588,7 +619,7 @@ litxr_validate_llm_digest <- function(digest) {
     stop("LLM digest is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
   }
 
-  if (identical(schema_version, "v2") || identical(schema_version, "v3") || identical(schema_version, "v4")) {
+  if (schema_version %in% c("v2", "v3", "v4", "v5")) {
     litxr_validate_paper_type(digest$paper_type)
     digest_revision <- suppressWarnings(as.integer(digest$digest_revision[[1]] %||% digest$digest_revision))
     if (length(digest_revision) != 1L || is.na(digest_revision) || digest_revision < 1L) {
@@ -648,10 +679,10 @@ litxr_validate_llm_digest <- function(digest) {
         "control_variables", "mechanism_variables"
       )
     )
-    if (identical(schema_version, "v3") || identical(schema_version, "v4")) {
+    if (schema_version %in% c("v3", "v4", "v5")) {
       .litxr_warn_v3_missing_empirical_fields(digest)
     }
-    if (identical(schema_version, "v4")) {
+    if (schema_version %in% c("v4", "v5")) {
       .litxr_validate_list_fields(
         digest,
         c("likely_reader_misconceptions", "business_relevance_pathway")
@@ -660,6 +691,9 @@ litxr_validate_llm_digest <- function(digest) {
       .litxr_validate_digest_tables(digest$tables)
       .litxr_validate_research_target_github_links(digest$research_target_github_links)
       .litxr_validate_evidence_shape(digest$evidence_shape)
+    }
+    if (identical(schema_version, "v5") && "source_detail" %in% names(digest)) {
+      .litxr_validate_source_detail(digest$source_detail, digest)
     }
     if ("anchor_references" %in% names(digest)) {
       .litxr_validate_inline_llm_table_field(

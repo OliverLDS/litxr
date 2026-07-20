@@ -309,6 +309,28 @@ litxr_validate_paper_type <- function(x) {
   x
 }
 
+.litxr_llm_digest_template_v5 <- function(ref_id) {
+  x <- .litxr_llm_digest_template_v4(ref_id)
+  x$schema_version <- "v5"
+  x$source_detail <- list(
+    schema_version = "v5",
+    coverage = list(
+      equations = "not_applicable",
+      benchmark_tables = "not_applicable",
+      precise_wording = "not_applicable",
+      methodological_disputes = "not_applicable"
+    ),
+    evidence_items = list(),
+    equation_cards = list(),
+    benchmark_tables = list(),
+    wording_cards = list(),
+    methodological_disputes = list(),
+    unresolved_detail_gaps = character(),
+    safe_for_digest_only_drafting = FALSE
+  )
+  x
+}
+
 .litxr_first_nonnull <- function(...) {
   values <- list(...)
   for (value in values) {
@@ -407,6 +429,10 @@ litxr_validate_paper_type <- function(x) {
     "research_target_github_links",
     "evidence_shape"
   ) %in% names(digest))
+}
+
+.litxr_has_v5_llm_fields <- function(digest) {
+  "source_detail" %in% names(digest)
 }
 
 .litxr_inline_llm_table_legacy_field_names <- function(field_name) {
@@ -549,7 +575,9 @@ litxr_validate_paper_type <- function(x) {
 
 .litxr_normalize_llm_digest_for_write <- function(digest, ref_id = NULL) {
   version <- if (is.null(digest[["schema_version"]]) || !length(digest[["schema_version"]])) {
-    if (.litxr_has_v4_llm_fields(digest)) {
+    if (.litxr_has_v5_llm_fields(digest)) {
+      "v5"
+    } else if (.litxr_has_v4_llm_fields(digest)) {
       "v4"
     } else if (.litxr_has_inline_llm_tables(digest)) {
       "v3"
@@ -559,7 +587,9 @@ litxr_validate_paper_type <- function(x) {
   } else {
     .litxr_llm_digest_schema_version(digest)
   }
-  template_fun <- if (identical(version, "v4") || .litxr_has_v4_llm_fields(digest)) {
+  template_fun <- if (identical(version, "v5") || .litxr_has_v5_llm_fields(digest)) {
+    .litxr_llm_digest_template_v5
+  } else if (identical(version, "v4") || .litxr_has_v4_llm_fields(digest)) {
     .litxr_llm_digest_template_v4
   } else if (identical(version, "v3") || .litxr_has_inline_llm_tables(digest)) {
     .litxr_llm_digest_template_v3
@@ -596,7 +626,10 @@ litxr_validate_paper_type <- function(x) {
   if ("evidence_shape" %in% names(payload)) {
     payload$evidence_shape <- .litxr_normalize_evidence_shape(payload$evidence_shape)
   }
-  if (identical(version, "v2") || identical(version, "v3") || identical(version, "v4")) {
+  if (identical(version, "v5") && "source_detail" %in% names(payload)) {
+    payload$source_detail <- .litxr_normalize_source_detail(payload$source_detail)
+  }
+  if (version %in% c("v2", "v3", "v4", "v5")) {
     payload$digest_revision <- suppressWarnings(as.integer(.litxr_first_nonnull(payload$digest_revision, 1L)))
     if (is.na(payload$digest_revision) || payload$digest_revision < 1L) payload$digest_revision <- 1L
     derived <- .litxr_first_nonnull(payload$derived_from_revision, NULL)
@@ -629,7 +662,7 @@ litxr_validate_paper_type <- function(x) {
   if (!("schema_version" %in% names(digest))) {
     digest$schema_version <- "v1"
   }
-  if (identical(.litxr_llm_digest_schema_version(digest), "v2") || identical(.litxr_llm_digest_schema_version(digest), "v3") || identical(.litxr_llm_digest_schema_version(digest), "v4")) {
+  if (.litxr_llm_digest_schema_version(digest) %in% c("v2", "v3", "v4", "v5")) {
     if (!("digest_revision" %in% names(digest)) || is.null(digest$digest_revision)) {
       digest$digest_revision <- 1L
     }
@@ -650,7 +683,7 @@ litxr_validate_paper_type <- function(x) {
     }
     if (!("anchor_references" %in% names(digest))) {
       digest$anchor_references <- list()
-    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3") || identical(.litxr_llm_digest_schema_version(digest), "v4")) {
+    } else if (.litxr_llm_digest_schema_version(digest) %in% c("v3", "v4", "v5")) {
       digest$anchor_references <- .litxr_inline_llm_table_to_dt(
         digest$anchor_references,
         ref_id = digest$ref_id %||% NULL,
@@ -659,7 +692,7 @@ litxr_validate_paper_type <- function(x) {
     }
     if (!("citation_logic_nodes" %in% names(digest))) {
       digest$citation_logic_nodes <- list()
-    } else if (identical(.litxr_llm_digest_schema_version(digest), "v3") || identical(.litxr_llm_digest_schema_version(digest), "v4")) {
+    } else if (.litxr_llm_digest_schema_version(digest) %in% c("v3", "v4", "v5")) {
       digest$citation_logic_nodes <- .litxr_inline_llm_table_to_dt(
         digest$citation_logic_nodes,
         ref_id = digest$ref_id %||% NULL,
@@ -675,6 +708,9 @@ litxr_validate_paper_type <- function(x) {
   }
   if ("evidence_shape" %in% names(digest)) {
     digest$evidence_shape <- .litxr_normalize_evidence_shape(digest$evidence_shape)
+  }
+  if (identical(.litxr_llm_digest_schema_version(digest), "v5") && "source_detail" %in% names(digest)) {
+    digest$source_detail <- .litxr_normalize_source_detail(digest$source_detail)
   }
   digest
 }
@@ -756,6 +792,247 @@ litxr_validate_paper_type <- function(x) {
     out[[name]] <- as.character(value %||% character())
   }
   out
+}
+
+.litxr_source_detail_coverage_levels <- function() {
+  c("complete", "partial", "not_applicable")
+}
+
+.litxr_source_detail_locator_fields <- function() {
+  c("section", "page", "label", "table", "figure", "equation", "appendix")
+}
+
+.litxr_normalize_source_detail <- function(x) {
+  if (is.null(x) || !length(x)) return(NULL)
+  if (!is.list(x)) {
+    stop("LLM digest field `source_detail` must be a named list.", call. = FALSE)
+  }
+
+  template <- .litxr_llm_digest_template_v5("")$source_detail
+  out <- template
+  for (name in intersect(names(out), names(x))) out[[name]] <- x[[name]]
+  if (is.null(out$coverage) || !is.list(out$coverage)) {
+    stop("LLM digest field `source_detail$coverage` must be a named list.", call. = FALSE)
+  }
+  coverage_template <- template$coverage
+  for (name in intersect(names(coverage_template), names(out$coverage))) {
+    coverage_template[[name]] <- as.character(out$coverage[[name]][[1]] %||% out$coverage[[name]])
+  }
+  out$coverage <- coverage_template
+  for (name in c(
+    "evidence_items", "equation_cards", "benchmark_tables", "wording_cards",
+    "methodological_disputes"
+  )) {
+    if (is.null(out[[name]])) out[[name]] <- list()
+  }
+  if (is.null(out$unresolved_detail_gaps)) out$unresolved_detail_gaps <- character()
+  if (is.list(out$unresolved_detail_gaps)) {
+    out$unresolved_detail_gaps <- unlist(out$unresolved_detail_gaps, use.names = FALSE)
+  }
+  out$unresolved_detail_gaps <- as.character(out$unresolved_detail_gaps)
+  out$safe_for_digest_only_drafting <- isTRUE(out$safe_for_digest_only_drafting)
+  out
+}
+
+.litxr_source_detail_scalar <- function(x, field_name, allow_empty = FALSE) {
+  if (is.list(x) && length(x)) x <- x[[1]]
+  value <- as.character(x %||% NA_character_)
+  if (length(value) != 1L || is.na(value) || (!allow_empty && !nzchar(trimws(value)))) {
+    stop("LLM digest field `", field_name, "` must be a non-empty character scalar.", call. = FALSE)
+  }
+  value
+}
+
+.litxr_validate_source_locator <- function(locator, field_name) {
+  if (!is.list(locator) || !length(locator)) {
+    stop("LLM digest field `", field_name, "` must be a non-empty source locator list.", call. = FALSE)
+  }
+  unknown <- setdiff(names(locator), .litxr_source_detail_locator_fields())
+  if (length(unknown)) {
+    stop("LLM digest field `", field_name, "` has unsupported locator fields: ", paste(unknown, collapse = ", "), call. = FALSE)
+  }
+  values <- unlist(locator, use.names = FALSE)
+  values <- trimws(as.character(values))
+  if (!length(values) || all(is.na(values) | !nzchar(values))) {
+    stop("LLM digest field `", field_name, "` must identify at least one source location.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+.litxr_validate_source_detail_supports_v4 <- function(supports_v4, digest, field_name) {
+  if (!is.list(supports_v4) || !length(supports_v4)) {
+    stop("LLM digest field `", field_name, "` must be a non-empty list of V4 support references.", call. = FALSE)
+  }
+  v4_fields <- names(.litxr_llm_digest_template_v4(""))
+  ordered_fields <- c(
+    "research_questions", "paper_structure", "methods", "key_findings", "limitations",
+    "contribution_type", "ranked_contributions", "likely_reader_misconceptions",
+    "business_relevance_pathway", "tables", "anchor_references", "citation_logic_nodes"
+  )
+  for (i in seq_along(supports_v4)) {
+    target <- supports_v4[[i]]
+    if (!is.list(target) || !("field" %in% names(target))) {
+      stop("Each `", field_name, "` item must contain a V4 `field`.", call. = FALSE)
+    }
+    target_field <- .litxr_source_detail_scalar(target$field, paste0(field_name, "$field"))
+    if (!(target_field %in% v4_fields)) {
+      stop("LLM digest field `", field_name, "$field` must name an existing V4 field.", call. = FALSE)
+    }
+    if ("item_index" %in% names(target) && !is.null(target$item_index) && length(target$item_index)) {
+      if (!(target_field %in% ordered_fields)) {
+        stop("LLM digest field `", field_name, "$item_index` is only valid for ordered V4 fields.", call. = FALSE)
+      }
+      item_index <- suppressWarnings(as.integer(target$item_index[[1]] %||% target$item_index))
+      target_value <- digest[[target_field]]
+      target_count <- if (is.data.frame(target_value)) nrow(target_value) else length(target_value)
+      if (length(item_index) != 1L || is.na(item_index) || item_index < 1L || item_index > target_count) {
+        stop("LLM digest field `", field_name, "$item_index` is outside the referenced V4 field.", call. = FALSE)
+      }
+    }
+  }
+  invisible(TRUE)
+}
+
+.litxr_validate_source_detail_items <- function(items, field_name, required_fields, digest, id_field = NULL) {
+  if (!is.list(items)) {
+    stop("LLM digest field `source_detail$", field_name, "` must be a list.", call. = FALSE)
+  }
+  ids <- character()
+  for (i in seq_along(items)) {
+    item <- items[[i]]
+    if (!is.list(item)) {
+      stop("Each `source_detail$", field_name, "` item must be a named list.", call. = FALSE)
+    }
+    missing <- setdiff(required_fields, names(item))
+    if (length(missing)) {
+      stop("Each `source_detail$", field_name, "` item is missing fields: ", paste(missing, collapse = ", "), call. = FALSE)
+    }
+    if (!is.null(id_field)) {
+      ids <- c(ids, .litxr_source_detail_scalar(item[[id_field]], paste0("source_detail$", field_name, "$", id_field)))
+    }
+    .litxr_validate_source_detail_supports_v4(item$supports_v4, digest, paste0("source_detail$", field_name, "$supports_v4"))
+  }
+  if (!is.null(id_field) && anyDuplicated(ids)) {
+    stop("LLM digest field `source_detail$", field_name, "$", id_field, "` values must be unique.", call. = FALSE)
+  }
+  ids
+}
+
+.litxr_validate_source_detail <- function(source_detail, digest) {
+  if (is.null(source_detail) || !length(source_detail)) return(invisible(TRUE))
+  if (!is.list(source_detail)) {
+    stop("LLM digest field `source_detail` must be a named list.", call. = FALSE)
+  }
+  required <- c(
+    "schema_version", "coverage", "evidence_items", "equation_cards", "benchmark_tables",
+    "wording_cards", "methodological_disputes", "unresolved_detail_gaps", "safe_for_digest_only_drafting"
+  )
+  missing <- setdiff(required, names(source_detail))
+  if (length(missing)) {
+    stop("LLM digest field `source_detail` is missing required fields: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  if (!identical(.litxr_source_detail_scalar(source_detail$schema_version, "source_detail$schema_version"), "v5")) {
+    stop("LLM digest field `source_detail$schema_version` must be `v5`.", call. = FALSE)
+  }
+  if (!is.list(source_detail$coverage)) {
+    stop("LLM digest field `source_detail$coverage` must be a named list.", call. = FALSE)
+  }
+  coverage_fields <- c("equations", "benchmark_tables", "precise_wording", "methodological_disputes")
+  if (length(setdiff(coverage_fields, names(source_detail$coverage)))) {
+    stop("LLM digest field `source_detail$coverage` is incomplete.", call. = FALSE)
+  }
+  for (name in coverage_fields) {
+    value <- .litxr_source_detail_scalar(source_detail$coverage[[name]], paste0("source_detail$coverage$", name))
+    if (!(value %in% .litxr_source_detail_coverage_levels())) {
+      stop("LLM digest field `source_detail$coverage$", name, "` must be complete, partial, or not_applicable.", call. = FALSE)
+    }
+  }
+  if (!is.logical(source_detail$safe_for_digest_only_drafting) || length(source_detail$safe_for_digest_only_drafting) != 1L || is.na(source_detail$safe_for_digest_only_drafting)) {
+    stop("LLM digest field `source_detail$safe_for_digest_only_drafting` must be a non-missing logical scalar.", call. = FALSE)
+  }
+  coverage_values <- unlist(source_detail$coverage[coverage_fields], use.names = FALSE)
+  if (isTRUE(source_detail$safe_for_digest_only_drafting) && any(coverage_values == "partial")) {
+    stop("LLM digest field `source_detail$safe_for_digest_only_drafting` must be false when coverage is partial.", call. = FALSE)
+  }
+  unresolved_detail_gaps <- source_detail$unresolved_detail_gaps
+  if (is.list(unresolved_detail_gaps)) {
+    unresolved_detail_gaps <- unlist(unresolved_detail_gaps, use.names = FALSE)
+  }
+  if (!(is.character(unresolved_detail_gaps) || is.null(unresolved_detail_gaps))) {
+    stop("LLM digest field `source_detail$unresolved_detail_gaps` must be a character vector.", call. = FALSE)
+  }
+
+  evidence_ids <- .litxr_validate_source_detail_items(
+    source_detail$evidence_items, "evidence_items",
+    c("evidence_id", "claim", "evidence_type", "source_locator", "conditions", "limitation", "supports_v4"),
+    digest, id_field = "evidence_id"
+  )
+  for (item in source_detail$evidence_items) {
+    .litxr_validate_source_locator(item$source_locator, "source_detail$evidence_items$source_locator")
+    if (!(.litxr_source_detail_scalar(item$evidence_type, "source_detail$evidence_items$evidence_type") %in% c("theorem", "experiment", "ablation", "benchmark", "case_study", "author_limit"))) {
+      stop("LLM digest field `source_detail$evidence_items$evidence_type` is unsupported.", call. = FALSE)
+    }
+    conditions <- item$conditions
+    if (is.list(conditions)) conditions <- unlist(conditions, use.names = FALSE)
+    if (!(is.character(conditions) || is.null(conditions))) {
+      stop("LLM digest field `source_detail$evidence_items$conditions` must be a character vector.", call. = FALSE)
+    }
+  }
+  .litxr_validate_source_detail_items(
+    source_detail$equation_cards, "equation_cards",
+    c("equation_id", "latex", "display_name", "source_locator", "symbols", "assumptions", "role_in_argument", "plain_language_interpretation", "supports_v4", "drafting_guidance"),
+    digest, id_field = "equation_id"
+  )
+  for (item in source_detail$equation_cards) {
+    .litxr_validate_source_locator(item$source_locator, "source_detail$equation_cards$source_locator")
+  }
+  .litxr_validate_source_detail_items(
+    source_detail$benchmark_tables, "benchmark_tables",
+    c("table_id", "title", "source_locator", "task_or_dataset", "metric_definitions", "experimental_conditions", "columns", "rows", "author_reported_takeaway", "digest_interpretation_boundary", "supports_v4"),
+    digest, id_field = "table_id"
+  )
+  for (item in source_detail$benchmark_tables) {
+    .litxr_validate_source_locator(item$source_locator, "source_detail$benchmark_tables$source_locator")
+    columns <- item$columns
+    if (is.list(columns)) columns <- unlist(columns, use.names = FALSE)
+    if (!(is.character(columns) || is.null(columns)) || !(is.list(item$rows) || is.data.frame(item$rows))) {
+      stop("Each `source_detail$benchmark_tables` item must contain character columns and list rows.", call. = FALSE)
+    }
+  }
+  .litxr_validate_source_detail_items(
+    source_detail$wording_cards, "wording_cards",
+    c("wording_id", "purpose", "short_verbatim_excerpt", "max_excerpt_words", "faithful_paraphrase", "why_precision_matters", "source_locator", "supports_v4"),
+    digest, id_field = "wording_id"
+  )
+  for (item in source_detail$wording_cards) {
+    .litxr_validate_source_locator(item$source_locator, "source_detail$wording_cards$source_locator")
+    excerpt <- .litxr_source_detail_scalar(item$short_verbatim_excerpt, "source_detail$wording_cards$short_verbatim_excerpt")
+    max_words <- suppressWarnings(as.integer(item$max_excerpt_words[[1]] %||% item$max_excerpt_words))
+    if (length(max_words) != 1L || is.na(max_words) || max_words < 1L || max_words > 25L || length(strsplit(trimws(excerpt), "\\s+")[[1]]) > max_words) {
+      stop("Each `source_detail$wording_cards` excerpt must contain at most its declared maximum of 25 words.", call. = FALSE)
+    }
+  }
+  .litxr_validate_source_detail_items(
+    source_detail$methodological_disputes, "methodological_disputes",
+    c("dispute_id", "question", "paper_position", "alternative_position_or_interpretation", "source_of_alternative", "evidence_for_paper_position", "evidence_for_alternative", "conditions_that_change_the_answer", "unresolved_point", "editorial_rule", "supports_v4"),
+    digest, id_field = "dispute_id"
+  )
+  for (item in source_detail$methodological_disputes) {
+    refs <- c(item$evidence_for_paper_position, item$evidence_for_alternative)
+    refs <- as.character(unlist(refs, use.names = FALSE))
+    if (length(refs) && any(!(refs %in% evidence_ids))) {
+      stop("Each methodological-dispute evidence reference must exist in `source_detail$evidence_items`.", call. = FALSE)
+    }
+  }
+  for (field in c("primary_results", "ablation_results", "failure_cases_or_negative_results")) {
+    if (field %in% names(source_detail)) {
+      refs <- as.character(unlist(source_detail[[field]], use.names = FALSE))
+      if (length(refs) && any(!(refs %in% evidence_ids))) {
+        stop("LLM digest field `source_detail$", field, "` must reference existing evidence_id values.", call. = FALSE)
+      }
+    }
+  }
+  invisible(TRUE)
 }
 
 .litxr_validate_ranked_contributions <- function(x) {
@@ -1005,6 +1282,9 @@ litxr_validate_paper_type <- function(x) {
       "evidence_strength", "evidence_shape", "keywords", "notes",
       "generated_at", "updated_at"
     ))
+  }
+  if (identical(schema_version, "v5")) {
+    return(.litxr_llm_digest_required_fields("v4"))
   }
   c(
     "ref_id", "summary", "motivation", "research_questions", "methods",

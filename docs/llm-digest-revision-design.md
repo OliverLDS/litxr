@@ -249,7 +249,7 @@ Example CLI direction:
 ```sh
 scripts/run_llm_digest_interactive.sh \
   --ref-id arxiv:2505.07087 \
-  --prompt-version v4.0
+  --prompt-version v5.0
 ```
 
 ### Why prompt versioning matters
