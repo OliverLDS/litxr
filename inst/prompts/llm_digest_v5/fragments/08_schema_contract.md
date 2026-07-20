@@ -23,11 +23,11 @@ source_detail is optional source-grounded detail. When present it must contain:
 
 - schema_version: `v5`.
 - coverage: equations, benchmark_tables, precise_wording, and methodological_disputes; each is complete, partial, or not_applicable.
-- evidence_items: reusable source-located evidence objects. Every quantitative claim must be represented here or in a benchmark table with a source locator and conditions.
-- equation_cards: exact LaTex, symbol meanings, assumptions, source locator, and drafting guidance. Use source_locator fields section, page, label, table, figure, equation, and appendix. Put equation numbers in label.
-- benchmark_tables: preserve columns, rows, metrics, conditions, and scope boundaries structurally. Use the legacy V4 tables field only as a concise projection where useful; do not replace its compatible shape.
-- wording_cards: short excerpts only, never more than 25 words. Prefer faithful_paraphrase in prose.
-- methodological_disputes: the paper position, alternative, evidence on both sides, conditions, unresolved point, and editorial rule.
+- evidence_items: reusable source-located evidence objects. Every item must contain `evidence_id`, `claim`, `evidence_type`, `source_locator`, `conditions`, `limitation`, and `supports_v4`. `evidence_type` must be one of `theorem`, `experiment`, `ablation`, `benchmark`, `case_study`, or `author_limit`. Every quantitative claim must be represented here or in a benchmark table with a source locator and conditions.
+- equation_cards: every item must contain `equation_id`, `latex`, `display_name`, `source_locator`, `symbols`, `assumptions`, `role_in_argument`, `plain_language_interpretation`, `supports_v4`, and `drafting_guidance`. Use source_locator fields section, page, label, table, figure, equation, and appendix. Put equation numbers in label.
+- benchmark_tables: every item must contain `table_id`, `title`, `source_locator`, `task_or_dataset`, `metric_definitions`, `experimental_conditions`, `columns`, `rows`, `author_reported_takeaway`, `digest_interpretation_boundary`, and `supports_v4`. Preserve columns, rows, metrics, conditions, and scope boundaries structurally. Use the legacy V4 tables field only as a concise projection where useful; do not replace its compatible shape.
+- wording_cards: every item must contain `wording_id`, `purpose`, `short_verbatim_excerpt`, `max_excerpt_words`, `faithful_paraphrase`, `why_precision_matters`, `source_locator`, and `supports_v4`. Short excerpts only, never more than 25 words. Prefer faithful_paraphrase in prose.
+- methodological_disputes: every item must contain `dispute_id`, `question`, `paper_position`, `alternative_position_or_interpretation`, `source_of_alternative`, `evidence_for_paper_position`, `evidence_for_alternative`, `conditions_that_change_the_answer`, `unresolved_point`, `editorial_rule`, and `supports_v4`.
 - unresolved_detail_gaps: short statements of source detail that remains unavailable.
 - safe_for_digest_only_drafting: false whenever relevant coverage is partial or the needed equation, proof, table, or methodological nuance is not captured.
 
