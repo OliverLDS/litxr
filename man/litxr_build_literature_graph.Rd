@@ -4,7 +4,12 @@
 \alias{litxr_build_literature_graph}
 \title{Build a bounded literature relationship graph from digest anchors}
 \usage{
-litxr_build_literature_graph(ref_ids, config = NULL, max_depth = 2L, max_nodes = 100L)
+litxr_build_literature_graph(
+  ref_ids,
+  config = NULL,
+  max_depth = 2L,
+  max_nodes = 100L
+)
 }
 \arguments{
 \item{ref_ids}{Bare reference ids used as graph roots.}
