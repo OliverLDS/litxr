@@ -159,6 +159,7 @@ Implemented today:
 - canonical project-level indexes
 - BibTeX export
 - markdown and structured digest storage
+- bounded literature-relationship graphs from digest anchors
 
 ## Research Analysis Schemas
 

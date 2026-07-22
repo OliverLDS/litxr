@@ -149,6 +149,20 @@ formula contains `formula_id`, `latex`, `display_name`, `source_location`,
 `plain_language_interpretation`, and `assumptions`. V5 does not include a
 source-detail, evidence-card, or drafting-safety layer.
 
+## Literature Relationship Graph
+
+`litxr_build_literature_graph()` turns digest `anchor_references` into a
+bounded directed graph. Every edge points from a paper to an anchored paper and
+retains the anchor role, relationship, confidence, and reason. Traversal reads
+`index/llm_digest.fst` once, then expands only through cached digest JSON files.
+Anchors without a cached digest remain visible as external nodes and are never
+traversed.
+
+Use `scripts/build_literature_graph.R` to write graph JSON from one or more
+bare root ids. The defaults are two anchor hops and 100 returned nodes. Use
+`scripts/render_literature_graph.R` to turn that JSON into a Cytoscape.js HTML
+viewer with hierarchy and network layouts, filtering, and node or edge details.
+
 ## Digest Schema V2/V3
 
 `litxr_llm_digest_template()` now defaults to schema `v2`.

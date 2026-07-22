@@ -1,3 +1,12 @@
+# litxr 0.1.8.8
+
+- Added bounded literature-relationship graph construction from digest
+  `anchor_references`, with cached-digest traversal, visible external anchors,
+  and explicit depth and node limits.
+- Added JSON graph and Cytoscape.js HTML renderer scripts for interactive
+  hierarchy and network views without re-reading the literature store during
+  rendering.
+
 # litxr 0.1.8.7
 
 - Simplified schema-v5 to the complete schema-v4 contract plus an optional
