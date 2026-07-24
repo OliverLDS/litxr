@@ -15,8 +15,7 @@ Usage:
   scripts/run_llm_digest_interactive.sh --ref-id REF_ID [--json_path ~/Downloads/litxr_schema.json] [--prompt-version v5.1] [--return-format download_json_file|inline_raw_json]
 
 Options:
-  --ref-id REF_ID       Canonical litxr ref_id to build or revise.
-                        Bare arXiv ids like 2510.22085 are also accepted.
+  --ref-id REF_ID       Bare arXiv id or bare DOI to build or revise.
   --json_path PATH      Downloaded JSON path to ingest.
                         Default: ~/Downloads/litxr_schema.json
   --prompt-version V    Prompt template version metadata to include.
@@ -104,16 +103,6 @@ if [[ "$return_format" != "download_json_file" && "$return_format" != "inline_ra
   exit 1
 fi
 
-normalize_ref_id() {
-  local value="$1"
-  if [[ "$value" =~ ^[0-9]{4}\.[0-9]{4,5}(v[0-9]+)?$ ]]; then
-    print -r -- "arxiv:${value}"
-  else
-    print -r -- "$value"
-  fi
-}
-
-ref_id="$(normalize_ref_id "$ref_id")"
 mode="$(Rscript - "$ref_id" <<'EOF'
 args <- commandArgs(trailingOnly = TRUE)
 ref_id <- args[[1L]]

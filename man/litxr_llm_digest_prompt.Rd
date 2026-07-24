@@ -14,7 +14,7 @@ litxr_llm_digest_prompt(
 )
 }
 \arguments{
-\item{ref_id}{Canonical reference identifier.}
+\item{ref_id}{Bare reference identifier.}
 
 \item{config}{Optional parsed config list or config path.}
 

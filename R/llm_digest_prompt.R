@@ -165,7 +165,7 @@
 #' `inst/prompts/`, while reference lookup, schema-template rendering, arXiv
 #' source hints, and revise-mode digest inclusion stay in R code.
 #'
-#' @param ref_id Canonical reference identifier.
+#' @param ref_id Bare reference identifier.
 #' @param config Optional parsed config list or config path.
 #' @param mode Either `"create"` or `"revise"`.
 #' @param schema_version Digest schema version. Supported values are `"v3"`,
@@ -193,13 +193,19 @@ litxr_llm_digest_prompt <- function(ref_id, config = NULL, mode = c("create", "r
     cfg <- litxr_read_config()
   }
 
-  ref <- litxr:::.litxr_task_ref_row_for_keys(cfg, ref_id, task = "citation")
-  if (!nrow(ref)) {
-    stop("Reference not found in canonical litxr store: ", ref_id, call. = FALSE)
+  locations <- .litxr_ref_json_locations_from_thin_stores(cfg, ref_id)
+  locations <- locations[
+    !is.na(locations$json_path) & nzchar(locations$json_path) & file.exists(locations$json_path),
+    ,
+    drop = FALSE
+  ]
+  if (!nrow(locations)) {
+    stop("Reference not found in local thin stores: ", ref_id, call. = FALSE)
   }
-  if (nrow(ref) > 1L) {
-    stop("Expected exactly one canonical reference row for ", ref_id, " but found ", nrow(ref), ".", call. = FALSE)
-  }
+  ref <- data.table::as.data.table(.litxr_storage_payload_as_list(
+    locations$json_path[[1L]],
+    fields = c("ref_id", "source", "source_id", "title", "doi", "linked_arxiv_ref_id")
+  ))
 
   existing_digest <- litxr_read_llm_digest(ref_id, cfg)
   if (identical(mode, "create") && !is.null(existing_digest)) {

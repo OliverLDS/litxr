@@ -66,14 +66,15 @@
   collection_ref_dirs <- vapply(collections, function(collection) {
     as.character(.litxr_collection_ref_dir(cfg, collection$collection_id %||% collection$journal_id))
   }, character(1))
+  collection_ids <- vapply(collections, function(collection) {
+    as.character(collection$collection_id %||% collection$journal_id %||% NA_character_)
+  }, character(1))
 
   collection_filter <- NULL
   if (!is.null(collection_id) && nzchar(as.character(collection_id))) {
     collection_filter <- match(
       as.character(collection_id[[1L]]),
-      vapply(collections, function(collection) {
-        as.character(collection$collection_id %||% collection$journal_id %||% NA_character_)
-      }, character(1))
+      collection_ids
     )
     if (is.na(collection_filter) || collection_filter < 1L) {
       return(data.table::data.table(
@@ -86,14 +87,27 @@
     }
   }
 
-  arxiv_rows <- .litxr_read_fst_table_safe(
-    .litxr_ref_arxiv_path(cfg),
-    columns = c("arxiv_id", "collection_index", "json_filename")
+  arxiv_input <- grepl(
+    "^arxiv:|^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$",
+    ref_ids,
+    ignore.case = TRUE
   )
-  doi_rows <- .litxr_read_fst_table_safe(
-    .litxr_ref_doi_path(cfg),
-    columns = c("doi", "collection_index", "json_filename")
-  )
+  arxiv_rows <- if (any(arxiv_input)) {
+    .litxr_read_fst_table_safe(
+      .litxr_ref_arxiv_path(cfg),
+      columns = c("arxiv_id", "collection_index", "json_filename")
+    )
+  } else {
+    data.table::data.table()
+  }
+  doi_rows <- if (any(!arxiv_input)) {
+    .litxr_read_fst_table_safe(
+      .litxr_ref_doi_path(cfg),
+      columns = c("doi", "collection_index", "json_filename")
+    )
+  } else {
+    data.table::data.table()
+  }
 
   parts <- list()
   if (nrow(arxiv_rows) && "arxiv_id" %in% names(arxiv_rows)) {
@@ -109,21 +123,14 @@
       arxiv_rows <- arxiv_rows[arxiv_rows$collection_index == collection_filter, , drop = FALSE]
     }
     if (nrow(arxiv_rows)) {
-      json_path <- vapply(seq_len(nrow(arxiv_rows)), function(i) {
-        idx <- suppressWarnings(as.integer(arxiv_rows$collection_index[[i]]))
-        if (is.na(idx) || idx < 1L || idx > length(collection_ref_dirs)) {
-          return(NA_character_)
-        }
-        file.path(collection_ref_dirs[[idx]], as.character(arxiv_rows$json_filename[[i]]))
-      }, character(1))
+      idx <- suppressWarnings(as.integer(arxiv_rows$collection_index))
+      valid <- !is.na(idx) & idx >= 1L & idx <= length(collection_ref_dirs)
+      json_path <- rep(NA_character_, nrow(arxiv_rows))
+      json_path[valid] <- file.path(collection_ref_dirs[idx[valid]], as.character(arxiv_rows$json_filename[valid]))
       parts[[length(parts) + 1L]] <- data.table::data.table(
-        ref_id = vapply(arxiv_rows$arxiv_id, .litxr_normalize_arxiv_ref_id, character(1)),
-        collection_id = vapply(seq_len(nrow(arxiv_rows)), function(i) {
-          idx <- suppressWarnings(as.integer(arxiv_rows$collection_index[[i]]))
-          if (is.na(idx) || idx < 1L || idx > length(collections)) return(NA_character_)
-          as.character(collections[[idx]]$collection_id %||% collections[[idx]]$journal_id %||% NA_character_)
-        }, character(1)),
-        collection_index = as.integer(arxiv_rows$collection_index),
+        ref_id = as.character(arxiv_rows$arxiv_id),
+        collection_id = collection_ids[idx],
+        collection_index = idx,
         json_filename = as.character(arxiv_rows$json_filename),
         json_path = json_path
       )
@@ -142,21 +149,14 @@
       doi_rows <- doi_rows[doi_rows$collection_index == collection_filter, , drop = FALSE]
     }
     if (nrow(doi_rows)) {
-      json_path <- vapply(seq_len(nrow(doi_rows)), function(i) {
-        idx <- suppressWarnings(as.integer(doi_rows$collection_index[[i]]))
-        if (is.na(idx) || idx < 1L || idx > length(collection_ref_dirs)) {
-          return(NA_character_)
-        }
-        file.path(collection_ref_dirs[[idx]], as.character(doi_rows$json_filename[[i]]))
-      }, character(1))
+      idx <- suppressWarnings(as.integer(doi_rows$collection_index))
+      valid <- !is.na(idx) & idx >= 1L & idx <= length(collection_ref_dirs)
+      json_path <- rep(NA_character_, nrow(doi_rows))
+      json_path[valid] <- file.path(collection_ref_dirs[idx[valid]], as.character(doi_rows$json_filename[valid]))
       parts[[length(parts) + 1L]] <- data.table::data.table(
-        ref_id = vapply(doi_rows$doi, .litxr_normalize_doi_ref_id, character(1)),
-        collection_id = vapply(seq_len(nrow(doi_rows)), function(i) {
-          idx <- suppressWarnings(as.integer(doi_rows$collection_index[[i]]))
-          if (is.na(idx) || idx < 1L || idx > length(collections)) return(NA_character_)
-          as.character(collections[[idx]]$collection_id %||% collections[[idx]]$journal_id %||% NA_character_)
-        }, character(1)),
-        collection_index = as.integer(doi_rows$collection_index),
+        ref_id = as.character(doi_rows$doi),
+        collection_id = collection_ids[idx],
+        collection_index = idx,
         json_filename = as.character(doi_rows$json_filename),
         json_path = json_path
       )

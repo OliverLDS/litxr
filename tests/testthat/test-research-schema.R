@@ -220,7 +220,7 @@ arxiv_sync <- litxr::litxr_sync_thin_ref_stores_from_json(
 )
 stopifnot(identical(arxiv_sync$mode, "incremental"))
 stopifnot(identical(arxiv_sync$diffs$ref_arxiv$added, 1L))
-prompt_create <- litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "create")
+prompt_create <- litxr::litxr_llm_digest_prompt("2501.00001", cfg, mode = "create")
 stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create, fixed = TRUE))
 stopifnot(grepl("https://arxiv.org/pdf/2501.00001", prompt_create, fixed = TRUE))
 stopifnot(grepl("anchor_ref_id", prompt_create, fixed = TRUE))
@@ -274,7 +274,7 @@ doi_sync <- litxr::litxr_sync_thin_ref_stores_from_json(
 )
 stopifnot(identical(doi_sync$mode, "incremental"))
 stopifnot(identical(doi_sync$diffs$ref_doi$added, 1L))
-prompt_create_doi <- litxr::litxr_llm_digest_prompt("doi:10.1000/prompt-doi", cfg, mode = "create")
+prompt_create_doi <- litxr::litxr_llm_digest_prompt("10.1000/prompt-doi", cfg, mode = "create")
 stopifnot(grepl("linked_arxiv_ref_id: arxiv:2501.00001", prompt_create_doi, fixed = TRUE))
 stopifnot(grepl("https://arxiv.org/html/2501.00001", prompt_create_doi, fixed = TRUE))
 stopifnot(grepl("https://doi.org/10.1000/prompt-doi", prompt_create_doi, fixed = TRUE))
@@ -283,10 +283,10 @@ prompt_digest <- litxr::litxr_llm_digest_template("arxiv:2501.00001", schema_ver
 prompt_digest$summary <- "Existing summary"
 prompt_digest$motivation <- "Existing motivation"
 litxr::litxr_write_llm_digest("arxiv:2501.00001", prompt_digest, cfg, keep_history = FALSE, bump_revision = FALSE)
-prompt_revise <- litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "revise")
+prompt_revise <- litxr::litxr_llm_digest_prompt("2501.00001", cfg, mode = "revise")
 stopifnot(grepl("Existing local digest to improve:", prompt_revise, fixed = TRUE))
 stopifnot(grepl("Existing summary", prompt_revise, fixed = TRUE))
-stopifnot(inherits(try(litxr::litxr_llm_digest_prompt("arxiv:2501.00001", cfg, mode = "create"), silent = TRUE), "try-error"))
+stopifnot(inherits(try(litxr::litxr_llm_digest_prompt("2501.00001", cfg, mode = "create"), silent = TRUE), "try-error"))
 
 digest_template_v3_emp <- litxr::litxr_llm_digest_template("doi:10.1000/v3-emp", schema_version = "v3")
 digest_template_v3_emp$paper_type <- "empirical archival"

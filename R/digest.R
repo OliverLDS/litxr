@@ -83,7 +83,7 @@
     return(.litxr_empty_llm_digest_index())
   }
   rows <- rows[, required, with = FALSE]
-  rows$ref_id <- vapply(rows$ref_id, .litxr_llm_digest_index_key, character(1))
+  rows$ref_id <- as.character(rows$ref_id)
   rows$json_filename <- as.character(rows$json_filename)
   rows$history_dir <- as.character(rows$history_dir)
   rows <- rows[!is.na(rows$ref_id) & nzchar(rows$ref_id), ]
@@ -124,7 +124,7 @@
     stop("LLM digest index rows are missing columns: ", paste(missing, collapse = ", "), call. = FALSE)
   }
   rows <- rows[, required, with = FALSE]
-  rows$ref_id <- vapply(rows$ref_id, .litxr_llm_digest_index_key, character(1))
+  rows$ref_id <- as.character(rows$ref_id)
   rows$json_filename <- as.character(rows$json_filename)
   rows$history_dir <- as.character(rows$history_dir)
   rows <- rows[!is.na(rows$ref_id) & nzchar(rows$ref_id), ]

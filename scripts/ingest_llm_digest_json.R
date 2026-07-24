@@ -164,13 +164,6 @@ if (isTRUE(parsed$json_path_provided) && !is.null(json_raw) && nzchar(json_raw) 
 result <- tryCatch(
   {
     cfg <- litxr::litxr_read_config()
-    existing <- litxr:::litxr_read_llm_digest(ref_id, cfg)
-    existing_revision <- if (is.null(existing) || is.null(existing$digest_revision)) {
-      NA_integer_
-    } else {
-      suppressWarnings(as.integer(first_or_null(existing$digest_revision)))
-    }
-
     if (!is.null(json_raw) && nzchar(json_raw)) {
       digest <- jsonlite::fromJSON(normalize_inline_json(json_raw), simplifyVector = FALSE)
     } else {
@@ -201,29 +194,18 @@ result <- tryCatch(
 
     digest$extraction_mode <- "chatgpt_manual"
     digest$prompt_version <- as.character(parsed$prompt_version)
-    litxr:::litxr_validate_llm_digest(digest)
-    litxr:::litxr_write_llm_digest(
+    written_path <- litxr:::litxr_write_llm_digest(
       ref_id,
       digest,
       cfg,
       keep_history = TRUE,
       bump_revision = identical(mode, "revise")
     )
-    written <- litxr:::litxr_read_llm_digest(ref_id, cfg)
+    written <- jsonlite::fromJSON(written_path, simplifyVector = FALSE)
     written_revision <- if (is.null(written) || is.null(written$digest_revision)) {
       NA_integer_
     } else {
       suppressWarnings(as.integer(first_or_null(written$digest_revision)))
-    }
-    if (identical(mode, "revise") && !is.na(existing_revision) && !is.na(written_revision) &&
-        written_revision <= existing_revision) {
-      stop(
-        "Revise ingest did not advance digest_revision. Existing revision: ",
-        existing_revision,
-        "; stored revision after write: ",
-        written_revision,
-        call. = FALSE
-      )
     }
 
     list(
