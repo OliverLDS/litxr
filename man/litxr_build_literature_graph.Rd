@@ -26,5 +26,7 @@ A list with \code{meta}, \code{nodes}, and \code{edges} data tables.
 \description{
 Builds a directed graph where each edge points from a paper to one of its
 anchored references. Traversal expands only through digests recorded in the
-thin LLM digest index; unresolved anchors remain visible external nodes.
+thin LLM digest index. DOI anchors linked through the thin identity map use a
+cached arXiv digest when one is available; unresolved anchors remain visible
+external nodes.
 }

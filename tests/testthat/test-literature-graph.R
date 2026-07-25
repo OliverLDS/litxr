@@ -73,3 +73,24 @@ stopifnot(nrow(shallow$edges) == 2L)
 limited <- litxr::litxr_build_literature_graph("2501.00001", cfg, max_depth = 2L, max_nodes = 2L)
 stopifnot(identical(limited$meta$returned_nodes, 2L))
 stopifnot(identical(limited$meta$truncated_nodes, 1L))
+
+write_digest("2501.00004", list(
+  list(anchor_rank = 1L, anchor_ref_id = "doi:10.1145/3613904.3642731", anchor_title = "Linked DOI anchor", anchor_role = "methodological_foundation", relationship_to_current_paper = "builds_on", confidence = "high", reason = "Available through the linked arXiv digest.")
+))
+write_digest("2309.14556")
+fst::write_fst(
+  data.table::data.table(
+    arxiv_id = "2309.14556",
+    doi = "10.1145/3613904.3642731"
+  ),
+  litxr:::.litxr_project_ref_identity_index_path(cfg)
+)
+
+linked <- litxr::litxr_build_literature_graph("2501.00004", cfg, max_depth = 2L, max_nodes = 10L)
+stopifnot(nrow(linked$nodes) == 2L)
+stopifnot(identical(linked$meta$external_nodes, 0L))
+stopifnot(identical(linked$nodes[ref_id == "2309.14556", node_type], "cached"))
+stopifnot(isTRUE(linked$nodes[ref_id == "2309.14556", traversable]))
+stopifnot(!any(linked$nodes$ref_id == "10.1145/3613904.3642731"))
+stopifnot(identical(linked$edges$target, "2309.14556"))
+stopifnot(identical(linked$edges$anchor_ref_id, "10.1145/3613904.3642731"))

@@ -2,7 +2,9 @@
 #'
 #' Builds a directed graph where each edge points from a paper to one of its
 #' anchored references. Traversal expands only through digests recorded in the
-#' thin LLM digest index; unresolved anchors remain visible external nodes.
+#' thin LLM digest index. DOI anchors linked through the thin identity map use
+#' a cached arXiv digest when one is available; unresolved anchors remain
+#' visible external nodes.
 #'
 #' @param ref_ids Bare reference ids used as graph roots.
 #' @param config Optional parsed config list or config path.
@@ -26,6 +28,23 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
 
   index <- .litxr_read_llm_digest_index(cfg)
   index <- index[!is.na(index$json_filename) & nzchar(index$json_filename), ]
+  identity_map <- .litxr_read_project_ref_identity_index(
+    cfg,
+    columns = c("arxiv_id", "doi")
+  )
+  identity_map <- identity_map[
+    !is.na(identity_map$arxiv_id) & nzchar(identity_map$arxiv_id) &
+      !is.na(identity_map$doi) & nzchar(identity_map$doi) &
+      identity_map$arxiv_id %in% index$ref_id,
+    c("arxiv_id", "doi"),
+    with = FALSE
+  ]
+  doi_to_cached_arxiv <- if (nrow(identity_map)) {
+    identity_map <- identity_map[!duplicated(identity_map$doi), ]
+    stats::setNames(as.character(identity_map$arxiv_id), as.character(identity_map$doi))
+  } else {
+    character()
+  }
   index_hit <- match(root_ids, index$ref_id)
   root_cached <- !is.na(index_hit)
   nodes <- data.table::data.table(
@@ -45,7 +64,8 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
   nodes$title[!is.na(title_hit)] <- root_titles$title[title_hit[!is.na(title_hit)]]
   edges <- data.table::data.table(
     id = character(), source = character(), target = character(),
-    anchor_title = character(), anchor_role = character(), relationship = character(), confidence = character(), reason = character()
+    anchor_ref_id = character(), anchor_title = character(), anchor_role = character(),
+    relationship = character(), confidence = character(), reason = character()
   )
   frontier <- root_ids[root_cached]
   seen_cached <- frontier
@@ -69,7 +89,12 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
         nodes$theoretical_mechanism[use_details] <- details$theoretical_mechanism[detail_hit[use_details]]
         nodes$github_urls[use_details] <- details$github_urls[detail_hit[use_details]]
       }
-      anchors <- Map(.litxr_literature_graph_anchor_rows, digests, frontier_rows$ref_id)
+      anchors <- Map(
+        .litxr_literature_graph_anchor_rows,
+        digests,
+        frontier_rows$ref_id,
+        MoreArgs = list(doi_to_cached_arxiv = doi_to_cached_arxiv)
+      )
       anchors <- anchors[vapply(anchors, nrow, integer(1L)) > 0L]
       if (!length(anchors)) {
         frontier <- character()
@@ -201,16 +226,21 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
   data.table::data.table(ref_id = locations$ref_id, title = titles)
 }
 
-.litxr_literature_graph_anchor_rows <- function(digest, source_id) {
+.litxr_literature_graph_anchor_rows <- function(digest, source_id, doi_to_cached_arxiv = character()) {
   empty <- data.table::data.table(
     source = character(), target = character(), anchor_title = character(),
-    anchor_role = character(), relationship = character(), confidence = character(), reason = character()
+    anchor_ref_id = character(), anchor_role = character(), relationship = character(),
+    confidence = character(), reason = character()
   )
   if (is.null(digest) || is.null(digest$anchor_references) || !length(digest$anchor_references)) return(empty)
   anchors <- digest$anchor_references
   if (!is.data.frame(anchors)) anchors <- data.table::as.data.table(anchors)
   if (!("anchor_ref_id" %in% names(anchors)) || !nrow(anchors)) return(empty)
-  target <- vapply(as.character(anchors$anchor_ref_id), .litxr_llm_digest_index_key, character(1))
+  anchor_ref_id <- vapply(as.character(anchors$anchor_ref_id), .litxr_llm_digest_index_key, character(1))
+  target <- anchor_ref_id
+  cached_arxiv <- unname(doi_to_cached_arxiv[anchor_ref_id])
+  use_cached_arxiv <- !is.na(cached_arxiv) & nzchar(cached_arxiv)
+  target[use_cached_arxiv] <- cached_arxiv[use_cached_arxiv]
   keep <- !is.na(target) & nzchar(target)
   if (!any(keep)) return(empty)
   column <- function(name) {
@@ -220,6 +250,7 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
   data.table::data.table(
     source = source_id,
     target = target[keep],
+    anchor_ref_id = anchor_ref_id[keep],
     anchor_title = column("anchor_title")[keep],
     anchor_role = column("anchor_role")[keep],
     relationship = column("relationship_to_current_paper")[keep],
