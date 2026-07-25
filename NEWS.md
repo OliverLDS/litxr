@@ -1,3 +1,13 @@
+# litxr 0.1.8.9
+
+- Added `litxr_score_arxiv_lexical_categories()` for narrow, tokenized
+  per-paper/category lexical scores without JSON hydration, ranking, or
+  downstream aggregation.
+- Reused that lexical scoring core in the inquiry-set CLI while retaining its
+  CLI-specific threshold, rank, and top-N output behavior.
+- Fixed citation-logic digest normalization when a `data.table` supplies the
+  duplicate-key columns during ingest.
+
 # litxr 0.1.8.8
 
 - Added bounded literature-relationship graph construction from digest

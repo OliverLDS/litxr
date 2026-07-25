@@ -118,65 +118,6 @@ usage <- function() {
   )
 }
 
-read_lexical_query_set <- function(path, query_set_id = NULL) {
-  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
-  if (!file.exists(path)) {
-    stop("Query set file not found: ", path, call. = FALSE)
-  }
-  ext <- tolower(tools::file_ext(path))
-  if (identical(ext, "csv")) {
-    dt <- data.table::fread(path, sep = ",", header = TRUE, na.strings = c("", "NA"))
-    required <- c("category_id", "lexical_keywords")
-    if (!all(required %in% names(dt))) {
-      stop("CSV lexical query set requires columns: category_id, lexical_keywords", call. = FALSE)
-    }
-    dt <- dt[!is.na(category_id) & nzchar(trimws(category_id)) & !is.na(lexical_keywords) & nzchar(trimws(lexical_keywords))]
-    if (!nrow(dt)) {
-      stop("Lexical query set CSV has no usable rows: ", path, call. = FALSE)
-    }
-    dt[, category_id := as.character(category_id)]
-    dt[, lexical_keywords := as.character(lexical_keywords)]
-    grouped <- split(dt$lexical_keywords, dt$category_id)
-    categories <- lapply(grouped, function(values) {
-      keywords <- unlist(strsplit(as.character(values), "|", fixed = TRUE), use.names = FALSE)
-      keywords <- trimws(keywords)
-      keywords <- keywords[!is.na(keywords) & nzchar(keywords)]
-      unique(keywords)
-    })
-    categories <- categories[lengths(categories) > 0L]
-    if (!length(categories)) {
-      stop("Lexical query set CSV produced no usable categories: ", path, call. = FALSE)
-    }
-    if (is.null(query_set_id) || !nzchar(as.character(query_set_id))) {
-      query_set_id <- tools::file_path_sans_ext(basename(path))
-    }
-    return(list(query_set_id = as.character(query_set_id)[[1L]], query_sets = stats::setNames(list(categories), as.character(query_set_id)[[1L]])))
-  }
-  if (identical(ext, "json")) {
-    obj <- jsonlite::fromJSON(path, simplifyVector = FALSE)
-  } else if (ext %in% c("yml", "yaml")) {
-    obj <- yaml::read_yaml(path)
-  } else {
-    stop("Unsupported lexical query set file extension: ", ext, call. = FALSE)
-  }
-  if (!is.list(obj) || !length(obj)) {
-    stop("Lexical query set file is empty: ", path, call. = FALSE)
-  }
-  if (is.null(names(obj)) || any(!nzchar(names(obj)))) {
-    stop("Lexical query set file must be a named list.", call. = FALSE)
-  }
-  if (length(obj) == 1L && is.list(obj[[1L]]) && !is.null(names(obj[[1L]]))) {
-    query_set_id <- names(obj)[[1L]]
-    query_sets <- obj
-  } else {
-    if (is.null(query_set_id) || !nzchar(as.character(query_set_id))) {
-      query_set_id <- tools::file_path_sans_ext(basename(path))
-    }
-    query_sets <- stats::setNames(list(obj), as.character(query_set_id)[[1L]])
-  }
-  list(query_set_id = as.character(query_set_id)[[1L]], query_sets = query_sets)
-}
-
 resolve_corpus_cache_path <- function(raw_corpus_path) {
   raw_corpus_path <- normalizePath(raw_corpus_path, winslash = "/", mustWork = FALSE)
   if (basename(raw_corpus_path) == "metadata.fst" && file.exists(file.path(dirname(raw_corpus_path), "postings.fst"))) {
@@ -199,99 +140,6 @@ resolve_corpus_cache_path <- function(raw_corpus_path) {
     field = "abstract",
     source = "raw"
   )
-}
-
-load_query_scores_keyword <- function(cfg, collection_id, field, query_set_id, query_sets, corpus_path, top_n, threshold, min_keywords_per_category) {
-  corpus_dt <- fst::read_fst(corpus_path, as.data.table = TRUE)
-  required <- c("arxiv_id", field)
-  if (!all(required %in% names(corpus_dt))) {
-    stop(
-      "Corpus metadata file must contain columns: ",
-      paste(required, collapse = ", "),
-      call. = FALSE
-    )
-  }
-
-  doc_ids <- as.character(corpus_dt[["arxiv_id"]])
-  texts <- as.character(corpus_dt[[field]])
-  keep <- !is.na(doc_ids) & nzchar(doc_ids) & !is.na(texts) & nzchar(texts)
-  if (!any(keep)) {
-    return(data.table::data.table())
-  }
-  doc_ids <- doc_ids[keep]
-  texts <- texts[keep]
-  if (!identical(field, "abstract_norm")) {
-    texts <- litxr::litxr_lexical_normalize_text(texts)
-  }
-  rm(corpus_dt)
-
-  flat <- litxr::litxr_lexical_flatten_query_sets(query_sets)
-  flat <- flat[flat$query_set == query_set_id, ]
-  if (!nrow(flat)) {
-    return(data.table::data.table())
-  }
-  flat[, keyword_norm := litxr::litxr_lexical_normalize_text(keyword)]
-  flat <- flat[!is.na(keyword_norm) & nzchar(keyword_norm)]
-  if (!nrow(flat)) {
-    return(data.table::data.table())
-  }
-  flat <- unique(flat, by = c("query_set", "category", "keyword_norm"))
-  pattern_dt <- flat[, .(
-    pattern = paste(litxr::litxr_lexical_escape_regex(keyword_norm), collapse = "|")
-  ), by = .(query_set, category)]
-  if (!nrow(pattern_dt)) {
-    return(data.table::data.table())
-  }
-
-  scores <- pattern_dt[, {
-    pat <- pattern[[1L]]
-    if (!nzchar(pat)) {
-      return(data.table::data.table())
-    }
-    hit_lists <- regmatches(texts, gregexpr(pat, texts, perl = TRUE))
-    hit_counts <- lengths(hit_lists)
-    keep <- which(hit_counts > 0L)
-    if (!length(keep)) {
-      return(data.table::data.table())
-    }
-    matched <- unlist(hit_lists[keep], use.names = FALSE)
-    doc_idx <- rep.int(keep, hit_counts[keep])
-    hit_dt <- data.table::data.table(
-      ref_id = doc_ids[doc_idx],
-      keyword = matched
-    )
-    hit_dt <- unique(hit_dt)
-    out <- hit_dt[, .(
-      score_max = data.table::uniqueN(keyword),
-      matched_keywords = paste(sort(unique(keyword)), collapse = " | ")
-    ), by = ref_id]
-    out[, `:=`(
-      category_id = as.character(category[[1L]]),
-      query_set = as.character(query_set[[1L]])
-    )]
-    out
-  }, by = .(query_set, category)]
-
-  if (!nrow(scores)) {
-    return(data.table::data.table())
-  }
-  scores <- scores[!is.na(ref_id) & nzchar(ref_id) & !is.na(score_max) & score_max >= min_keywords_per_category]
-  if (!nrow(scores)) {
-    return(data.table::data.table())
-  }
-  scores <- scores[score_max >= threshold]
-  if (!nrow(scores)) {
-    return(data.table::data.table())
-  }
-  scores <- scores[query_set == query_set_id, ]
-  if (!nrow(scores)) {
-    return(data.table::data.table())
-  }
-  data.table::setorderv(scores, c("category_id", "score_max", "ref_id"), order = c(1L, -1L, 1L), na.last = TRUE)
-  scores[, rank_in_category := seq_len(.N), by = category_id]
-  scores <- scores[rank_in_category <= top_n]
-  scores[, c("query_set", "rank_in_category") := NULL]
-  scores
 }
 
 timed_step <- function(label, expr) {
@@ -326,108 +174,24 @@ load_query_scores_keyword_tokenized <- function(query_set_id, query_sets, corpus
   if (length(missing)) {
     stop("Lexical cache file(s) not found: ", paste(missing, collapse = ", "), call. = FALSE)
   }
-
-  cache_meta <- timed_step("keyword_read_metadata", fst::read_fst(paths$metadata, as.data.table = TRUE, columns = c("doc_int", "arxiv_id")))
-  cache_meta <- cache_meta[!is.na(doc_int) & !is.na(arxiv_id) & nzchar(arxiv_id)]
-  if (!nrow(cache_meta)) {
-    return(data.table::data.table())
-  }
-  cache_meta[, ref_id := as.character(arxiv_id)]
-  cache_meta[, arxiv_id := NULL]
-
-  cache_postings <- timed_step("keyword_read_postings", fst::read_fst(paths$postings, as.data.table = TRUE, columns = c("doc_int", "term")))
-  cache_postings <- cache_postings[!is.na(doc_int) & !is.na(term) & nzchar(term)]
-  if (!nrow(cache_postings)) {
-    return(data.table::data.table())
-  }
-
-  flat <- timed_step("keyword_flatten_query_sets", litxr::litxr_lexical_flatten_query_sets(query_sets))
-  flat <- flat[flat$query_set == query_set_id, ]
-  if (!nrow(flat)) {
-    return(data.table::data.table())
-  }
-  flat[, keyword_norm := litxr::litxr_lexical_normalize_text(keyword)]
-  flat <- flat[!is.na(keyword_norm) & nzchar(keyword_norm)]
-  if (!nrow(flat)) {
-    return(data.table::data.table())
-  }
-  flat <- unique(flat, by = c("query_set", "category", "keyword_norm"))
-
-  keyword_tokens <- litxr::litxr_lexical_tokenize(flat$keyword_norm, normalize = FALSE)
-  token_counts <- lengths(keyword_tokens)
-  keep <- token_counts > 0L
-  if (!any(keep)) {
-    return(data.table::data.table())
-  }
-  flat <- flat[keep]
-  keyword_tokens <- keyword_tokens[keep]
-  token_counts <- token_counts[keep]
-  keyword_parts <- data.table::data.table(
-    query_set = flat$query_set[rep.int(seq_len(nrow(flat)), token_counts)],
-    category = flat$category[rep.int(seq_len(nrow(flat)), token_counts)],
-    keyword_norm = flat$keyword_norm[rep.int(seq_len(nrow(flat)), token_counts)],
-    term = unlist(keyword_tokens, use.names = FALSE)
-  )
-  if (!nrow(keyword_parts)) {
-    return(data.table::data.table())
-  }
-  keyword_terms <- unique(keyword_parts)
-  keyword_terms[, n_terms := data.table::uniqueN(term), by = .(query_set, category, keyword_norm)]
-  needed_terms <- unique(keyword_terms$term)
-
-  keyword_postings <- timed_step(
-    "keyword_filter_postings",
-    cache_postings[term %in% needed_terms, .(doc_int, term)]
-  )
-  if (!nrow(keyword_postings)) {
-    return(data.table::data.table())
-  }
-
-  matches <- timed_step(
-    "keyword_join_postings",
-    keyword_postings[keyword_terms, on = "term", nomatch = 0L, allow.cartesian = TRUE]
-  )
-  if (!nrow(matches)) {
-    return(data.table::data.table())
-  }
-  matches <- unique(matches[, .(doc_int, query_set, category, keyword_norm, term, n_terms)])
-
-  keyword_counts <- timed_step(
-    "keyword_count_terms",
-    matches[, .(n_terms_matched = .N), by = .(doc_int, query_set, category, keyword_norm, n_terms)]
-  )
-  keyword_counts <- keyword_counts[n_terms_matched >= n_terms]
-  if (!nrow(keyword_counts)) {
-    return(data.table::data.table())
-  }
-
   scores <- timed_step(
     "keyword_score_categories",
-    keyword_counts[, .(
-      score_max = .N,
-      matched_keywords = paste(sort(unique(keyword_norm)), collapse = " | ")
-    ), by = .(doc_int, query_set, category)]
+    litxr:::.litxr_score_arxiv_lexical_category_rows(
+      query_set_id = query_set_id,
+      query_sets = query_sets,
+      metadata_path = paths$metadata,
+      postings_path = paths$postings,
+      min_keywords_per_category = min_keywords_per_category
+    )
   )
-  scores <- scores[score_max >= min_keywords_per_category]
+  scores <- scores[scores$score_max >= threshold, ]
   if (!nrow(scores)) {
     return(data.table::data.table())
   }
-  scores <- scores[score_max >= threshold]
-  if (!nrow(scores)) {
-    return(data.table::data.table())
-  }
-
-  scores[, ref_id := cache_meta$ref_id[match(doc_int, cache_meta$doc_int)]]
-  scores <- scores[!is.na(ref_id) & nzchar(ref_id)]
-  if (!nrow(scores)) {
-    return(data.table::data.table())
-  }
-  scores[, category_id := as.character(category)]
-  scores[, query_set := as.character(query_set)]
   data.table::setorderv(scores, c("category_id", "score_max", "ref_id"), order = c(1L, -1L, 1L), na.last = TRUE)
   scores[, rank_in_category := seq_len(.N), by = category_id]
   scores <- scores[rank_in_category <= top_n]
-  scores[, c("query_set", "rank_in_category", "doc_int", "category") := NULL]
+  scores[, "rank_in_category" := NULL]
   scores[]
 }
 
@@ -689,7 +453,7 @@ if (!is.null(query_set_path) && nzchar(as.character(query_set_path)[[1L]])) {
     paste0(query_set_id, ".csv")
   )
 }
-query_spec <- read_lexical_query_set(query_set_path, query_set_id = query_set_id)
+query_spec <- litxr:::.litxr_read_lexical_query_set(query_set_path, query_set_id = query_set_id)
 query_set_id <- query_spec$query_set_id
 query_sets <- query_spec$query_sets
 

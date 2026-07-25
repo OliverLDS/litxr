@@ -1847,7 +1847,7 @@ litxr_validate_paper_type <- function(x) {
     x <- x[!is.na(x) & nzchar(x)]
     if (!length(x)) NA_character_ else paste(unique(x), collapse = "; ")
   }, character(1))
-  key_matrix <- dt[, key_cols, drop = FALSE]
+  key_matrix <- dt[, key_cols, with = FALSE]
   key_values <- do.call(paste, c(lapply(key_matrix, function(col) {
     col <- as.character(col)
     col[is.na(col)] <- ""
