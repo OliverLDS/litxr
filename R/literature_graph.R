@@ -146,6 +146,24 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
     use_hint <- use_hint & !is.na(title_hit)
     nodes$title[use_hint] <- edges$anchor_title[title_hit[use_hint]]
   }
+  detail_ids <- nodes$ref_id[nodes$node_type == "cached" & nodes$depth >= max_depth]
+  if (length(detail_ids)) {
+    detail_index <- match(detail_ids, index$ref_id)
+    detail_rows <- index[detail_index[!is.na(detail_index)], ]
+    detail_paths <- file.path(.litxr_project_llm_dir(cfg), basename(detail_rows$json_filename))
+    detail_digests <- lapply(detail_paths, function(path) {
+      if (!file.exists(path)) return(NULL)
+      tryCatch(.litxr_postprocess_llm_digest_read(jsonlite::fromJSON(path, simplifyVector = FALSE)), error = function(e) NULL)
+    })
+    details <- .litxr_literature_graph_digest_details(detail_digests, detail_rows$ref_id)
+    if (nrow(details)) {
+      detail_hit <- match(nodes$ref_id, details$ref_id)
+      use_details <- !is.na(detail_hit)
+      nodes$summary[use_details] <- details$summary[detail_hit[use_details]]
+      nodes$theoretical_mechanism[use_details] <- details$theoretical_mechanism[detail_hit[use_details]]
+      nodes$github_urls[use_details] <- details$github_urls[detail_hit[use_details]]
+    }
+  }
   data.table::setorder(nodes, depth, ref_id)
   data.table::setorder(edges, source, target, id)
   list(

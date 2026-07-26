@@ -23,6 +23,10 @@ write_digest <- function(ref_id, anchors = list()) {
       evidence_context = "Linked by the paper."
     ))
   }
+  if (identical(ref_id, "2309.14556")) {
+    digest$summary <- "Linked arXiv digest summary."
+    digest$theoretical_mechanism <- "Linked arXiv digest mechanism."
+  }
   litxr::litxr_write_llm_digest(ref_id, digest, cfg, keep_history = FALSE, bump_revision = FALSE)
 }
 
@@ -91,6 +95,8 @@ stopifnot(nrow(linked$nodes) == 2L)
 stopifnot(identical(linked$meta$external_nodes, 0L))
 stopifnot(identical(linked$nodes[ref_id == "2309.14556", node_type], "cached"))
 stopifnot(isTRUE(linked$nodes[ref_id == "2309.14556", traversable]))
+stopifnot(identical(linked$nodes[ref_id == "2309.14556", summary], "Linked arXiv digest summary."))
+stopifnot(identical(linked$nodes[ref_id == "2309.14556", theoretical_mechanism], "Linked arXiv digest mechanism."))
 stopifnot(!any(linked$nodes$ref_id == "10.1145/3613904.3642731"))
 stopifnot(identical(linked$edges$target, "2309.14556"))
 stopifnot(identical(linked$edges$anchor_ref_id, "10.1145/3613904.3642731"))

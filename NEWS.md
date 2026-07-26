@@ -1,3 +1,12 @@
+# litxr 0.1.8.10
+
+- Resolved DOI anchors through `ref_identity_map.fst` to cached linked arXiv
+  digests when available, preserving the original anchor id as edge provenance.
+- Hydrated cached terminal graph nodes after bounded traversal so their digest
+  summary, mechanism, and GitHub details remain available in the renderer.
+- Added an edge-style legend and compact, label-aware network layout with bare
+  reference ids, smaller nodes, and wider label-aware spacing.
+
 # litxr 0.1.8.9
 
 - Added `litxr_score_arxiv_lexical_categories()` for narrow, tokenized
