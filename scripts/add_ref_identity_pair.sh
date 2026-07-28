@@ -123,7 +123,7 @@ if payload.get("status") != "ok":
 
 def bare_arxiv(value):
     value = str(value or "")
-    return value[7:] if value.startswith("arxiv:") else value
+    return value[len("arxiv:"):] if value.startswith("arxiv:") else value
 
 def bare_doi(value):
     value = str(value or "")

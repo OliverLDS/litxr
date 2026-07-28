@@ -1,3 +1,13 @@
+# litxr 0.1.8.11
+
+- Fixed manual arXiv--DOI pair logging so canonical `arxiv:` ids retain their
+  complete bare identifier in `manual_ref_identity_pairs.tsv`.
+- Added a draggable, resizable cached-digest panel to rendered literature
+  graphs. It lists cached nodes by bare reference id, restores its prior size
+  after collapse, centers a selected node on the canvas, and shows its details
+  in the right panel.
+- Added a draggable splitter between graph canvases and their details panels.
+
 # litxr 0.1.8.10
 
 - Resolved DOI anchors through `ref_identity_map.fst` to cached linked arXiv
