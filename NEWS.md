@@ -1,3 +1,9 @@
+# litxr 0.1.8.12
+
+- Added optional short-title sidecars to rendered literature graphs. Canvas
+  labels use a user-editable short title while cached-node tables retain full
+  titles; rendered graphs can export overrides for reuse on later renders.
+
 # litxr 0.1.8.11
 
 - Fixed manual arXiv--DOI pair logging so canonical `arxiv:` ids retain their
