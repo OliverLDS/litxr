@@ -87,6 +87,9 @@ parse_crossref_entry_unified <- function(cr_message) {
   if (is.na(pub_date)) pub_date <- extract_date(cr_message$`published-online`)
   if (is.na(pub_date)) pub_date <- extract_date(cr_message$issued)
   if (is.na(pub_date)) pub_date <- extract_date(cr_message$created)
+  if (is.na(pub_date)) {
+    pub_date <- as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC")
+  }
 
   year  <- if (!is.na(pub_date)) as.integer(format(pub_date, "%Y")) else NA_integer_
   month <- if (!is.na(pub_date)) as.integer(format(pub_date, "%m")) else NA_integer_

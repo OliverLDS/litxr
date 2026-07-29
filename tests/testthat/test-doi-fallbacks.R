@@ -24,6 +24,23 @@ test_that("parse_crossref_entry_unified preserves author name-only fallback", {
   expect_identical(out$pages[[1]], "3669-3676")
 })
 
+test_that("parse_crossref_entry_unified uses a typed missing publication date", {
+  dated <- list(
+    DOI = "10.1000/dated",
+    issued = list(`date-parts` = list(c(2024L, 1L, 1L)))
+  )
+  undated <- list(DOI = "10.1000/undated")
+
+  records <- data.table::rbindlist(list(
+    litxr::parse_crossref_entry_unified(dated),
+    litxr::parse_crossref_entry_unified(undated)
+  ), fill = TRUE)
+
+  expect_s3_class(records$pub_date, "POSIXct")
+  expect_false(is.na(records$pub_date[[1L]]))
+  expect_true(is.na(records$pub_date[[2L]]))
+})
+
 test_that("invalid fallback container titles are routed to unclassified doi", {
   td <- tempfile("litxr-doi-config-")
   dir.create(td)
