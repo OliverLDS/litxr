@@ -58,8 +58,8 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
   nodes$title[!is.na(title_hit)] <- root_titles$title[title_hit[!is.na(title_hit)]]
   edges <- data.table::data.table(
     id = character(), source = character(), target = character(),
-    anchor_ref_id = character(), anchor_title = character(), anchor_role = character(),
-    relationship = character(), confidence = character(), reason = character()
+    anchor_ref_id = character(), anchor_role = character(), relationship = character(),
+    confidence = character()
   )
   upward_frontier <- upward_ids[upward_ids %in% index$ref_id]
   downward_frontier <- downward_ids[downward_ids %in% index$ref_id]
@@ -103,12 +103,11 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
         }
         if (length(add_ids)) {
           add_hit <- match(add_ids, index$ref_id)
-          title_hint <- candidates$anchor_title[match(add_ids, candidates$next_ref_id)]
           nodes <- data.table::rbindlist(list(nodes, data.table::data.table(
             id = add_ids,
             ref_id = add_ids,
             node_type = ifelse(!is.na(add_hit), "cached", "external"),
-            title = title_hint,
+            title = NA_character_,
             summary = NA_character_,
             theoretical_mechanism = NA_character_,
             github_urls = NA_character_,
@@ -125,11 +124,9 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
             source = candidates$source_ref_id,
             target = candidates$target_ref_id,
             anchor_ref_id = candidates$anchor_ref_id,
-            anchor_title = candidates$anchor_title,
             anchor_role = candidates$anchor_role,
             relationship = candidates$relationship,
-            confidence = candidates$confidence,
-            reason = candidates$reason
+            confidence = candidates$confidence
           )), use.names = TRUE)
         }
         next_cached <- add_ids[add_ids %in% index$ref_id]
@@ -152,10 +149,6 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
   if (nrow(edges)) {
     edge_key <- paste(edges$source, edges$target, edges$anchor_ref_id, sep = "\r")
     edges <- edges[!duplicated(edge_key), ]
-    title_hit <- match(nodes$ref_id, edges$target)
-    use_hint <- is.na(nodes$title) | !nzchar(nodes$title)
-    use_hint <- use_hint & !is.na(title_hit)
-    nodes$title[use_hint] <- edges$anchor_title[title_hit[use_hint]]
   }
   detail_ids <- nodes$ref_id[nodes$node_type == "cached"]
   if (length(detail_ids)) {

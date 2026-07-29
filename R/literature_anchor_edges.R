@@ -4,11 +4,9 @@
     target_ref_id = character(),
     anchor_ref_id = character(),
     anchor_rank = integer(),
-    anchor_title = character(),
     anchor_role = character(),
     relationship = character(),
-    confidence = character(),
-    reason = character()
+    confidence = character()
   )
 }
 
@@ -114,11 +112,9 @@
       target_ref_id = target_ref_id[keep],
       anchor_ref_id = anchor_ref_id[keep],
       anchor_rank = suppressWarnings(as.integer(column("anchor_rank")[keep])),
-      anchor_title = column("anchor_title")[keep],
       anchor_role = column("anchor_role")[keep],
       relationship = column("relationship_to_current_paper")[keep],
-      confidence = column("confidence")[keep],
-      reason = column("reason")[keep]
+      confidence = column("confidence")[keep]
     )
   }, parsed, digest_index$ref_id)
   rows <- rows[!vapply(rows, is.null, logical(1L))]
