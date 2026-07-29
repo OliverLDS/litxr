@@ -1,3 +1,15 @@
+# litxr 0.1.8.13
+
+- Added `index/literature_anchor_edges.fst` and
+  `scripts/sync_literature_anchor_edges.R` for compact, incremental indexing
+  of current LLM-digest anchor relationships. Digest thin-store sync now
+  refreshes this index after changed digest JSON files.
+- Added upward and downward graph roots through
+  `litxr_build_literature_graph()` and `build_literature_graph.R`, while
+  retaining `--ref-ids` as an upward-compatible CLI alias.
+- Added right-panel controls to hide or restore the upward and downward
+  branches of a selected rendered graph node.
+
 # litxr 0.1.8.12
 
 - Added optional short-title sidecars to rendered literature graphs. Canvas

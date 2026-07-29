@@ -38,6 +38,7 @@ write_digest("2501.00002", list(
   list(anchor_rank = 1L, anchor_ref_id = "2501.00003", anchor_title = "Grandparent", anchor_role = "technical_foundation", relationship_to_current_paper = "builds_on", confidence = "high", reason = "Supplies the algorithm.")
 ))
 write_digest("2501.00003")
+litxr:::.litxr_sync_literature_anchor_edges(cfg, mode = "full")
 
 arxiv_collection_index <- litxr:::.litxr_collection_index_for_id(cfg, "arxiv_cs_ai")
 arxiv_ref_dir <- litxr:::.litxr_collection_ref_dir(cfg, "arxiv_cs_ai")
@@ -89,6 +90,7 @@ fst::write_fst(
   ),
   litxr:::.litxr_project_ref_identity_index_path(cfg)
 )
+litxr:::.litxr_sync_literature_anchor_edges(cfg, mode = "incremental", ref_ids = c("2501.00004", "2309.14556"))
 
 linked <- litxr::litxr_build_literature_graph("2501.00004", cfg, max_depth = 2L, max_nodes = 10L)
 stopifnot(nrow(linked$nodes) == 2L)
@@ -100,3 +102,18 @@ stopifnot(identical(linked$nodes[ref_id == "2309.14556", theoretical_mechanism],
 stopifnot(!any(linked$nodes$ref_id == "10.1145/3613904.3642731"))
 stopifnot(identical(linked$edges$target, "2309.14556"))
 stopifnot(identical(linked$edges$anchor_ref_id, "10.1145/3613904.3642731"))
+
+write_digest("2501.00005", list(
+  list(anchor_rank = 1L, anchor_ref_id = "2501.00001", anchor_title = "Root paper", anchor_role = "methodological_foundation", relationship_to_current_paper = "builds_on", confidence = "high", reason = "Cites the root paper.")
+))
+litxr:::.litxr_sync_literature_anchor_edges(cfg, mode = "incremental", ref_ids = "2501.00005")
+downward <- litxr::litxr_build_literature_graph(
+  downward_ref_ids = "2501.00001",
+  config = cfg,
+  max_depth = 1L,
+  max_nodes = 10L
+)
+stopifnot(identical(downward$meta$downward_root_ref_ids, "2501.00001"))
+stopifnot(identical(downward$nodes[ref_id == "2501.00005", node_type], "cached"))
+stopifnot(identical(downward$edges$source, "2501.00005"))
+stopifnot(identical(downward$edges$target, "2501.00001"))

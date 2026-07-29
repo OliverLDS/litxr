@@ -56,7 +56,7 @@ usage <- function() {
       "",
       "Behavior:",
       "  - Reads digest JSON files from digest/llm/.",
-      "  - Writes the digest index to index/llm_digest.fst.",
+      "  - Writes the digest index to index/llm_digest.fst and refreshes index/literature_anchor_edges.fst.",
       "  - Stores bare normalized ref_id, JSON filename, and history directory name.",
       "  - Never bootstraps the index from reader code; this script is the explicit sync entry point.",
       sep = "\n"
@@ -181,6 +181,23 @@ if (identical(mode, "full")) {
   litxr:::.litxr_write_llm_digest_index(cfg, merged)
 }
 
+anchor_edge_sync <- if (identical(mode, "full") || nrow(rows)) {
+  litxr:::.litxr_sync_literature_anchor_edges(
+    cfg,
+    mode = mode,
+    ref_ids = rows$ref_id
+  )
+} else {
+  list(
+    path = litxr:::.litxr_project_literature_anchor_edges_path(cfg),
+    mode = mode,
+    digests_scanned = 0L,
+    edges_removed = 0L,
+    edges_added = 0L,
+    edges_total = NA_integer_
+  )
+}
+
 log_line("syncing thin digest stores")
 log_line("mode=", mode)
 log_line("json_dir=", if (dir.exists(digest_dir)) digest_dir else "[missing]")
@@ -193,5 +210,6 @@ emit_json(list(
   json_dir = if (dir.exists(digest_dir)) digest_dir else NA_character_,
   index_path = index_path,
   selected_json_files = length(files),
-  selected_rows = nrow(rows)
+  selected_rows = nrow(rows),
+  literature_anchor_edges = anchor_edge_sync
 ))

@@ -5,28 +5,36 @@
 \title{Build a bounded literature relationship graph from digest anchors}
 \usage{
 litxr_build_literature_graph(
-  ref_ids,
+  ref_ids = NULL,
   config = NULL,
   max_depth = 2L,
-  max_nodes = 100L
+  max_nodes = 100L,
+  upward_ref_ids = NULL,
+  downward_ref_ids = NULL
 )
 }
 \arguments{
-\item{ref_ids}{Bare reference ids used as graph roots.}
+\item{ref_ids}{Deprecated alias for \code{upward_ref_ids}.}
 
 \item{config}{Optional parsed config list or config path.}
 
-\item{max_depth}{Maximum number of anchor hops from a root. Default: \code{2}.}
+\item{max_depth}{Maximum number of hops in each direction from a root.
+Default: \code{2}.}
 
 \item{max_nodes}{Maximum number of returned nodes. Default: \code{100}.}
+
+\item{upward_ref_ids}{Bare reference ids whose anchored references are traced.}
+
+\item{downward_ref_ids}{Bare reference ids whose local citing papers are traced.}
 }
 \value{
 A list with \code{meta}, \code{nodes}, and \code{edges} data tables.
 }
 \description{
 Builds a directed graph where each edge points from a paper to one of its
-anchored references. Traversal expands only through digests recorded in the
-thin LLM digest index. DOI anchors linked through the thin identity map use
-a cached arXiv digest when one is available; unresolved anchors remain
-visible external nodes.
+anchored references. Traversal reads the thin LLM digest and literature
+anchor-edge indexes once. Upward roots follow anchored references; downward
+roots follow locally cached papers that cite them. DOI anchors linked through
+the thin identity map use a cached arXiv digest when one is available;
+unresolved upward anchors remain visible external nodes.
 }

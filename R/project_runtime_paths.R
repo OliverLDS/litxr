@@ -341,6 +341,10 @@
   file.path(.litxr_project_index_dir(cfg), "llm_digest.fst")
 }
 
+.litxr_project_literature_anchor_edges_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "literature_anchor_edges.fst")
+}
+
 .litxr_project_md_dir <- function(cfg) {
   file.path(.litxr_project_root(cfg), "md")
 }

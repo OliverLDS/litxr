@@ -1,25 +1,35 @@
 #' Build a bounded literature relationship graph from digest anchors
 #'
 #' Builds a directed graph where each edge points from a paper to one of its
-#' anchored references. Traversal expands only through digests recorded in the
-#' thin LLM digest index. DOI anchors linked through the thin identity map use
-#' a cached arXiv digest when one is available; unresolved anchors remain
-#' visible external nodes.
+#' anchored references. Traversal reads the thin LLM digest and literature
+#' anchor-edge indexes once. Upward roots follow anchored references; downward
+#' roots follow locally cached papers that cite them. DOI anchors linked through
+#' the thin identity map use a cached arXiv digest when one is available;
+#' unresolved upward anchors remain visible external nodes.
 #'
-#' @param ref_ids Bare reference ids used as graph roots.
+#' @param ref_ids Deprecated alias for `upward_ref_ids`.
+#' @param upward_ref_ids Bare reference ids whose anchored references are traced.
+#' @param downward_ref_ids Bare reference ids whose local citing papers are traced.
 #' @param config Optional parsed config list or config path.
-#' @param max_depth Maximum number of anchor hops from a root. Default: `2`.
+#' @param max_depth Maximum number of hops in each direction from a root.
+#'   Default: `2`.
 #' @param max_nodes Maximum number of returned nodes. Default: `100`.
 #'
 #' @return A list with `meta`, `nodes`, and `edges` data tables.
 #' @export
-litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L, max_nodes = 100L) {
+litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_depth = 2L, max_nodes = 100L, upward_ref_ids = NULL, downward_ref_ids = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
-  root_ids <- vapply(as.character(ref_ids), .litxr_llm_digest_index_key, character(1))
-  root_ids <- unique(root_ids[!is.na(root_ids) & nzchar(root_ids)])
-  if (!length(root_ids)) stop("`ref_ids` must contain at least one bare reference id.", call. = FALSE)
+  normalize_ids <- function(x) {
+    if (is.null(x) || !length(x)) return(character())
+    ids <- vapply(as.character(x), .litxr_llm_digest_index_key, character(1L))
+    unique(ids[!is.na(ids) & nzchar(ids)])
+  }
+  upward_ids <- unique(c(normalize_ids(ref_ids), normalize_ids(upward_ref_ids)))
+  downward_ids <- normalize_ids(downward_ref_ids)
+  root_ids <- unique(c(upward_ids, downward_ids))
+  if (!length(root_ids)) stop("Supply at least one `upward_ref_ids` or `downward_ref_ids` value.", call. = FALSE)
 
   max_depth <- suppressWarnings(as.integer(max_depth[[1L]]))
   max_nodes <- suppressWarnings(as.integer(max_nodes[[1L]]))
@@ -28,23 +38,7 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
 
   index <- .litxr_read_llm_digest_index(cfg)
   index <- index[!is.na(index$json_filename) & nzchar(index$json_filename), ]
-  identity_map <- .litxr_read_project_ref_identity_index(
-    cfg,
-    columns = c("arxiv_id", "doi")
-  )
-  identity_map <- identity_map[
-    !is.na(identity_map$arxiv_id) & nzchar(identity_map$arxiv_id) &
-      !is.na(identity_map$doi) & nzchar(identity_map$doi) &
-      identity_map$arxiv_id %in% index$ref_id,
-    c("arxiv_id", "doi"),
-    with = FALSE
-  ]
-  doi_to_cached_arxiv <- if (nrow(identity_map)) {
-    identity_map <- identity_map[!duplicated(identity_map$doi), ]
-    stats::setNames(as.character(identity_map$arxiv_id), as.character(identity_map$doi))
-  } else {
-    character()
-  }
+  anchor_edges <- .litxr_read_literature_anchor_edges(cfg)
   index_hit <- match(root_ids, index$ref_id)
   root_cached <- !is.na(index_hit)
   nodes <- data.table::data.table(
@@ -67,86 +61,103 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
     anchor_ref_id = character(), anchor_title = character(), anchor_role = character(),
     relationship = character(), confidence = character(), reason = character()
   )
-  frontier <- root_ids[root_cached]
-  seen_cached <- frontier
+  upward_frontier <- upward_ids[upward_ids %in% index$ref_id]
+  downward_frontier <- downward_ids[downward_ids %in% index$ref_id]
+  frontier_parts <- list()
+  if (length(upward_frontier)) {
+    frontier_parts[[length(frontier_parts) + 1L]] <- data.table::data.table(ref_id = upward_frontier, direction = "upward")
+  }
+  if (length(downward_frontier)) {
+    frontier_parts[[length(frontier_parts) + 1L]] <- data.table::data.table(ref_id = downward_frontier, direction = "downward")
+  }
+  frontier <- if (length(frontier_parts)) {
+    data.table::rbindlist(frontier_parts, use.names = TRUE)
+  } else {
+    data.table::data.table(ref_id = character(), direction = character())
+  }
+  visited_upward <- frontier$ref_id[frontier$direction == "upward"]
+  visited_downward <- frontier$ref_id[frontier$direction == "downward"]
   truncated_nodes <- 0L
 
-  if (nrow(index) && length(frontier) && max_depth > 0L) {
+  if (nrow(index) && nrow(anchor_edges) && nrow(frontier) && max_depth > 0L) {
     for (depth in seq_len(max_depth)) {
-      if (!length(frontier)) break
-      frontier_hit <- match(frontier, index$ref_id)
-      frontier_rows <- index[frontier_hit[!is.na(frontier_hit)], ]
-      paths <- file.path(.litxr_project_llm_dir(cfg), basename(frontier_rows$json_filename))
-      digests <- lapply(paths, function(path) {
-        if (!file.exists(path)) return(NULL)
-        tryCatch(.litxr_postprocess_llm_digest_read(jsonlite::fromJSON(path, simplifyVector = FALSE)), error = function(e) NULL)
-      })
-      details <- .litxr_literature_graph_digest_details(digests, frontier_rows$ref_id)
-      if (nrow(details)) {
-        detail_hit <- match(nodes$ref_id, details$ref_id)
-        use_details <- !is.na(detail_hit)
-        nodes$summary[use_details] <- details$summary[detail_hit[use_details]]
-        nodes$theoretical_mechanism[use_details] <- details$theoretical_mechanism[detail_hit[use_details]]
-        nodes$github_urls[use_details] <- details$github_urls[detail_hit[use_details]]
+      if (!nrow(frontier)) break
+      next_frontier <- list()
+      directions <- if (depth %% 2L) c("upward", "downward") else c("downward", "upward")
+      for (direction in directions) {
+        current <- frontier$ref_id[frontier$direction == direction]
+        if (!length(current)) next
+        candidates <- if (identical(direction, "upward")) {
+          anchor_edges[anchor_edges$source_ref_id %in% current, ]
+        } else {
+          anchor_edges[anchor_edges$target_ref_id %in% current, ]
+        }
+        if (!nrow(candidates)) next
+        candidates$next_ref_id <- if (identical(direction, "upward")) candidates$target_ref_id else candidates$source_ref_id
+        data.table::setorder(candidates, anchor_rank, source_ref_id, target_ref_id)
+        add_ids <- unique(candidates$next_ref_id[!candidates$next_ref_id %in% nodes$ref_id])
+        available <- max_nodes - nrow(nodes)
+        if (length(add_ids) > available) {
+          truncated_nodes <- truncated_nodes + length(add_ids) - available
+          add_ids <- head(add_ids, available)
+        }
+        if (length(add_ids)) {
+          add_hit <- match(add_ids, index$ref_id)
+          title_hint <- candidates$anchor_title[match(add_ids, candidates$next_ref_id)]
+          nodes <- data.table::rbindlist(list(nodes, data.table::data.table(
+            id = add_ids,
+            ref_id = add_ids,
+            node_type = ifelse(!is.na(add_hit), "cached", "external"),
+            title = title_hint,
+            summary = NA_character_,
+            theoretical_mechanism = NA_character_,
+            github_urls = NA_character_,
+            depth = as.integer(depth),
+            is_root = FALSE,
+            traversable = !is.na(add_hit) & depth < max_depth
+          )), use.names = TRUE)
+        }
+        candidates <- candidates[candidates$source_ref_id %in% nodes$ref_id & candidates$target_ref_id %in% nodes$ref_id, ]
+        if (nrow(candidates)) {
+          candidates$id <- paste(candidates$source_ref_id, candidates$target_ref_id, candidates$anchor_rank, seq_len(nrow(candidates)), sep = "->")
+          edges <- data.table::rbindlist(list(edges, data.table::data.table(
+            id = candidates$id,
+            source = candidates$source_ref_id,
+            target = candidates$target_ref_id,
+            anchor_ref_id = candidates$anchor_ref_id,
+            anchor_title = candidates$anchor_title,
+            anchor_role = candidates$anchor_role,
+            relationship = candidates$relationship,
+            confidence = candidates$confidence,
+            reason = candidates$reason
+          )), use.names = TRUE)
+        }
+        next_cached <- add_ids[add_ids %in% index$ref_id]
+        if (identical(direction, "upward")) {
+          next_cached <- setdiff(next_cached, visited_upward)
+          visited_upward <- unique(c(visited_upward, next_cached))
+        } else {
+          next_cached <- setdiff(next_cached, visited_downward)
+          visited_downward <- unique(c(visited_downward, next_cached))
+        }
+        if (length(next_cached) && depth < max_depth) {
+          next_frontier[[length(next_frontier) + 1L]] <- data.table::data.table(ref_id = next_cached, direction = direction)
+        }
       }
-      anchors <- Map(
-        .litxr_literature_graph_anchor_rows,
-        digests,
-        frontier_rows$ref_id,
-        MoreArgs = list(doi_to_cached_arxiv = doi_to_cached_arxiv)
-      )
-      anchors <- anchors[vapply(anchors, nrow, integer(1L)) > 0L]
-      if (!length(anchors)) {
-        frontier <- character()
-        next
-      }
-      candidates <- data.table::rbindlist(anchors, use.names = TRUE)
-      candidate_ids <- unique(candidates$target)
-      existing <- match(candidate_ids, nodes$ref_id)
-      add_ids <- candidate_ids[is.na(existing)]
-      available <- max_nodes - nrow(nodes)
-      if (length(add_ids) > available) {
-        truncated_nodes <- truncated_nodes + length(add_ids) - available
-        add_ids <- head(add_ids, available)
-      }
-      if (length(add_ids)) {
-        add_hit <- match(add_ids, index$ref_id)
-        add_cached <- !is.na(add_hit)
-        title_hint <- candidates$anchor_title[match(add_ids, candidates$target)]
-        additions <- data.table::data.table(
-          id = add_ids,
-          ref_id = add_ids,
-          node_type = ifelse(add_cached, "cached", "external"),
-          title = title_hint,
-          summary = NA_character_,
-          theoretical_mechanism = NA_character_,
-          github_urls = NA_character_,
-          depth = as.integer(depth),
-          is_root = FALSE,
-          traversable = add_cached & depth < max_depth
-        )
-        nodes <- data.table::rbindlist(list(nodes, additions), use.names = TRUE)
-      }
-      keep_edges <- candidates$target %in% nodes$ref_id
-      candidates <- candidates[keep_edges, ]
-      if (nrow(candidates)) {
-        candidates$id <- paste(candidates$source, candidates$target, seq_len(nrow(candidates)), sep = "->")
-        edges <- data.table::rbindlist(list(edges, candidates[, names(edges), with = FALSE]), use.names = TRUE)
-      }
-      next_cached <- add_ids[!is.na(match(add_ids, index$ref_id))]
-      frontier <- setdiff(next_cached, seen_cached)
-      seen_cached <- c(seen_cached, frontier)
+      frontier <- if (length(next_frontier)) data.table::rbindlist(next_frontier, use.names = TRUE) else data.table::data.table(ref_id = character(), direction = character())
       if (nrow(nodes) >= max_nodes) break
     }
   }
 
   if (nrow(edges)) {
+    edge_key <- paste(edges$source, edges$target, edges$anchor_ref_id, sep = "\r")
+    edges <- edges[!duplicated(edge_key), ]
     title_hit <- match(nodes$ref_id, edges$target)
     use_hint <- is.na(nodes$title) | !nzchar(nodes$title)
     use_hint <- use_hint & !is.na(title_hit)
     nodes$title[use_hint] <- edges$anchor_title[title_hit[use_hint]]
   }
-  detail_ids <- nodes$ref_id[nodes$node_type == "cached" & nodes$depth >= max_depth]
+  detail_ids <- nodes$ref_id[nodes$node_type == "cached"]
   if (length(detail_ids)) {
     detail_index <- match(detail_ids, index$ref_id)
     detail_rows <- index[detail_index[!is.na(detail_index)], ]
@@ -169,6 +180,8 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
   list(
     meta = list(
       root_ref_ids = root_ids,
+      upward_root_ref_ids = upward_ids,
+      downward_root_ref_ids = downward_ids,
       missing_root_ref_ids = root_ids[!root_cached],
       max_depth = max_depth,
       max_nodes = max_nodes,
@@ -242,37 +255,4 @@ litxr_build_literature_graph <- function(ref_ids, config = NULL, max_depth = 2L,
     as.character(payload$title %||% NA_character_)[[1L]]
   }, character(1L))
   data.table::data.table(ref_id = locations$ref_id, title = titles)
-}
-
-.litxr_literature_graph_anchor_rows <- function(digest, source_id, doi_to_cached_arxiv = character()) {
-  empty <- data.table::data.table(
-    source = character(), target = character(), anchor_title = character(),
-    anchor_ref_id = character(), anchor_role = character(), relationship = character(),
-    confidence = character(), reason = character()
-  )
-  if (is.null(digest) || is.null(digest$anchor_references) || !length(digest$anchor_references)) return(empty)
-  anchors <- digest$anchor_references
-  if (!is.data.frame(anchors)) anchors <- data.table::as.data.table(anchors)
-  if (!("anchor_ref_id" %in% names(anchors)) || !nrow(anchors)) return(empty)
-  anchor_ref_id <- vapply(as.character(anchors$anchor_ref_id), .litxr_llm_digest_index_key, character(1))
-  target <- anchor_ref_id
-  cached_arxiv <- unname(doi_to_cached_arxiv[anchor_ref_id])
-  use_cached_arxiv <- !is.na(cached_arxiv) & nzchar(cached_arxiv)
-  target[use_cached_arxiv] <- cached_arxiv[use_cached_arxiv]
-  keep <- !is.na(target) & nzchar(target)
-  if (!any(keep)) return(empty)
-  column <- function(name) {
-    if (!(name %in% names(anchors))) return(rep(NA_character_, nrow(anchors)))
-    as.character(anchors[[name]])
-  }
-  data.table::data.table(
-    source = source_id,
-    target = target[keep],
-    anchor_ref_id = anchor_ref_id[keep],
-    anchor_title = column("anchor_title")[keep],
-    anchor_role = column("anchor_role")[keep],
-    relationship = column("relationship_to_current_paper")[keep],
-    confidence = column("confidence")[keep],
-    reason = column("reason")[keep]
-  )
 }
