@@ -49,12 +49,18 @@ jsonlite::write_json(
   auto_unbox = TRUE,
   pretty = TRUE
 )
+jsonlite::write_json(
+  list(title = "Cached parent title"),
+  file.path(arxiv_ref_dir, "arxiv_2501_00002.json"),
+  auto_unbox = TRUE,
+  pretty = TRUE
+)
 dir.create(dirname(litxr:::.litxr_ref_arxiv_path(cfg)), recursive = TRUE, showWarnings = FALSE)
 fst::write_fst(
   data.table::data.table(
-    arxiv_id = "2501.00001",
+    arxiv_id = c("2501.00001", "2501.00002"),
     collection_index = arxiv_collection_index,
-    json_filename = "arxiv_2501_00001.json"
+    json_filename = c("arxiv_2501_00001.json", "arxiv_2501_00002.json")
   ),
   litxr:::.litxr_ref_arxiv_path(cfg)
 )
@@ -67,6 +73,7 @@ stopifnot(nrow(graph$edges) == 3L)
 stopifnot(identical(graph$nodes[node_type == "external", ref_id], "10.1000/external"))
 stopifnot(identical(graph$nodes[ref_id == "2501.00003", depth], 2L))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", title], "Root paper title"))
+stopifnot(identical(graph$nodes[ref_id == "2501.00002", title], "Cached parent title"))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", summary], "Root-paper summary."))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", theoretical_mechanism], "Root-paper mechanism."))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", github_urls], "https://github.com/example/root-paper"))

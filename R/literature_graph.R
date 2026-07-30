@@ -72,9 +72,6 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
     is_root = TRUE,
     traversable = root_cached & max_depth > 0L
   )
-  root_titles <- .litxr_literature_graph_root_titles(cfg, root_ids)
-  title_hit <- match(nodes$ref_id, root_titles$ref_id)
-  nodes$title[!is.na(title_hit)] <- root_titles$title[title_hit[!is.na(title_hit)]]
   edges <- data.table::data.table(
     id = character(), source = character(), target = character(),
     anchor_ref_id = character(), anchor_role = character(), relationship = character(),
@@ -173,6 +170,9 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
     edge_key <- paste(edges$source, edges$target, edges$anchor_ref_id, sep = "\r")
     edges <- edges[!duplicated(edge_key), ]
   }
+  node_titles <- .litxr_literature_graph_titles(cfg, nodes$ref_id)
+  title_hit <- match(nodes$ref_id, node_titles$ref_id)
+  nodes$title[!is.na(title_hit)] <- node_titles$title[title_hit[!is.na(title_hit)]]
   detail_ids <- nodes$ref_id[nodes$node_type == "cached"]
   if (length(detail_ids)) {
     detail_index <- match(detail_ids, index$ref_id)
@@ -265,7 +265,7 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
   data.table::rbindlist(rows, use.names = TRUE)
 }
 
-.litxr_literature_graph_root_titles <- function(cfg, ref_ids) {
+.litxr_literature_graph_titles <- function(cfg, ref_ids) {
   collections <- .litxr_config_collections(cfg)
   ref_dirs <- vapply(collections, function(collection) {
     as.character(.litxr_collection_ref_dir(cfg, collection$collection_id %||% collection$journal_id))
