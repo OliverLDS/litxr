@@ -59,7 +59,7 @@ fst::write_fst(
   litxr:::.litxr_ref_arxiv_path(cfg)
 )
 
-graph <- litxr::litxr_build_literature_graph("2501.00001", cfg, max_depth = 2L, max_nodes = 10L)
+graph <- litxr::litxr_build_literature_graph(upward_ref_ids = "2501.00001", config = cfg, max_depth = 2L, max_nodes = 10L)
 stopifnot(identical(graph$meta$root_ref_ids, "2501.00001"))
 stopifnot(identical(graph$meta$external_nodes, 1L))
 stopifnot(nrow(graph$nodes) == 4L)
@@ -71,11 +71,11 @@ stopifnot(identical(graph$nodes[ref_id == "2501.00001", summary], "Root-paper su
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", theoretical_mechanism], "Root-paper mechanism."))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", github_urls], "https://github.com/example/root-paper"))
 
-shallow <- litxr::litxr_build_literature_graph("2501.00001", cfg, max_depth = 1L, max_nodes = 10L)
+shallow <- litxr::litxr_build_literature_graph(upward_ref_ids = "2501.00001", config = cfg, max_depth = 1L, max_nodes = 10L)
 stopifnot(nrow(shallow$nodes) == 3L)
 stopifnot(nrow(shallow$edges) == 2L)
 
-limited <- litxr::litxr_build_literature_graph("2501.00001", cfg, max_depth = 2L, max_nodes = 2L)
+limited <- litxr::litxr_build_literature_graph(upward_ref_ids = "2501.00001", config = cfg, max_depth = 2L, max_nodes = 2L)
 stopifnot(identical(limited$meta$returned_nodes, 2L))
 stopifnot(identical(limited$meta$truncated_nodes, 1L))
 
@@ -92,7 +92,7 @@ fst::write_fst(
 )
 litxr:::.litxr_sync_literature_anchor_edges(cfg, mode = "incremental", ref_ids = c("2501.00004", "2309.14556"))
 
-linked <- litxr::litxr_build_literature_graph("2501.00004", cfg, max_depth = 2L, max_nodes = 10L)
+linked <- litxr::litxr_build_literature_graph(upward_ref_ids = "2501.00004", config = cfg, max_depth = 2L, max_nodes = 10L)
 stopifnot(nrow(linked$nodes) == 2L)
 stopifnot(identical(linked$meta$external_nodes, 0L))
 stopifnot(identical(linked$nodes[ref_id == "2309.14556", node_type], "cached"))
@@ -117,3 +117,45 @@ stopifnot(identical(downward$meta$downward_root_ref_ids, "2501.00001"))
 stopifnot(identical(downward$nodes[ref_id == "2501.00005", node_type], "cached"))
 stopifnot(identical(downward$edges$source, "2501.00005"))
 stopifnot(identical(downward$edges$target, "2501.00001"))
+
+bidirectional <- litxr::litxr_build_literature_graph(
+  ref_ids = "2501.00001",
+  config = cfg,
+  max_depth = 1L,
+  max_nodes = 10L
+)
+stopifnot(any(bidirectional$nodes$ref_id == "2501.00005"))
+stopifnot(any(bidirectional$edges$source == "2501.00005" & bidirectional$edges$target == "2501.00001"))
+
+write_digest("2501.00101", list(
+  list(anchor_rank = 1L, anchor_ref_id = "2501.00102", anchor_role = "methodological_foundation", relationship_to_current_paper = "builds_on", confidence = "high")
+))
+write_digest("2501.00102", list(
+  list(anchor_rank = 1L, anchor_ref_id = "2501.00103", anchor_role = "methodological_foundation", relationship_to_current_paper = "builds_on", confidence = "high")
+))
+write_digest("2501.00103", list(
+  list(anchor_rank = 1L, anchor_ref_id = "2501.00104", anchor_role = "comparison", relationship_to_current_paper = "compares_with", confidence = "medium")
+))
+write_digest("2501.00104", list(
+  list(anchor_rank = 1L, anchor_ref_id = "2501.00101", anchor_role = "methodological_foundation", relationship_to_current_paper = "builds_on", confidence = "high")
+))
+litxr:::.litxr_sync_literature_anchor_edges(
+  cfg,
+  mode = "incremental",
+  ref_ids = c("2501.00101", "2501.00102", "2501.00103", "2501.00104")
+)
+
+cycle_graph <- litxr::litxr_build_literature_graph(upward_ref_ids = "2501.00101", config = cfg, max_depth = 4L, max_nodes = 10L)
+stopifnot(all(c("2501.00101", "2501.00102", "2501.00103", "2501.00104") %in% cycle_graph$nodes$ref_id))
+stopifnot(any(cycle_graph$edges$source == "2501.00104" & cycle_graph$edges$target == "2501.00101"))
+stopifnot(identical(cycle_graph$edges[relationship == "compares_with", edge_type], "comparison"))
+
+foundation_only <- litxr::litxr_build_literature_graph(
+  upward_ref_ids = "2501.00101",
+  config = cfg,
+  max_depth = 4L,
+  max_nodes = 10L,
+  include_edge_types = "foundation"
+)
+stopifnot(!any(foundation_only$nodes$ref_id == "2501.00104"))
+stopifnot(all(foundation_only$edges$edge_type == "foundation"))

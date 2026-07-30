@@ -7,17 +7,21 @@
 #' the thin identity map use a cached arXiv digest when one is available;
 #' unresolved upward anchors remain visible external nodes.
 #'
-#' @param ref_ids Deprecated alias for `upward_ref_ids`.
+#' @param ref_ids Bare reference ids whose anchored references and local citing
+#'   papers are both traced.
 #' @param upward_ref_ids Bare reference ids whose anchored references are traced.
 #' @param downward_ref_ids Bare reference ids whose local citing papers are traced.
 #' @param config Optional parsed config list or config path.
 #' @param max_depth Maximum number of hops in each direction from a root.
 #'   Default: `2`.
 #' @param max_nodes Maximum number of returned nodes. Default: `100`.
+#' @param include_edge_types Optional edge categories to retain: foundation,
+#'   extension, comparison, or context.
+#' @param exclude_edge_types Optional edge categories to remove.
 #'
 #' @return A list with `meta`, `nodes`, and `edges` data tables.
 #' @export
-litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_depth = 2L, max_nodes = 100L, upward_ref_ids = NULL, downward_ref_ids = NULL) {
+litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_depth = 2L, max_nodes = 100L, upward_ref_ids = NULL, downward_ref_ids = NULL, include_edge_types = NULL, exclude_edge_types = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
 
@@ -26,19 +30,34 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
     ids <- vapply(as.character(x), .litxr_llm_digest_index_key, character(1L))
     unique(ids[!is.na(ids) & nzchar(ids)])
   }
-  upward_ids <- unique(c(normalize_ids(ref_ids), normalize_ids(upward_ref_ids)))
-  downward_ids <- normalize_ids(downward_ref_ids)
+  bidirectional_ids <- normalize_ids(ref_ids)
+  upward_ids <- unique(c(bidirectional_ids, normalize_ids(upward_ref_ids)))
+  downward_ids <- unique(c(bidirectional_ids, normalize_ids(downward_ref_ids)))
   root_ids <- unique(c(upward_ids, downward_ids))
-  if (!length(root_ids)) stop("Supply at least one `upward_ref_ids` or `downward_ref_ids` value.", call. = FALSE)
+  if (!length(root_ids)) stop("Supply at least one `ref_ids`, `upward_ref_ids`, or `downward_ref_ids` value.", call. = FALSE)
 
   max_depth <- suppressWarnings(as.integer(max_depth[[1L]]))
   max_nodes <- suppressWarnings(as.integer(max_nodes[[1L]]))
   if (is.na(max_depth) || max_depth < 0L) stop("`max_depth` must be a non-negative integer.", call. = FALSE)
   if (is.na(max_nodes) || max_nodes < length(root_ids)) stop("`max_nodes` must be at least the number of root ids.", call. = FALSE)
 
+  include_edge_types <- .litxr_literature_graph_edge_types(include_edge_types)
+  exclude_edge_types <- .litxr_literature_graph_edge_types(exclude_edge_types)
+  if (length(include_edge_types) && length(exclude_edge_types)) {
+    stop("Supply only one of include_edge_types or exclude_edge_types.", call. = FALSE)
+  }
+
   index <- .litxr_read_llm_digest_index(cfg)
   index <- index[!is.na(index$json_filename) & nzchar(index$json_filename), ]
   anchor_edges <- .litxr_read_literature_anchor_edges(cfg)
+  if (nrow(anchor_edges)) {
+    anchor_edges$edge_type <- .litxr_literature_graph_edge_type(anchor_edges$relationship, anchor_edges$anchor_role)
+    if (length(include_edge_types)) {
+      anchor_edges <- anchor_edges[anchor_edges$edge_type %in% include_edge_types, ]
+    } else if (length(exclude_edge_types)) {
+      anchor_edges <- anchor_edges[!anchor_edges$edge_type %in% exclude_edge_types, ]
+    }
+  }
   index_hit <- match(root_ids, index$ref_id)
   root_cached <- !is.na(index_hit)
   nodes <- data.table::data.table(
@@ -59,7 +78,7 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
   edges <- data.table::data.table(
     id = character(), source = character(), target = character(),
     anchor_ref_id = character(), anchor_role = character(), relationship = character(),
-    confidence = character()
+    confidence = character(), edge_type = character()
   )
   upward_frontier <- upward_ids[upward_ids %in% index$ref_id]
   downward_frontier <- downward_ids[downward_ids %in% index$ref_id]
@@ -95,11 +114,14 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
         if (!nrow(candidates)) next
         candidates$next_ref_id <- if (identical(direction, "upward")) candidates$target_ref_id else candidates$source_ref_id
         data.table::setorder(candidates, anchor_rank, source_ref_id, target_ref_id)
-        add_ids <- unique(candidates$next_ref_id[!candidates$next_ref_id %in% nodes$ref_id])
+        additions <- candidates[!candidates$next_ref_id %in% nodes$ref_id, ]
+        additions <- additions[!duplicated(additions$next_ref_id), ]
+        add_ids <- additions$next_ref_id
         available <- max_nodes - nrow(nodes)
         if (length(add_ids) > available) {
           truncated_nodes <- truncated_nodes + length(add_ids) - available
-          add_ids <- head(add_ids, available)
+          additions <- head(additions, available)
+          add_ids <- additions$next_ref_id
         }
         if (length(add_ids)) {
           add_hit <- match(add_ids, index$ref_id)
@@ -126,7 +148,8 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
             anchor_ref_id = candidates$anchor_ref_id,
             anchor_role = candidates$anchor_role,
             relationship = candidates$relationship,
-            confidence = candidates$confidence
+            confidence = candidates$confidence,
+            edge_type = candidates$edge_type
           )), use.names = TRUE)
         }
         next_cached <- add_ids[add_ids %in% index$ref_id]
@@ -178,6 +201,8 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
       missing_root_ref_ids = root_ids[!root_cached],
       max_depth = max_depth,
       max_nodes = max_nodes,
+      include_edge_types = include_edge_types,
+      exclude_edge_types = exclude_edge_types,
       returned_nodes = nrow(nodes),
       returned_edges = nrow(edges),
       external_nodes = sum(nodes$node_type == "external"),
@@ -186,6 +211,33 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
     nodes = nodes,
     edges = edges
   )
+}
+
+.litxr_literature_graph_edge_type <- function(relationship, anchor_role) {
+  relationship <- tolower(as.character(relationship))
+  anchor_role <- tolower(as.character(anchor_role))
+  relationship[is.na(relationship)] <- ""
+  anchor_role[is.na(anchor_role)] <- ""
+  foundation <- grepl("builds_on|foundation", relationship) | grepl("foundation", anchor_role)
+  extension <- !foundation & grepl("extends", relationship)
+  comparison <- !foundation & !extension & grepl("compare|contrast", relationship)
+  data.table::fifelse(
+    foundation,
+    "foundation",
+    data.table::fifelse(extension, "extension", data.table::fifelse(comparison, "comparison", "context"))
+  )
+}
+
+.litxr_literature_graph_edge_types <- function(types) {
+  if (is.null(types) || !length(types)) return(character())
+  types <- unique(tolower(trimws(as.character(types))))
+  types <- types[!is.na(types) & nzchar(types)]
+  allowed <- c("foundation", "extension", "comparison", "context")
+  invalid <- setdiff(types, allowed)
+  if (length(invalid)) {
+    stop("Unknown literature graph edge type(s): ", paste(invalid, collapse = ", "), call. = FALSE)
+  }
+  types
 }
 
 .litxr_literature_graph_digest_details <- function(digests, ref_ids) {

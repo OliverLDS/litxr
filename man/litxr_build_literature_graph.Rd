@@ -10,11 +10,14 @@ litxr_build_literature_graph(
   max_depth = 2L,
   max_nodes = 100L,
   upward_ref_ids = NULL,
-  downward_ref_ids = NULL
+  downward_ref_ids = NULL,
+  include_edge_types = NULL,
+  exclude_edge_types = NULL
 )
 }
 \arguments{
-\item{ref_ids}{Deprecated alias for \code{upward_ref_ids}.}
+\item{ref_ids}{Bare reference ids whose anchored references and local citing
+papers are both traced.}
 
 \item{config}{Optional parsed config list or config path.}
 
@@ -26,6 +29,11 @@ Default: \code{2}.}
 \item{upward_ref_ids}{Bare reference ids whose anchored references are traced.}
 
 \item{downward_ref_ids}{Bare reference ids whose local citing papers are traced.}
+
+\item{include_edge_types}{Optional edge categories to retain: foundation,
+extension, comparison, or context.}
+
+\item{exclude_edge_types}{Optional edge categories to remove.}
 }
 \value{
 A list with \code{meta}, \code{nodes}, and \code{edges} data tables.
