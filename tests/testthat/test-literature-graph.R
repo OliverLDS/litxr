@@ -74,6 +74,8 @@ stopifnot(identical(graph$nodes[node_type == "external", ref_id], "10.1000/exter
 stopifnot(identical(graph$nodes[ref_id == "2501.00003", depth], 2L))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", title], "Root paper title"))
 stopifnot(identical(graph$nodes[ref_id == "2501.00002", title], "Cached parent title"))
+stopifnot(identical(graph$nodes[ref_id == "10.1000/external", title], "External work"))
+stopifnot(identical(graph$nodes[ref_id == "10.1000/external", title], "External work"))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", summary], "Root-paper summary."))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", theoretical_mechanism], "Root-paper mechanism."))
 stopifnot(identical(graph$nodes[ref_id == "2501.00001", github_urls], "https://github.com/example/root-paper"))

@@ -190,6 +190,37 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
       nodes$theoretical_mechanism[use_details] <- details$theoretical_mechanism[detail_hit[use_details]]
       nodes$github_urls[use_details] <- details$github_urls[detail_hit[use_details]]
     }
+    anchor_title_rows <- lapply(seq_along(detail_digests), function(i) {
+      digest <- detail_digests[[i]]
+      if (is.null(digest) || is.null(digest$anchor_references) || !length(digest$anchor_references)) return(NULL)
+      anchors <- data.table::as.data.table(digest$anchor_references)
+      if (!nrow(anchors) || !all(c("anchor_ref_id", "anchor_title") %in% names(anchors))) return(NULL)
+      anchor_ref_id <- vapply(as.character(anchors$anchor_ref_id), .litxr_llm_digest_index_key, character(1L))
+      anchor_title <- as.character(anchors$anchor_title)
+      keep <- !is.na(anchor_ref_id) & nzchar(anchor_ref_id) & !is.na(anchor_title) & nzchar(anchor_title)
+      if (!any(keep)) return(NULL)
+      data.table::data.table(
+        source_ref_id = detail_rows$ref_id[[i]],
+        anchor_ref_id = anchor_ref_id[keep],
+        anchor_title = anchor_title[keep]
+      )
+    })
+    anchor_title_rows <- anchor_title_rows[lengths(anchor_title_rows) > 0L]
+    if (length(anchor_title_rows) && nrow(edges)) {
+      anchor_title_rows <- data.table::rbindlist(anchor_title_rows, use.names = TRUE)
+      anchor_keys <- paste(anchor_title_rows$source_ref_id, anchor_title_rows$anchor_ref_id, sep = "\r")
+      edge_keys <- paste(edges$source, edges$anchor_ref_id, sep = "\r")
+      anchor_title_hit <- match(edge_keys, anchor_keys)
+      fallback_titles <- data.table::data.table(
+        ref_id = edges$target[!is.na(anchor_title_hit)],
+        title = anchor_title_rows$anchor_title[anchor_title_hit[!is.na(anchor_title_hit)]]
+      )
+      fallback_titles <- fallback_titles[!duplicated(ref_id), ]
+      fallback_hit <- match(nodes$ref_id, fallback_titles$ref_id)
+      use_fallback <- nodes$node_type == "external" &
+        (is.na(nodes$title) | !nzchar(nodes$title)) & !is.na(fallback_hit)
+      nodes$title[use_fallback] <- fallback_titles$title[fallback_hit[use_fallback]]
+    }
   }
   data.table::setorder(nodes, depth, ref_id)
   data.table::setorder(edges, source, target, id)
