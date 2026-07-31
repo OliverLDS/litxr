@@ -22,7 +22,10 @@ test_that("raw embedding metadata repair only fills narrow missing arxiv rows", 
     collection_index = c(1L, 1L),
     json_filename = c("2401_00001.json", "2401_00002.json")
   )
-  fst::write_fst(ref_rows, file.path(index_dir, "ref_arxiv.fst"))
+  fst::write_fst(
+    ref_rows[, .(arxiv_id, json_filename)],
+    file.path(index_dir, "ref_arxiv_cs_ai.fst")
+  )
 
   jsonlite::write_json(
     list(ref_id = "2401.00001", abstract = "alpha abstract"),
@@ -73,7 +76,7 @@ test_that("raw embedding metadata repair only fills narrow missing arxiv rows", 
   )
   expect_error(
     litxr:::.litxr_repair_embedding_raw_metadata_index("arxiv_cs_ai", cfg, field = "abstract"),
-    "not present in ref_arxiv.fst"
+    "not present in ref_arxiv_cs_ai.fst"
   )
 })
 
@@ -99,10 +102,9 @@ test_that("raw embedding metadata repair accepts legacy ref_id raw key", {
   fst::write_fst(
     data.table::data.table(
       arxiv_id = c("2401.00001"),
-      collection_index = c(1L),
       json_filename = c("2401_00001.json")
     ),
-    file.path(index_dir, "ref_arxiv.fst")
+    file.path(index_dir, "ref_arxiv_cs_ai.fst")
   )
   jsonlite::write_json(
     list(ref_id = "2401.00001", abstract = "alpha abstract"),
@@ -125,10 +127,9 @@ test_that("raw embedding metadata repair accepts legacy ref_id raw key", {
   fst::write_fst(
     data.table::data.table(
       arxiv_id = c("2401.00001", "2401.00002"),
-      collection_index = c(1L, 1L),
       json_filename = c("2401_00001.json", "2401_00002.json")
     ),
-    file.path(index_dir, "ref_arxiv.fst")
+    file.path(index_dir, "ref_arxiv_cs_ai.fst")
   )
 
   result <- litxr:::.litxr_repair_embedding_raw_metadata_index("arxiv_cs_ai", cfg, field = "abstract")

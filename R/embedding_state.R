@@ -689,9 +689,9 @@ litxr_migrate_embedding_metadata_files <- function(
   raw_only_ids <- setdiff(raw_ids, ref_ids)
   if (length(raw_only_ids)) {
     stop(
-      "Raw embedding metadata contains arXiv id(s) not present in ref_arxiv_",
-      collection_id,
-      ".fst: ",
+      "Raw embedding metadata contains arXiv id(s) not present in ",
+      basename(ref_path),
+      ": ",
       paste(raw_only_ids, collapse = ", "),
       call. = FALSE
     )
