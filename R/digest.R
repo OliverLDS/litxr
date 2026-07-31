@@ -607,6 +607,13 @@ litxr_validate_llm_digest <- function(digest) {
         litxr_validate_anchor_references,
         ref_id = digest$ref_id %||% NULL
       )
+      if (identical(schema_version, "v5")) {
+        anchors <- .litxr_normalize_anchor_references(digest$anchor_references)
+        .litxr_validate_anchor_reference_role(
+          anchors$anchor_role,
+          allowed = .litxr_anchor_reference_levels("v5")
+        )
+      }
     }
     if ("citation_logic_nodes" %in% names(digest)) {
       .litxr_validate_inline_llm_table_field(

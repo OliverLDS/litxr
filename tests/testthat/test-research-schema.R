@@ -167,6 +167,17 @@ digest_template_v5$formulas <- list(list(
   assumptions = c("The feasible set is bounded.")
 ))
 stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v5))))
+digest_template_v5$anchor_references <- data.table::data.table(
+  anchor_rank = 1L,
+  anchor_ref_id = "1409.0473",
+  anchor_role = "methodological_foundation",
+  relationship_to_current_paper = "builds_on",
+  confidence = "high"
+)
+stopifnot(isTRUE(invisible(litxr::litxr_validate_llm_digest(digest_template_v5))))
+bad_v5_anchor_role <- digest_template_v5
+bad_v5_anchor_role$anchor_references$anchor_role <- "motivation"
+stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v5_anchor_role), silent = TRUE), "try-error"))
 bad_v5_formula <- digest_template_v5
 bad_v5_formula$formulas[[1]]$source_location <- NULL
 stopifnot(inherits(try(litxr::litxr_validate_llm_digest(bad_v5_formula), silent = TRUE), "try-error"))

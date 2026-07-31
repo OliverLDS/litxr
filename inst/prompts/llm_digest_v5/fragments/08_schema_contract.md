@@ -53,7 +53,11 @@ Structured extraction fields:
 
 Inline retrieval blocks:
 - anchor_references: up to three prior works that anchor, motivate, compare with, or frame the
-  paper.
+  paper. Every object uses anchor_role from exactly: theoretical_foundation,
+  conceptual_foundation, methodological_foundation, empirical_benchmark, main_comparison,
+  review_anchor, or unknown. Every object uses relationship_to_current_paper from exactly:
+  builds_on, extends, tests, applies, compares_with, contradicts, critiques, replicates,
+  generalizes, narrows, uses_as_context, or unknown.
 - citation_logic_nodes: reusable citation-ready semantic claims this paper can support in future
   writing.
 

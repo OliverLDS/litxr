@@ -143,6 +143,14 @@ identification is claimed.
   `very_high`, `not_applicable`, `unknown`.
 - `limitations`: short evidence limitations.
 
+For schema `v5`, `anchor_references$anchor_role` is one of
+`theoretical_foundation`, `conceptual_foundation`,
+`methodological_foundation`, `empirical_benchmark`, `main_comparison`,
+`review_anchor`, or `unknown`. Its
+`relationship_to_current_paper` is one of `builds_on`, `extends`, `tests`,
+`applies`, `compares_with`, `contradicts`, `critiques`, `replicates`,
+`generalizes`, `narrows`, `uses_as_context`, or `unknown`.
+
 For schema `v5`, `formulas` is optional and defaults to `[]`. Each retained
 formula contains `formula_id`, `latex`, `display_name`, `source_location`,
 `symbols` (objects with `symbol` and `meaning`),
@@ -162,6 +170,12 @@ Use `scripts/build_literature_graph.R` to write graph JSON from one or more
 bare root ids. The defaults are two anchor hops and 100 returned nodes. Use
 `scripts/render_literature_graph.R` to turn that JSON into a Cytoscape.js HTML
 viewer with hierarchy and network layouts, filtering, and node or edge details.
+
+Human corrections belong in `log/manual_literature_anchor_edges.tsv`. Add rows
+through `scripts/add_manual_literature_anchor_edge.R`; the graph reader overlays
+these four-column rows (`source_ref_id`, `target_ref_id`, `anchor_role`,
+`relationship`) on the generated edge index. The last manual row for a
+source/target pair wins without rewriting the generated index.
 
 ## Digest Schema V2/V3
 

@@ -1,3 +1,15 @@
+# litxr 0.1.8.14
+
+- Hardened V5 anchor-reference guidance and validation with explicit canonical
+  anchor-role and relationship enums, while retaining the broader legacy role
+  vocabulary for V3 and V4 digests.
+- Added `scripts/add_manual_literature_anchor_edge.R` for validated,
+  append-only human relationship corrections in
+  `log/manual_literature_anchor_edges.tsv`.
+- Made literature-graph reads overlay manual edges on
+  `index/literature_anchor_edges.fst`; the final manual row for a source/target
+  pair takes precedence without changing generated-edge sync.
+
 # litxr 0.1.8.13
 
 - Added `index/literature_anchor_edges.fst` and

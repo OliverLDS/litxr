@@ -14,6 +14,7 @@ Instructions:
 8. `ranked_contributions` is an array of objects, never an array of strings. Every object must contain `rank`, `contribution_type`, `contribution`, and `reason`.
 9. `evidence_shape.evidence_mode`, `evidence_shape.inference_type`, and `evidence_shape.strength_level` must use only the enum values stated in the schema contract below; do not invent compound values.
 10. This extraction is in `{{mode}}` mode with prompt_version `{{prompt_version}}`.
+11. In `anchor_references`, use only the anchor_role and relationship_to_current_paper enum values stated in the schema contract. Do not invent near-synonyms.
 
 Return JSON matching this schema exactly:
 {{template_json}}

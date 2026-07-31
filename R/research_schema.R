@@ -1502,13 +1502,9 @@ litxr_validate_paper_type <- function(x) {
   out
 }
 
-.litxr_validate_anchor_reference_role <- function(x) {
+.litxr_validate_anchor_reference_role <- function(x, allowed = .litxr_anchor_reference_levels()) {
   normalized <- .litxr_normalize_anchor_reference_role(x)
-  bad <- !(normalized %in% c(
-    "theoretical_foundation", "conceptual_foundation", "methodological_foundation",
-    "empirical_benchmark", "main_comparison", "motivation", "contrasting_view",
-    "problem_origin", "application_context", "review_anchor", "policy_context", "unknown"
-  ))
+  bad <- !(normalized %in% allowed)
   if (any(bad)) {
     stop("Invalid anchor role value(s): ", paste(unique(as.character(x[bad])), collapse = ", "), call. = FALSE)
   }
@@ -1571,8 +1567,8 @@ litxr_validate_paper_type <- function(x) {
   invisible(TRUE)
 }
 
-.litxr_anchor_reference_levels <- function() {
-  c(
+.litxr_anchor_reference_levels <- function(schema_version = NULL) {
+  legacy_levels <- c(
     "theoretical_foundation",
     "conceptual_foundation",
     "methodological_foundation",
@@ -1586,6 +1582,18 @@ litxr_validate_paper_type <- function(x) {
     "policy_context",
     "unknown"
   )
+  if (identical(schema_version, "v5")) {
+    return(c(
+      "theoretical_foundation",
+      "conceptual_foundation",
+      "methodological_foundation",
+      "empirical_benchmark",
+      "main_comparison",
+      "review_anchor",
+      "unknown"
+    ))
+  }
+  legacy_levels
 }
 
 .litxr_citation_logic_type_levels <- function() {

@@ -93,18 +93,16 @@ Collection-local storage uses:
 - `fulltxt_md/`
 - `llm_json/`
 
-Project-level canonical data lives under `project.data_root/`, including:
+Project-level data lives under `project.data_root/`, including:
 
-- `index/ref_aliases.fst`
-- `index/entities.fst`
-- `index/entity_collections.fst`
-- `index/entity_status.fst`
-- `index/references.fst`
-- `index/reference_collections.fst`
-- `index/sync_state.fst`
-- `embeddings/`
-- `md/`
-- `llm/`
+- `ref/<collection_id>/` for reference JSON
+- `index/ref_identity_map.fst`, `index/ref_arxiv.fst`, `index/ref_doi.fst`,
+  and `index/ref_isbn.fst` for thin reference indexes
+- `index/llm_digest.fst` and `index/literature_anchor_edges.fst` for digest
+  and literature-relationship indexes
+- `digest/llm/` for current LLM digest JSON
+- `corpus/` and `queries/` for embedding and lexical search assets
+- `log/` for sync history and manual relationship corrections
 
 ## Scripts
 
@@ -126,8 +124,8 @@ compacts that delta into the full collection index once at the end by default.
 use `--complete` for the full digest rendering.
 The interactive digest prompt is built by `litxr_llm_digest_prompt()` from
 package fragments under `inst/prompts/`. New interactive prompts use schema
-`v4`, which adds ranked contributions, reader-misconception checks, business
-relevance pathways, and a general `evidence_shape` field.
+`v5`, which retains the V4 digest contract and adds optional extracted
+formulas.
 
 The v0.1.0 refactor makes `entity_id` the internal identity key while keeping
 `ref_id` as the surface-facing alias used by users and scripts. Rich payload

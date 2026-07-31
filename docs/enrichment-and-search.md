@@ -229,7 +229,7 @@ Example:
 
 ```sh
 scripts/run_llm_digest_interactive.sh \
-  --ref-id arxiv:2505.07087
+  --ref-id 2505.07087
 ```
 
 The shell wrapper checks whether the digest already exists, generates the

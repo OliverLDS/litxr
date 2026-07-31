@@ -10,17 +10,20 @@
   )
 }
 
-.litxr_read_literature_anchor_edges <- function(cfg) {
+.litxr_read_literature_anchor_edges <- function(cfg, include_manual = TRUE) {
   path <- .litxr_project_literature_anchor_edges_path(cfg)
-  if (!file.exists(path)) return(.litxr_empty_literature_anchor_edges())
-  rows <- tryCatch(
-    fst::read_fst(path, as.data.table = TRUE),
-    error = function(e) .litxr_empty_literature_anchor_edges()
-  )
+  rows <- if (file.exists(path)) {
+    tryCatch(
+      fst::read_fst(path, as.data.table = TRUE),
+      error = function(e) .litxr_empty_literature_anchor_edges()
+    )
+  } else {
+    .litxr_empty_literature_anchor_edges()
+  }
   rows <- data.table::as.data.table(rows)
   required <- names(.litxr_empty_literature_anchor_edges())
   if (!nrow(rows) || !all(required %in% names(rows))) {
-    return(.litxr_empty_literature_anchor_edges())
+    rows <- .litxr_empty_literature_anchor_edges()
   }
   rows <- rows[, required, with = FALSE]
   char_cols <- setdiff(required, "anchor_rank")
@@ -31,6 +34,64 @@
       !is.na(target_ref_id) & nzchar(target_ref_id),
     
   ]
+  if (isTRUE(include_manual)) {
+    manual_path <- file.path(.litxr_project_log_dir(cfg), "manual_literature_anchor_edges.tsv")
+    if (file.exists(manual_path)) {
+      manual <- data.table::fread(
+        manual_path,
+        sep = "\t",
+        header = TRUE,
+        colClasses = "character",
+        showProgress = FALSE
+      )
+      manual_columns <- c("source_ref_id", "target_ref_id", "anchor_role", "relationship")
+      if (!identical(names(manual), manual_columns)) {
+        stop(
+          "Manual literature anchor edge log must contain exactly: ",
+          paste(manual_columns, collapse = ", "),
+          call. = FALSE
+        )
+      }
+      if (nrow(manual)) {
+        manual[, row_order__ := seq_len(.N)]
+        manual[, source_ref_id := tolower(trimws(as.character(source_ref_id)))]
+        manual[, target_ref_id := tolower(trimws(as.character(target_ref_id)))]
+        manual[, anchor_role := trimws(as.character(anchor_role))]
+        manual[, relationship := trimws(as.character(relationship))]
+        id_ok <- grepl("^[0-9]{4}\\.[0-9]{4,5}$", manual$source_ref_id) |
+          grepl("^10\\.[^[:space:]/]+/.+$", manual$source_ref_id)
+        target_ok <- grepl("^[0-9]{4}\\.[0-9]{4,5}$", manual$target_ref_id) |
+          grepl("^10\\.[^[:space:]/]+/.+$", manual$target_ref_id)
+        if (!all(id_ok & target_ok)) {
+          stop("Manual literature anchor edge log requires bare arXiv or DOI ids.", call. = FALSE)
+        }
+        role_ok <- manual$anchor_role %in% .litxr_anchor_reference_levels("v5")
+        relationship_ok <- manual$relationship %in% c(
+          "builds_on", "extends", "tests", "applies", "compares_with", "contradicts",
+          "critiques", "replicates", "generalizes", "narrows", "uses_as_context", "unknown"
+        )
+        if (!all(role_ok)) stop("Manual literature anchor edge log contains an invalid anchor_role.", call. = FALSE)
+        if (!all(relationship_ok)) stop("Manual literature anchor edge log contains an invalid relationship.", call. = FALSE)
+        manual <- manual[!duplicated(paste(source_ref_id, target_ref_id, sep = "\r"), fromLast = TRUE), ]
+        data.table::setorder(manual, row_order__)
+        manual[, anchor_rank := seq_len(.N), by = source_ref_id]
+        manual <- manual[, .(
+          source_ref_id,
+          target_ref_id,
+          anchor_ref_id = target_ref_id,
+          anchor_rank,
+          anchor_role,
+          relationship,
+          confidence = NA_character_
+        )]
+        if (nrow(manual)) {
+          manual_key <- paste(manual$source_ref_id, manual$target_ref_id, sep = "\r")
+          auto_key <- paste(rows$source_ref_id, rows$target_ref_id, sep = "\r")
+          rows <- data.table::rbindlist(list(rows[!auto_key %in% manual_key, ], manual), use.names = TRUE)
+        }
+      }
+    }
+  }
   data.table::setorder(rows, source_ref_id, anchor_rank, target_ref_id)
   rows[]
 }
@@ -142,7 +203,7 @@
   touched <- unique(vapply(as.character(ref_ids %||% character()), .litxr_llm_digest_index_key, character(1L)))
   touched <- touched[!is.na(touched) & nzchar(touched)]
   if (!length(touched)) {
-    existing <- .litxr_read_literature_anchor_edges(cfg)
+    existing <- .litxr_read_literature_anchor_edges(cfg, include_manual = FALSE)
     return(list(
       path = .litxr_project_literature_anchor_edges_path(cfg),
       mode = mode,
@@ -152,7 +213,7 @@
       edges_total = nrow(existing)
     ))
   }
-  existing <- .litxr_read_literature_anchor_edges(cfg)
+  existing <- .litxr_read_literature_anchor_edges(cfg, include_manual = FALSE)
   edges_removed <- sum(existing$source_ref_id %in% touched)
   retained <- existing[!existing$source_ref_id %in% touched, ]
   merged <- data.table::rbindlist(list(retained, incoming), use.names = TRUE, fill = TRUE)
