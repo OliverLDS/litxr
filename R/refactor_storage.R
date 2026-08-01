@@ -420,15 +420,23 @@
     }
   }
 
-  arxiv_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), collection_index = integer(), json_filename = character(), doi = character())
+  arxiv_collection_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), collection_index = integer(), json_filename = character(), doi = character())
   doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), collection_index = integer(), json_filename = character())
   isbn_rows <- if (length(isbn_rows_list)) data.table::rbindlist(isbn_rows_list, fill = TRUE) else data.table::data.table(isbn = character(), collection_index = integer(), json_filename = character())
 
-  if (nrow(arxiv_rows)) {
-    arxiv_rows$arxiv_version <- suppressWarnings(as.integer(arxiv_rows$arxiv_version))
-    arxiv_rows$arxiv_version[is.na(arxiv_rows$arxiv_version)] <- 0L
-    data.table::setorder(arxiv_rows, arxiv_id, -arxiv_version)
+  if (nrow(arxiv_collection_rows)) {
+    arxiv_collection_rows$arxiv_version <- suppressWarnings(as.integer(arxiv_collection_rows$arxiv_version))
+    arxiv_collection_rows$arxiv_version[is.na(arxiv_collection_rows$arxiv_version)] <- 0L
+
+    # Preserve membership in every source collection before creating the global projection.
+    data.table::setorder(arxiv_collection_rows, collection_index, arxiv_id, -arxiv_version)
+    arxiv_collection_rows <- arxiv_collection_rows[
+      !duplicated(arxiv_collection_rows, by = c("collection_index", "arxiv_id")),
+    ]
+    arxiv_rows <- arxiv_collection_rows[order(arxiv_id, -arxiv_version), ]
     arxiv_rows <- arxiv_rows[!duplicated(arxiv_rows$arxiv_id), ]
+  } else {
+    arxiv_rows <- arxiv_collection_rows
   }
   if (nrow(doi_rows)) {
     dup_doi <- duplicated(doi_rows$doi)
@@ -457,6 +465,7 @@
     doi_folders = doi_branch_folders,
     isbn_folders = isbn_branch_folders,
     arxiv_rows = arxiv_rows,
+    arxiv_collection_rows = arxiv_collection_rows,
     doi_rows = doi_rows,
     isbn_rows = isbn_rows
   )
@@ -623,15 +632,16 @@
   inputs <- .litxr_sync_thin_ref_store_inputs(cfg, collection_ids = collection_ids, json_mtime_after = json_mtime_after)
   selected_ids <- inputs$selected_collection_ids
   arxiv_rows <- inputs$arxiv_rows
+  arxiv_collection_rows <- inputs$arxiv_collection_rows
   doi_rows <- inputs$doi_rows
   isbn_rows <- inputs$isbn_rows
   current_mode <- if (is.null(json_mtime_after) && is.null(collection_ids)) "full" else "incremental"
   remove_missing <- is.null(json_mtime_after) && is.null(collection_ids)
   diff_dir <- .litxr_ensure_project_log_dir(cfg)
-  if (nrow(arxiv_rows)) {
+  if (nrow(arxiv_collection_rows)) {
     identities <- data.table::data.table(
-      arxiv_id = arxiv_rows$arxiv_id,
-      doi = if ("doi" %in% names(arxiv_rows)) trimws(arxiv_rows$doi) else rep(NA_character_, nrow(arxiv_rows))
+      arxiv_id = arxiv_collection_rows$arxiv_id,
+      doi = if ("doi" %in% names(arxiv_collection_rows)) trimws(arxiv_collection_rows$doi) else rep(NA_character_, nrow(arxiv_collection_rows))
     )
     identities <- identities[!is.na(identities$doi) & nzchar(identities$doi), ]
     if (nrow(identities)) {
@@ -692,20 +702,24 @@
   }
 
   arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows_write, "arxiv_id", remove_missing = remove_missing)
-  if (nrow(arxiv_rows)) {
-    arxiv_collection_indices <- unique(as.integer(arxiv_rows$collection_index))
+  if (nrow(arxiv_collection_rows)) {
+    arxiv_collection_indices <- unique(as.integer(arxiv_collection_rows$collection_index))
     arxiv_collection_indices <- arxiv_collection_indices[!is.na(arxiv_collection_indices) & arxiv_collection_indices >= 1L]
     if (length(arxiv_collection_indices)) {
       collections <- .litxr_config_collections(cfg)
-      for (collection_index in arxiv_collection_indices) {
-        if (collection_index > length(collections)) {
+      for (current_collection_index in arxiv_collection_indices) {
+        if (current_collection_index > length(collections)) {
           next
         }
-        collection_id <- as.character(collections[[collection_index]]$collection_id %||% collections[[collection_index]]$journal_id %||% NA_character_)
+        collection_id <- as.character(collections[[current_collection_index]]$collection_id %||% collections[[current_collection_index]]$journal_id %||% NA_character_)
         if (is.na(collection_id) || !nzchar(collection_id)) {
           next
         }
-        collection_rows <- arxiv_rows[arxiv_rows$collection_index == collection_index, c("arxiv_id", "json_filename"), with = FALSE]
+        collection_rows <- arxiv_collection_rows[
+          collection_index == current_collection_index,
+          c("arxiv_id", "json_filename"),
+          with = FALSE
+        ]
         if (!nrow(collection_rows)) {
           next
         }

@@ -84,7 +84,10 @@ test_that("thin ref store sync collapses arxiv versions before inferring identit
   expect_true(is.list(migration))
   arxiv_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_arxiv_path(project$cfg), as.data.table = TRUE))
   identity_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_project_ref_identity_index_path(project$cfg), as.data.table = TRUE))
-  expect_identical(names(arxiv_store), c("arxiv_id"))
+  expect_identical(
+    names(arxiv_store),
+    c("arxiv_id", "arxiv_version", "collection_index", "json_filename", "doi")
+  )
   expect_identical(sort(names(identity_store)), c("arxiv_id", "doi"))
   if (file.exists(litxr:::.litxr_ref_doi_path(project$cfg))) {
     doi_store <- data.table::as.data.table(fst::read_fst(litxr:::.litxr_ref_doi_path(project$cfg), as.data.table = TRUE))
@@ -181,6 +184,48 @@ test_that("arxiv-side identity extraction ignores blank DOI values", {
   identity_map <- data.table::as.data.table(litxr::litxr_read_ref_identity_map(project$cfg))
   expect_false(any(identity_map$arxiv_id == "2502.54321"))
   expect_false(any(identity_map$doi == ""))
+})
+
+test_that("thin sync preserves multi-subject arxiv membership in local indexes", {
+  project <- make_temp_sync_project()
+  cfg <- project$cfg
+  cs_lg <- project$arxiv_collection
+  cs_lg$collection_id <- "arxiv_cs_lg"
+  cs_lg$title <- "arXiv cs.LG"
+  cs_lg$local_path <- file.path(cfg$project$data_root, "ref", "arxiv_cs_lg")
+  cs_lg$metadata$category <- "cs.LG"
+  cs_lg$sync$search_query <- "cat:cs.LG"
+  cfg$collections[[length(cfg$collections) + 1L]] <- cs_lg
+  yaml::write_yaml(cfg, project$config_path)
+  cfg <- litxr::litxr_read_config(project$config_path)
+
+  cs_ai_dir <- litxr:::.litxr_collection_ref_dir(cfg, "arxiv_cs_ai")
+  cs_lg_dir <- litxr:::.litxr_collection_ref_dir(cfg, "arxiv_cs_lg")
+  dir.create(cs_lg_dir, recursive = TRUE, showWarnings = FALSE)
+  jsonlite::write_json(
+    list(ref_id = "arxiv:2501.12345", source_id = "2501.12345v1", arxiv_version = 1L),
+    file.path(cs_ai_dir, "arxiv_2501_12345_cs_ai.json"),
+    auto_unbox = TRUE,
+    null = "null"
+  )
+  jsonlite::write_json(
+    list(ref_id = "arxiv:2501.12345", source_id = "2501.12345v2", arxiv_version = 2L),
+    file.path(cs_lg_dir, "arxiv_2501_12345_cs_lg.json"),
+    auto_unbox = TRUE,
+    null = "null"
+  )
+
+  litxr::litxr_sync_thin_ref_stores_from_json(cfg)
+  global_rows <- fst::read_fst(litxr:::.litxr_ref_arxiv_path(cfg), as.data.table = TRUE)
+  cs_ai_rows <- fst::read_fst(litxr:::.litxr_ref_arxiv_collection_path(cfg, "arxiv_cs_ai"), as.data.table = TRUE)
+  cs_lg_rows <- fst::read_fst(litxr:::.litxr_ref_arxiv_collection_path(cfg, "arxiv_cs_lg"), as.data.table = TRUE)
+
+  expect_equal(sum(global_rows$arxiv_id == "2501.12345"), 1L)
+  expect_identical(global_rows[arxiv_id == "2501.12345", json_filename], "arxiv_2501_12345_cs_lg.json")
+  expect_identical(cs_ai_rows$arxiv_id, "2501.12345")
+  expect_identical(cs_ai_rows$json_filename, "arxiv_2501_12345_cs_ai.json")
+  expect_identical(cs_lg_rows$arxiv_id, "2501.12345")
+  expect_identical(cs_lg_rows$json_filename, "arxiv_2501_12345_cs_lg.json")
 })
 
 test_that("arxiv fetch history cutoff ignores trailing zero-count days", {
