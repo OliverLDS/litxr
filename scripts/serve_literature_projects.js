@@ -76,21 +76,40 @@ function validateProject(project, filePath) {
   if (path.basename(filePath) !== `${projectId}.json`) throw new Error(`Filename does not match project_id: ${filePath}`);
   if (!name) throw new Error(`Empty project name in ${filePath}`);
   const refIds = [...new Set((project.ref_ids || []).map(normalizeRefId))];
-  const referenceCache = {};
-  const cache = project.reference_cache && typeof project.reference_cache === "object" ? project.reference_cache : {};
-  for (const refId of refIds) {
-    const entry = cache[refId];
-    if (!entry || typeof entry !== "object") continue;
+  return { schema_version: 1, project_id: projectId, name, ref_ids: refIds };
+}
+
+function referenceCachePath(projectsPath) {
+  return path.join(projectsPath, "_ref_cache.json");
+}
+
+function validateReferenceCache(cache, filePath) {
+  const rawEntries = cache && typeof cache.references === "object" && cache.references ? cache.references : {};
+  const references = {};
+  for (const [rawRefId, entry] of Object.entries(rawEntries)) {
+    const refId = normalizeRefId(rawRefId);
+    if (!entry || typeof entry !== "object") throw new Error(`Invalid cached reference in ${filePath}: ${refId}`);
     const title = String(entry.title || "").trim();
     const summary = String(entry.summary || "");
-    if (!title || !summary) continue;
-    referenceCache[refId] = {
-      title,
-      summary,
-      cached_at: String(entry.cached_at || "")
-    };
+    if (!title || !summary) throw new Error(`Incomplete cached reference in ${filePath}: ${refId}`);
+    references[refId] = { title, summary, has_digest: entry.has_digest === true, cached_at: String(entry.cached_at || "") };
   }
-  return { schema_version: 1, project_id: projectId, name, ref_ids: refIds, reference_cache: referenceCache };
+  return { schema_version: 1, references };
+}
+
+function readReferenceCache(projectsPath) {
+  const filePath = referenceCachePath(projectsPath);
+  if (!fs.existsSync(filePath)) return { schema_version: 1, references: {} };
+  return validateReferenceCache(JSON.parse(fs.readFileSync(filePath, "utf8")), filePath);
+}
+
+function writeReferenceCache(projectsPath, cache) {
+  const filePath = referenceCachePath(projectsPath);
+  const clean = validateReferenceCache(cache, filePath);
+  const temporaryPath = `${filePath}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(clean, null, 2)}\n`);
+  fs.renameSync(temporaryPath, filePath);
+  return clean;
 }
 
 function readProjects(projectsPath) {
@@ -123,12 +142,36 @@ function writeProject(projectsPath, project) {
   return clean;
 }
 
-function projectForClient(project) {
-  const referenceCache = {};
-  for (const [refId, entry] of Object.entries(project.reference_cache)) {
-    referenceCache[refId] = { title: entry.title, cached_at: entry.cached_at };
+function migrateProjectReferenceCaches(projectsPath) {
+  let sharedCache = readReferenceCache(projectsPath);
+  let cacheChanged = false;
+  for (const name of fs.readdirSync(projectsPath).filter((entry) => /^[a-z0-9][a-z0-9_]*\.json$/.test(entry))) {
+    const filePath = path.join(projectsPath, name);
+    const rawProject = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const legacyCache = rawProject.reference_cache && typeof rawProject.reference_cache === "object" ? rawProject.reference_cache : {};
+    const project = validateProject(rawProject, filePath);
+    for (const refId of project.ref_ids) {
+      const entry = legacyCache[refId];
+      if (sharedCache.references[refId] || !entry || typeof entry !== "object") continue;
+      const title = String(entry.title || "").trim();
+      const summary = String(entry.summary || "");
+      if (!title || !summary) continue;
+      sharedCache.references[refId] = { title, summary, has_digest: entry.has_digest === true, cached_at: String(entry.cached_at || "") };
+      cacheChanged = true;
+    }
+    if (Object.hasOwn(rawProject, "reference_cache")) writeProject(projectsPath, project);
   }
-  return { ...project, reference_cache: referenceCache };
+  if (cacheChanged || !fs.existsSync(referenceCachePath(projectsPath))) sharedCache = writeReferenceCache(projectsPath, sharedCache);
+  return sharedCache;
+}
+
+function projectForClient(project, cache) {
+  const visibleCache = {};
+  for (const refId of project.ref_ids) {
+    const entry = cache.references[refId];
+    if (entry) visibleCache[refId] = { title: entry.title, has_digest: entry.has_digest, cached_at: entry.cached_at };
+  }
+  return { ...project, reference_cache: visibleCache };
 }
 
 function readBody(request) {
@@ -173,19 +216,20 @@ function titleFromSummary(summary, refId) {
 
 async function hydrateReference(summaryScript, refId) {
   const summary = await run("/bin/zsh", [summaryScript, ...summaryArgs(refId)]);
-  return { title: titleFromSummary(summary, refId), summary, cached_at: new Date().toISOString() };
+  const hasDigest = /^digest_present:\s*true\s*$/mi.test(summary);
+  return { title: titleFromSummary(summary, refId), summary, has_digest: hasDigest, cached_at: new Date().toISOString() };
 }
 
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LitXR Project Library</title>
-<style>:root{--ink:#17231f;--forest:#173b35;--paper:#fffdf7;--sand:#f4f0e8;--line:#bdc7be}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--sand);font:15px Georgia,serif}header{height:62px;padding:0 22px;display:flex;align-items:center;gap:12px;background:var(--forest);color:#f7f0dc}h1{font-size:20px;margin:0}header button{margin-left:auto}main{--detail-width:42%;height:calc(100vh - 62px);display:grid;grid-template-columns:260px minmax(320px,1fr) 6px minmax(320px,var(--detail-width))}main.projects-hidden{grid-template-columns:0 minmax(320px,1fr) 6px minmax(320px,var(--detail-width))}section,aside{min-width:0;overflow:auto;background:var(--paper);border-right:1px solid var(--line)}main.projects-hidden>section:first-child{visibility:hidden;overflow:hidden;border:0}aside{border-right:0}.panel-resizer{background:var(--line);cursor:col-resize;transition:background .15s}.panel-resizer:hover,.panel-resizer.dragging{background:#648c7a}.head{position:sticky;top:0;z-index:2;padding:16px;background:var(--paper);border-bottom:1px solid var(--line)}.head h2{margin:0 0 10px;font-size:17px;color:var(--forest)}button,input{font:inherit}button{cursor:pointer;border:1px solid #8ca095;background:#f7f0dc;color:var(--forest);padding:6px 9px;border-radius:3px}input{min-width:0;border:1px solid var(--line);padding:7px}.row,.actions{display:flex;gap:6px}.row input{flex:1}.actions{margin-top:10px}.actions button{font-size:12px}.list{padding:10px}.item{width:100%;text-align:left;padding:10px;border:0;border-bottom:1px solid #e1e5dc;background:transparent;border-radius:0}.item.active{background:#e7eee5}.item strong,.item small{display:block}.item strong{line-height:1.28}.item small,.empty,.ref{color:#64736a}.empty{padding:22px;line-height:1.5}.detail{padding:20px}.detail-header{display:flex;align-items:flex-start;gap:10px}.detail h2{margin:0 0 5px;color:var(--forest);font-size:21px}.detail-body{line-height:1.55}.detail-body h1,.detail-body h2,.detail-body h3{color:var(--forest);margin:1.25em 0 .4em}.detail-body h1{font-size:21px}.detail-body h2{font-size:18px}.detail-body h3{font-size:16px}.detail-body p{margin:.55em 0}.detail-body ol,.detail-body ul{padding-left:1.35em}.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.icon{margin-left:auto;padding:4px 7px;font-size:16px;line-height:1}.detail-actions{margin-top:18px;display:flex;gap:8px}@media(max-width:900px){main,main.projects-hidden{display:block;height:auto}main>section:first-child{max-height:45vh}main.projects-hidden>section:first-child{display:none}.panel-resizer{display:none}aside{max-height:55vh;border-top:1px solid var(--line)}}</style></head>
+<style>:root{--ink:#17231f;--forest:#173b35;--paper:#fffdf7;--sand:#f4f0e8;--line:#bdc7be}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--sand);font:15px Georgia,serif}header{height:62px;padding:0 22px;display:flex;align-items:center;gap:12px;background:var(--forest);color:#f7f0dc}h1{font-size:20px;margin:0}header button{margin-left:auto}main{--detail-width:42%;height:calc(100vh - 62px);display:grid;grid-template-columns:260px minmax(320px,1fr) 6px minmax(320px,var(--detail-width))}main.projects-hidden{grid-template-columns:0 minmax(320px,1fr) 6px minmax(320px,var(--detail-width))}section,aside{min-width:0;overflow:auto;background:var(--paper);border-right:1px solid var(--line)}main.projects-hidden>section:first-child{visibility:hidden;overflow:hidden;border:0}aside{border-right:0}.panel-resizer{background:var(--line);cursor:col-resize;transition:background .15s}.panel-resizer:hover,.panel-resizer.dragging{background:#648c7a}.head{position:sticky;top:0;z-index:2;padding:16px;background:var(--paper);border-bottom:1px solid var(--line)}.head h2{margin:0 0 10px;font-size:17px;color:var(--forest)}button,input{font:inherit}button{cursor:pointer;border:1px solid #8ca095;background:#f7f0dc;color:var(--forest);padding:6px 9px;border-radius:3px}input{min-width:0;border:1px solid var(--line);padding:7px}.row,.actions{display:flex;gap:6px}.row input{flex:1}.actions{margin-top:10px}.actions button{font-size:12px}.list{padding:10px}.item{width:100%;text-align:left;padding:10px;border:0;border-bottom:1px solid #e1e5dc;background:transparent;border-radius:0}.item.active{background:#e7eee5}.item strong,.item small{display:block}.item strong{line-height:1.28}.digest-marker{display:inline-grid;place-items:center;width:13px;height:13px;margin-left:5px;border-radius:50%;background:#2f6b58;color:#fff;font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;vertical-align:1px}.item small,.empty,.ref{color:#64736a}.empty{padding:22px;line-height:1.5}.detail{padding:20px}.detail-header{display:flex;align-items:flex-start;gap:10px}.detail h2{margin:0 0 5px;color:var(--forest);font-size:21px}.detail-body{line-height:1.55}.detail-body h1,.detail-body h2,.detail-body h3{color:var(--forest);margin:1.25em 0 .4em}.detail-body h1{font-size:21px}.detail-body h2{font-size:18px}.detail-body h3{font-size:16px}.detail-body p{margin:.55em 0}.detail-body ol,.detail-body ul{padding-left:1.35em}.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.icon{margin-left:auto;padding:4px 7px;font-size:16px;line-height:1}.detail-actions{margin-top:18px;display:flex;gap:8px}@media(max-width:900px){main,main.projects-hidden{display:block;height:auto}main>section:first-child{max-height:45vh}main.projects-hidden>section:first-child{display:none}.panel-resizer{display:none}aside{max-height:55vh;border-top:1px solid var(--line)}}</style></head>
 <body><header><h1>LitXR Project Library</h1><button id="toggle-projects" type="button">Hide projects</button></header><main id="app-main"><section><div class="head"><h2>Projects</h2><div class="row"><input id="project-name" placeholder="New project name"><button id="add-project">Add</button></div><div class="actions"><button id="delete" disabled>Delete</button></div></div><div id="projects" class="list"></div></section><section><div class="head"><h2 id="refs-title">References</h2><div class="row"><input id="ref-id" placeholder="Bare arXiv ID, DOI, or ISBN"><button id="add-ref" disabled>Add</button></div><div class="actions"><button id="export" disabled>Export .bib</button></div></div><div id="refs" class="list"></div></section><div id="panel-resizer" class="panel-resizer" role="separator" aria-label="Resize reference and summary panels" aria-orientation="vertical"></div><aside><div id="detail" class="empty">Select a reference to view its summary.</div></aside></main>
 <script>
 const state={projects:[],projectId:null,refId:null};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,options={}){const response=await fetch(url,{...options,headers:{'Content-Type':'application/json'}});const data=await response.json();if(!response.ok)throw new Error(data.error||('HTTP '+response.status));return data}
 const selected=()=>state.projects.find(p=>p.project_id===state.projectId)||null;
-function summaryHtml(summary){const out=[],paragraph=[];let list='';const flush=()=>{if(paragraph.length){out.push('<p>'+paragraph.join(' ')+'</p>');paragraph.length=0}};const close=()=>{if(list){out.push('</'+list+'>');list=''}};for(const raw of String(summary).split(/\\r?\\n/)){const line=raw.trim();if(!line){flush();close();continue}if(/^(ref_id|title):/i.test(line)||line==='research_schema')continue;if(line==='abstract'){flush();close();out.push('<h3>Abstract</h3>');continue}const heading=line.match(/^(#{1,3})\\s+(.+)/);if(heading){flush();close();out.push('<h'+heading[1].length+'>'+esc(heading[2])+'</h'+heading[1].length+'>');continue}const ordered=line.match(/^\\d+\\.\\s+(.+)/);const bullet=line.match(/^[-*]\\s+(.+)/);if(ordered||bullet){flush();const type=ordered?'ol':'ul';if(list&&list!==type)close();if(!list){out.push('<'+type+'>');list=type}out.push('<li>'+esc((ordered||bullet)[1])+'</li>');continue}close();paragraph.push(esc(line))}flush();close();return out.join('')}
-function render(){const projects=document.getElementById('projects');projects.innerHTML=state.projects.length?state.projects.map(p=>'<button class="item '+(p.project_id===state.projectId?'active':'')+'" data-project="'+p.project_id+'"><strong>'+esc(p.name)+'</strong><small>'+p.ref_ids.length+' references</small></button>').join(''):'<div class="empty">No projects yet.</div>';projects.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{state.projectId=b.dataset.project;state.refId=null;render();document.getElementById('detail').className='empty';document.getElementById('detail').textContent='Select a reference to view its summary.'});const project=selected();document.getElementById('delete').disabled=!project;document.getElementById('add-ref').disabled=!project;document.getElementById('export').disabled=!project||!project.ref_ids.length;document.getElementById('refs-title').textContent=project?project.name:'References';const refs=document.getElementById('refs');refs.innerHTML=!project?'<div class="empty">Select a project.</div>':project.ref_ids.length?project.ref_ids.map(id=>{const cached=project.reference_cache?.[id];return '<button class="item '+(id===state.refId?'active':'')+'" data-ref="'+esc(id)+'"><strong>'+esc(cached?.title||id)+'</strong><small>'+esc(id)+'</small></button>'}).join(''):'<div class="empty">This project has no references.</div>';refs.querySelectorAll('[data-ref]').forEach(b=>b.onclick=()=>showRef(b.dataset.ref))}
+function summaryHtml(summary){const out=[],paragraph=[];let list='';const flush=()=>{if(paragraph.length){out.push('<p>'+paragraph.join(' ')+'</p>');paragraph.length=0}};const close=()=>{if(list){out.push('</'+list+'>');list=''}};for(const raw of String(summary).split(/\\r?\\n/)){const line=raw.trim();if(!line){flush();close();continue}if(/^(ref_id|title|digest_present):/i.test(line)||line==='research_schema')continue;if(line==='abstract'){flush();close();out.push('<h3>Abstract</h3>');continue}const heading=line.match(/^(#{1,3})\\s+(.+)/);if(heading){flush();close();out.push('<h'+heading[1].length+'>'+esc(heading[2])+'</h'+heading[1].length+'>');continue}const ordered=line.match(/^\\d+\\.\\s+(.+)/);const bullet=line.match(/^[-*]\\s+(.+)/);if(ordered||bullet){flush();const type=ordered?'ol':'ul';if(list&&list!==type)close();if(!list){out.push('<'+type+'>');list=type}out.push('<li>'+esc((ordered||bullet)[1])+'</li>');continue}close();paragraph.push(esc(line))}flush();close();return out.join('')}
+function render(){const projects=document.getElementById('projects');projects.innerHTML=state.projects.length?state.projects.map(p=>'<button class="item '+(p.project_id===state.projectId?'active':'')+'" data-project="'+p.project_id+'"><strong>'+esc(p.name)+'</strong><small>'+p.ref_ids.length+' references</small></button>').join(''):'<div class="empty">No projects yet.</div>';projects.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{state.projectId=b.dataset.project;state.refId=null;render();document.getElementById('detail').className='empty';document.getElementById('detail').textContent='Select a reference to view its summary.'});const project=selected();document.getElementById('delete').disabled=!project;document.getElementById('add-ref').disabled=!project;document.getElementById('export').disabled=!project||!project.ref_ids.length;document.getElementById('refs-title').textContent=project?project.name:'References';const refs=document.getElementById('refs');refs.innerHTML=!project?'<div class="empty">Select a project.</div>':project.ref_ids.length?project.ref_ids.map(id=>{const cached=project.reference_cache?.[id];const marker=cached?.has_digest?'<span class="digest-marker" title="Cached LLM digest" aria-label="Cached LLM digest">D</span>':'';return '<button class="item '+(id===state.refId?'active':'')+'" data-ref="'+esc(id)+'"><strong>'+esc(cached?.title||id)+marker+'</strong><small>'+esc(id)+'</small></button>'}).join(''):'<div class="empty">This project has no references.</div>';refs.querySelectorAll('[data-ref]').forEach(b=>b.onclick=()=>showRef(b.dataset.ref))}
 async function reload(preferred=state.projectId){const data=await api('/api/projects');state.projects=data.projects;state.projectId=state.projects.some(p=>p.project_id===preferred)?preferred:(state.projects[0]?.project_id||null);render()}
 function showDetail(refId,entry){const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<div class="detail-header"><div><h2>'+esc(entry.title)+'</h2><div class="ref">'+esc(refId)+'</div></div><button id="refresh-ref" class="icon" title="Refresh cached reference" aria-label="Refresh cached reference">↻</button></div><div class="detail-body">'+summaryHtml(entry.summary)+'</div><div class="detail-actions"><button id="remove-ref">Remove from project</button></div>';document.getElementById('refresh-ref').onclick=refreshRef;document.getElementById('remove-ref').onclick=removeRef}
 async function showRef(id){const project=selected();if(!project)return;state.refId=id;render();const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<p>Loading cached reference...</p>';try{const data=await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(id));await reload(project.project_id);state.refId=id;render();showDetail(id,data.reference)}catch(error){detail.className='empty';detail.textContent=error.message}}
@@ -214,6 +258,7 @@ async function main() {
     fs.mkdirSync(projectsPath);
   }
   if (!fs.statSync(projectsPath).isDirectory()) throw new Error(`Not a directory: ${projectsPath}`);
+  migrateProjectReferenceCaches(projectsPath);
   const scriptDir = __dirname;
   const summaryScript = path.join(scriptDir, "report_ref_summary.sh");
   const bibScript = path.join(scriptDir, "write_bib_by_ref_ids.sh");
@@ -227,14 +272,15 @@ async function main() {
         return response.end(html);
       }
       if (request.method === "GET" && parts.join("/") === "api/projects") {
-        return sendJson(response, { status: "ok", projects: readProjects(projectsPath).map(projectForClient) });
+        const cache = readReferenceCache(projectsPath);
+        return sendJson(response, { status: "ok", projects: readProjects(projectsPath).map((project) => projectForClient(project, cache)) });
       }
       if (request.method === "POST" && parts.join("/") === "api/projects") {
         const body = await readBody(request);
         const name = String(body.name || "").trim();
         if (!name) throw new Error("Project name must not be empty.");
         const id = projectIdFor(name, new Set(readProjects(projectsPath).map((p) => p.project_id)));
-        return sendJson(response, { status: "ok", project: projectForClient(writeProject(projectsPath, { project_id: id, name, ref_ids: [] })) }, 201);
+        return sendJson(response, { status: "ok", project: projectForClient(writeProject(projectsPath, { project_id: id, name, ref_ids: [] }), readReferenceCache(projectsPath)) }, 201);
       }
       if (parts[0] === "api" && parts[1] === "projects" && parts.length === 3) {
         const project = readProject(projectsPath, parts[2]);
@@ -249,32 +295,35 @@ async function main() {
           const body = await readBody(request);
           const refId = normalizeRefId(body.ref_id);
           if (!project.ref_ids.includes(refId)) project.ref_ids.push(refId);
-          if (!project.reference_cache[refId]) {
-            project.reference_cache[refId] = await hydrateReference(summaryScript, refId);
+          let cache = readReferenceCache(projectsPath);
+          if (!cache.references[refId]) {
+            cache.references[refId] = await hydrateReference(summaryScript, refId);
+            cache = writeReferenceCache(projectsPath, cache);
           }
-          return sendJson(response, { status: "ok", ref_id: refId, project: projectForClient(writeProject(projectsPath, project)) });
+          return sendJson(response, { status: "ok", ref_id: refId, project: projectForClient(writeProject(projectsPath, project), cache) });
         } else if (request.method === "DELETE" && parts.length === 5) {
           const refId = normalizeRefId(parts[4]);
           project.ref_ids = project.ref_ids.filter((id) => id !== refId);
-          delete project.reference_cache[refId];
         } else if (request.method === "GET" && parts.length === 5) {
           const refId = normalizeRefId(parts[4]);
           if (!project.ref_ids.includes(refId)) throw new Error(`Reference is not in project: ${refId}`);
-          if (!project.reference_cache[refId]) {
-            project.reference_cache[refId] = await hydrateReference(summaryScript, refId);
-            writeProject(projectsPath, project);
+          let cache = readReferenceCache(projectsPath);
+          if (!cache.references[refId]) {
+            cache.references[refId] = await hydrateReference(summaryScript, refId);
+            cache = writeReferenceCache(projectsPath, cache);
           }
-          return sendJson(response, { status: "ok", ref_id: refId, reference: project.reference_cache[refId] });
+          return sendJson(response, { status: "ok", ref_id: refId, reference: cache.references[refId] });
         } else if (request.method === "POST" && parts.length === 6 && parts[5] === "refresh") {
           const refId = normalizeRefId(parts[4]);
           if (!project.ref_ids.includes(refId)) throw new Error(`Reference is not in project: ${refId}`);
-          project.reference_cache[refId] = await hydrateReference(summaryScript, refId);
-          writeProject(projectsPath, project);
-          return sendJson(response, { status: "ok", ref_id: refId, reference: project.reference_cache[refId] });
+          const cache = readReferenceCache(projectsPath);
+          cache.references[refId] = await hydrateReference(summaryScript, refId);
+          writeReferenceCache(projectsPath, cache);
+          return sendJson(response, { status: "ok", ref_id: refId, reference: cache.references[refId] });
         } else {
           throw new Error("Unsupported project reference operation.");
         }
-        return sendJson(response, { status: "ok", project: projectForClient(writeProject(projectsPath, project)) });
+        return sendJson(response, { status: "ok", project: projectForClient(writeProject(projectsPath, project), readReferenceCache(projectsPath)) });
       }
       if (request.method === "GET" && parts[0] === "api" && parts[1] === "projects" && parts[3] === "bib") {
         const project = readProject(projectsPath, parts[2]);

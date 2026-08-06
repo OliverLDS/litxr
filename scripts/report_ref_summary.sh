@@ -283,6 +283,8 @@ if (is.null(digest)) {
   digest_missing <- FALSE
 }
 
+cat(sprintf("\ndigest_present: %s\n", if (digest_missing) "false" else "true"))
+
   to_md_lines <- function(digest, report_mode = "key") {
     scalar_text <- function(x) {
       if (is.null(x) || !length(x) || is.na(x[[1]]) || !nzchar(trimws(as.character(x[[1]])))) return(NULL)
