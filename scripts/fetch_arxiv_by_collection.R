@@ -148,9 +148,14 @@ sync_records_by_query <- function(journal, collection_ref_dir, query, page_size,
   day_journal$sync$start <- if (is.null(day_journal$sync$start)) 0L else as.integer(day_journal$sync$start)
   day_journal$sync$rows <- page_size
   day_journal$sync$limit <- page_size
+  # Offset pagination is only reliable when every request uses one fixed order.
+  day_journal$sync$sort_by <- "submittedDate"
+  day_journal$sync$sort_order <- "ascending"
 
   start <- day_journal$sync$start[[1L]]
   total_written <- 0L
+  expected_total <- NA_integer_
+  seen_ids <- character()
   repeat {
     day_journal$sync$start <- start
     if (sleep_seconds > 0) {
@@ -161,12 +166,38 @@ sync_records_by_query <- function(journal, collection_ref_dir, query, page_size,
     if (!page_n) {
       break
     }
-    litxr:::.litxr_write_journal_record_files(incoming, collection_ref_dir, day_journal)
-    total_written <- total_written + page_n
+
+    page_total <- attr(incoming, "arxiv_total_results", exact = TRUE)
+    if (is.null(page_total)) {
+      stop("arXiv API response did not report totalResults for paginated collection fetch.", call. = FALSE)
+    }
+    if (is.na(expected_total)) {
+      expected_total <- as.integer(page_total)
+    } else if (!identical(expected_total, as.integer(page_total))) {
+      stop("arXiv API totalResults changed during paginated collection fetch.", call. = FALSE)
+    }
+
+    page_ids <- as.character(incoming$ref_id)
+    new_rows <- !(page_ids %in% seen_ids)
+    if (any(new_rows)) {
+      litxr:::.litxr_write_journal_record_files(incoming[new_rows, ], collection_ref_dir, day_journal)
+      seen_ids <- c(seen_ids, page_ids[new_rows])
+      total_written <- total_written + sum(new_rows)
+    }
+    if (length(seen_ids) >= expected_total) {
+      break
+    }
     if (page_n < page_size) {
       break
     }
     start <- start + page_size
+  }
+  if (!is.na(expected_total) && length(seen_ids) != expected_total) {
+    stop(
+      "arXiv paginated collection fetch was incomplete: expected ", expected_total,
+      " unique records but received ", length(seen_ids), ".",
+      call. = FALSE
+    )
   }
   total_written
 }

@@ -196,8 +196,7 @@ for (start in seq.int(1L, length(fetch_ids), by = batch_size)) {
       stop("Unable to resolve arXiv collection for: ", as.character(row$ref_id[[1L]]), call. = FALSE)
     }
 
-    collection_dir <- litxr:::.litxr_resolve_local_path(cfg, collection$local_path)
-    litxr:::.litxr_ensure_collection_ref_dir(cfg, collection$collection_id)
+    collection_dir <- litxr:::.litxr_ensure_collection_ref_dir(cfg, collection$collection_id)
     json_path <- file.path(collection_dir, paste0(litxr:::.litxr_record_slug(data.table::data.table(ref_id = row$ref_id[[1L]], doi = NA_character_)), ".json"))
     if (!isTRUE(parsed$force) && file.exists(json_path)) {
       next

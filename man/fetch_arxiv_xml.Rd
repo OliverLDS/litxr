@@ -9,6 +9,8 @@ fetch_arxiv_xml(
   search_query = NULL,
   start = NULL,
   max_results = 100L,
+  sort_by = NULL,
+  sort_order = NULL,
   retry_max = 6L,
   retry_backoff_seconds = 30
 )
@@ -21,6 +23,10 @@ fetch_arxiv_xml(
 \item{start}{Result offset.}
 
 \item{max_results}{Maximum number of records to request.}
+
+\item{sort_by}{Optional stable arXiv sort field for search queries.}
+
+\item{sort_order}{Optional sort order for \code{sort_by}.}
 
 \item{retry_max}{Maximum number of retries after rate limiting or transient
 request failure.}

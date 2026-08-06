@@ -23,6 +23,8 @@
 #' @param search_query Optional arXiv search query.
 #' @param start Result offset.
 #' @param max_results Maximum number of records to request.
+#' @param sort_by Optional stable arXiv sort field for search queries.
+#' @param sort_order Optional sort order for `sort_by`.
 #' @param retry_max Maximum number of retries after rate limiting or transient
 #'   request failure.
 #' @param retry_backoff_seconds Base backoff in seconds for arXiv rate limiting.
@@ -34,6 +36,8 @@ fetch_arxiv_xml <- function(
   search_query = NULL,
   start = NULL,
   max_results = 100L,
+  sort_by = NULL,
+  sort_order = NULL,
   retry_max = 6L,
   retry_backoff_seconds = 30
 ) {
@@ -50,6 +54,12 @@ fetch_arxiv_xml <- function(
 
   if (!is.null(search_query) && nzchar(search_query)) {
     req <- httr2::req_url_query(req, search_query = search_query, max_results = as.integer(max_results))
+    if (!is.null(sort_by) && length(sort_by) && nzchar(sort_by[[1L]])) {
+      req <- httr2::req_url_query(req, sortBy = as.character(sort_by[[1L]]))
+    }
+    if (!is.null(sort_order) && length(sort_order) && nzchar(sort_order[[1L]])) {
+      req <- httr2::req_url_query(req, sortOrder = as.character(sort_order[[1L]]))
+    }
   }
 
   resp <- NULL

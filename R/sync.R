@@ -1074,6 +1074,8 @@ litxr_add_refs <- function(
   batch_size <- if (is.null(journal$sync$rows)) 100L else as.integer(journal$sync$rows)
   delay_seconds <- if (is.null(journal$sync$delay_seconds)) 3 else as.numeric(journal$sync$delay_seconds)
   start <- if (is.null(journal$sync$start)) 0L else as.integer(journal$sync$start)
+  sort_by <- if (is.null(journal$sync$sort_by)) NULL else as.character(journal$sync$sort_by)
+  sort_order <- if (is.null(journal$sync$sort_order)) NULL else as.character(journal$sync$sort_order)
   entries <- list()
 
   repeat {
@@ -1085,9 +1087,13 @@ litxr_add_refs <- function(
     feed <- fetch_arxiv_xml(
       search_query = search_query,
       start = start,
-      max_results = request_n
+      max_results = request_n,
+      sort_by = sort_by,
+      sort_order = sort_order
     )
 
+    total_results_node <- xml2::xml_find_first(feed, ".//*[local-name()='totalResults']")
+    total_results <- suppressWarnings(as.integer(xml2::xml_text(total_results_node)))
     page_entries <- xml2::xml_find_all(feed, ".//*[local-name()='entry']")
     if (!length(page_entries)) break
 
@@ -1109,6 +1115,7 @@ litxr_add_refs <- function(
   })
 
   records <- data.table::rbindlist(rows, fill = TRUE)
+  attr(records, "arxiv_total_results") <- total_results
   if (is.finite(limit) && nrow(records) > limit) {
     records <- records[seq_len(limit), ]
   }
