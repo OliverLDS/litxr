@@ -1,0 +1,242 @@
+#!/usr/bin/env node
+
+const fs = require("node:fs");
+const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
+const { execFile } = require("node:child_process");
+
+function usage() {
+  process.stdout.write(`Usage:
+  node scripts/serve_literature_projects.js --projects-path PATH [--port PORT] [--no-browser]
+
+Options:
+  --projects-path PATH  Required human-managed projects directory.
+  --port PORT           Optional localhost port. Default: 8787.
+  --no-browser          Start without opening the browser.
+  -h, --help            Show this help message.
+
+The server binds only to 127.0.0.1. Stop it with Ctrl-C.
+`);
+}
+
+function parseArgs(args) {
+  const parsed = { projectsPath: "", port: 8787, browser: true };
+  for (let i = 0; i < args.length; i += 1) {
+    const key = args[i];
+    if (key === "-h" || key === "--help") return { ...parsed, help: true };
+    if (key === "--no-browser") {
+      parsed.browser = false;
+      continue;
+    }
+    if (i + 1 >= args.length) throw new Error(`Missing value for ${key}`);
+    const value = args[++i];
+    if (key === "--projects-path") parsed.projectsPath = value;
+    else if (key === "--port") parsed.port = Number(value);
+    else throw new Error(`Unknown argument: ${key}`);
+  }
+  return parsed;
+}
+
+function normalizeRefId(value) {
+  const refId = String(value || "")
+    .trim()
+    .replace(/^(arxiv|doi|isbn):/i, "")
+    .toLowerCase();
+  const arxiv = /^\d{4}\.\d{4,5}$/.test(refId);
+  const doi = /^10\.\d{4,9}\/\S+$/.test(refId);
+  const isbn = /^(?:\d{9}[\dx]|\d{13})$/.test(refId.replace(/[- ]/g, ""));
+  if (!arxiv && !doi && !isbn) throw new Error(`Unsupported bare reference id: ${refId}`);
+  return isbn ? refId.replace(/[- ]/g, "") : refId;
+}
+
+function canonicalRefId(refId) {
+  if (/^\d{4}\.\d{4,5}$/.test(refId)) return `arxiv:${refId}`;
+  if (/^10\./.test(refId)) return `doi:${refId}`;
+  return `isbn:${refId}`;
+}
+
+function projectIdFor(name, existingIds) {
+  const base = String(name || "")
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7F]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "project";
+  let candidate = base;
+  let suffix = 2;
+  while (existingIds.has(candidate)) candidate = `${base}_${suffix++}`;
+  return candidate;
+}
+
+function validateProject(project, filePath) {
+  const projectId = String(project.project_id || "");
+  const name = String(project.name || "").trim();
+  if (!/^[a-z0-9][a-z0-9_]*$/.test(projectId)) throw new Error(`Invalid project_id in ${filePath}`);
+  if (path.basename(filePath) !== `${projectId}.json`) throw new Error(`Filename does not match project_id: ${filePath}`);
+  if (!name) throw new Error(`Empty project name in ${filePath}`);
+  const refIds = [...new Set((project.ref_ids || []).map(normalizeRefId))];
+  return { schema_version: 1, project_id: projectId, name, ref_ids: refIds };
+}
+
+function readProjects(projectsPath) {
+  return fs.readdirSync(projectsPath)
+    .filter((name) => /^[a-z0-9][a-z0-9_]*\.json$/.test(name))
+    .map((name) => {
+      const filePath = path.join(projectsPath, name);
+      return validateProject(JSON.parse(fs.readFileSync(filePath, "utf8")), filePath);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+function projectPath(projectsPath, projectId) {
+  if (!/^[a-z0-9][a-z0-9_]*$/.test(projectId)) throw new Error(`Invalid project_id: ${projectId}`);
+  return path.join(projectsPath, `${projectId}.json`);
+}
+
+function readProject(projectsPath, projectId) {
+  const filePath = projectPath(projectsPath, projectId);
+  if (!fs.existsSync(filePath)) throw new Error(`Project not found: ${projectId}`);
+  return validateProject(JSON.parse(fs.readFileSync(filePath, "utf8")), filePath);
+}
+
+function writeProject(projectsPath, project) {
+  const filePath = projectPath(projectsPath, project.project_id);
+  const clean = validateProject(project, filePath);
+  const temporaryPath = `${filePath}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(clean, null, 2)}\n`);
+  fs.renameSync(temporaryPath, filePath);
+  return clean;
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      try {
+        const text = Buffer.concat(chunks).toString("utf8").trim();
+        resolve(text ? JSON.parse(text) : {});
+      } catch (error) {
+        reject(new Error("Request body must be valid JSON."));
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+function sendJson(response, value, status = 200) {
+  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  response.end(JSON.stringify(value));
+}
+
+function run(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(String(stderr || stdout || error.message).trim()));
+      else resolve(stdout);
+    });
+  });
+}
+
+const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LitXR Project Library</title>
+<style>:root{--ink:#17231f;--forest:#173b35;--paper:#fffdf7;--sand:#f4f0e8;--line:#bdc7be}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--sand);font:15px Georgia,serif}header{height:62px;padding:0 22px;display:flex;align-items:center;background:var(--forest);color:#f7f0dc}h1{font-size:20px;margin:0}main{height:calc(100vh - 62px);display:grid;grid-template-columns:260px minmax(320px,1fr) minmax(320px,42%)}section,aside{min-width:0;overflow:auto;background:var(--paper);border-right:1px solid var(--line)}aside{border-right:0}.head{position:sticky;top:0;z-index:2;padding:16px;background:var(--paper);border-bottom:1px solid var(--line)}.head h2{margin:0 0 10px;font-size:17px;color:var(--forest)}button,input{font:inherit}button{cursor:pointer;border:1px solid #8ca095;background:#f7f0dc;color:var(--forest);padding:6px 9px;border-radius:3px}.row{display:flex;gap:6px}.row input{min-width:0;flex:1;padding:7px;border:1px solid var(--line)}.actions{display:flex;gap:7px;margin-top:10px}.actions button{font-size:12px}.list{padding:10px}.item{width:100%;text-align:left;padding:10px;border:0;border-bottom:1px solid #e1e5dc;background:transparent;border-radius:0}.item.active{background:#e7eee5}.item strong,.item small{display:block}.item small,.empty{color:#64736a}.empty{padding:22px;line-height:1.5}.detail{padding:20px}.detail h2{margin:0 0 5px;color:var(--forest);font-size:21px}.detail pre{white-space:pre-wrap;font:14px/1.55 Georgia,serif}.ref{color:#64736a;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}@media(max-width:900px){main{grid-template-columns:220px 1fr}aside{grid-column:1/-1;max-height:55vh;border-top:1px solid var(--line)}}</style></head>
+<body><header><h1>LitXR Project Library</h1></header><main><section><div class="head"><h2>Projects</h2><div class="row"><input id="project-name" placeholder="New project name"><button id="add-project">Add</button></div><div class="actions"><button id="rename" disabled>Rename</button><button id="delete" disabled>Delete</button></div></div><div id="projects" class="list"></div></section><section><div class="head"><h2 id="refs-title">References</h2><div class="row"><input id="ref-id" placeholder="Bare arXiv ID, DOI, or ISBN"><button id="add-ref" disabled>Add</button></div><div class="actions"><button id="export" disabled>Export .bib</button></div></div><div id="refs" class="list"></div></section><aside><div id="detail" class="empty">Select a reference to view its summary.</div></aside></main>
+<script>const state={projects:[],projectId:null,refId:null};const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function api(url,options={}){const response=await fetch(url,{...options,headers:{'Content-Type':'application/json'}});const data=await response.json();if(!response.ok)throw new Error(data.error||('HTTP '+response.status));return data}const selected=()=>state.projects.find(p=>p.project_id===state.projectId)||null;function render(){const projects=document.getElementById('projects');projects.innerHTML=state.projects.length?state.projects.map(p=>'<button class="item '+(p.project_id===state.projectId?'active':'')+'" data-project="'+p.project_id+'"><strong>'+esc(p.name)+'</strong><small>'+p.ref_ids.length+' references</small></button>').join(''):'<div class="empty">No projects yet.</div>';projects.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{state.projectId=b.dataset.project;state.refId=null;render();document.getElementById('detail').innerHTML='Select a reference to view its summary.'});const project=selected();document.getElementById('rename').disabled=!project;document.getElementById('delete').disabled=!project;document.getElementById('add-ref').disabled=!project;document.getElementById('export').disabled=!project||!project.ref_ids.length;document.getElementById('refs-title').textContent=project?project.name:'References';const refs=document.getElementById('refs');refs.innerHTML=!project?'<div class="empty">Select a project.</div>':project.ref_ids.length?project.ref_ids.map(id=>'<button class="item '+(id===state.refId?'active':'')+'" data-ref="'+esc(id)+'"><strong>'+esc(id)+'</strong><small>View summary</small></button>').join(''):'<div class="empty">This project has no references.</div>';refs.querySelectorAll('[data-ref]').forEach(b=>b.onclick=()=>showRef(b.dataset.ref))}async function reload(preferred=state.projectId){const data=await api('/api/projects');state.projects=data.projects;state.projectId=state.projects.some(p=>p.project_id===preferred)?preferred:(state.projects[0]?.project_id||null);render()}async function showRef(id){state.refId=id;render();const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<p>Loading...</p>';try{const data=await api('/api/references/'+encodeURIComponent(id));detail.innerHTML='<h2>'+esc(id)+'</h2><div class="ref">'+esc(id)+'</div><pre>'+esc(data.summary)+'</pre><button id="remove-ref">Remove from project</button>';document.getElementById('remove-ref').onclick=removeRef}catch(error){detail.innerHTML='<div class="empty">'+esc(error.message)+'</div>'}}async function addProject(){const input=document.getElementById('project-name');if(!input.value.trim())return;try{const data=await api('/api/projects',{method:'POST',body:JSON.stringify({name:input.value.trim()})});input.value='';await reload(data.project.project_id)}catch(e){alert(e.message)}}async function renameProject(){const p=selected();const name=p&&prompt('Project name',p.name);if(name?.trim()){await api('/api/projects/'+p.project_id,{method:'PATCH',body:JSON.stringify({name:name.trim()})});await reload(p.project_id)}}async function deleteProject(){const p=selected();if(p&&confirm('Delete project '+p.name+'?')){await api('/api/projects/'+p.project_id,{method:'DELETE'});state.projectId=null;await reload()}}async function addRef(){const p=selected(),input=document.getElementById('ref-id');if(p&&input.value.trim()){try{await api('/api/projects/'+p.project_id+'/refs',{method:'POST',body:JSON.stringify({ref_id:input.value.trim()})});input.value='';await reload(p.project_id)}catch(e){alert(e.message)}}}async function removeRef(){const p=selected();if(p&&state.refId){await api('/api/projects/'+p.project_id+'/refs/'+encodeURIComponent(state.refId),{method:'DELETE'});state.refId=null;document.getElementById('detail').innerHTML='Select a reference to view its summary.';await reload(p.project_id)}}document.getElementById('add-project').onclick=addProject;document.getElementById('rename').onclick=renameProject;document.getElementById('delete').onclick=deleteProject;document.getElementById('add-ref').onclick=addRef;document.getElementById('export').onclick=()=>{const p=selected();if(p)location.href='/api/projects/'+p.project_id+'/bib'};reload().catch(e=>alert(e.message));</script></body></html>`;
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) return usage();
+  if (!args.projectsPath) throw new Error("--projects-path is required.");
+  if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) throw new Error("--port must be an integer from 1 to 65535.");
+  const projectsPath = path.resolve(args.projectsPath);
+  if (!fs.existsSync(projectsPath)) {
+    const parent = path.dirname(projectsPath);
+    if (!fs.existsSync(parent)) throw new Error(`Parent directory does not exist: ${parent}`);
+    fs.mkdirSync(projectsPath);
+  }
+  if (!fs.statSync(projectsPath).isDirectory()) throw new Error(`Not a directory: ${projectsPath}`);
+  const scriptDir = __dirname;
+  const summaryScript = path.join(scriptDir, "report_ref_summary.sh");
+  const bibScript = path.join(scriptDir, "write_bib_by_ref_ids.sh");
+
+  const server = http.createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url, "http://127.0.0.1");
+      const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+      if (request.method === "GET" && parts.length === 0) {
+        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+        return response.end(html);
+      }
+      if (request.method === "GET" && parts.join("/") === "api/projects") return sendJson(response, { status: "ok", projects: readProjects(projectsPath) });
+      if (request.method === "POST" && parts.join("/") === "api/projects") {
+        const body = await readBody(request);
+        const name = String(body.name || "").trim();
+        if (!name) throw new Error("Project name must not be empty.");
+        const id = projectIdFor(name, new Set(readProjects(projectsPath).map((p) => p.project_id)));
+        return sendJson(response, { status: "ok", project: writeProject(projectsPath, { project_id: id, name, ref_ids: [] }) }, 201);
+      }
+      if (parts[0] === "api" && parts[1] === "projects" && parts.length === 3) {
+        const project = readProject(projectsPath, parts[2]);
+        if (request.method === "PATCH") {
+          const body = await readBody(request);
+          project.name = String(body.name || "").trim();
+          if (!project.name) throw new Error("Project name must not be empty.");
+          return sendJson(response, { status: "ok", project: writeProject(projectsPath, project) });
+        }
+        if (request.method === "DELETE") {
+          fs.unlinkSync(projectPath(projectsPath, project.project_id));
+          return sendJson(response, { status: "ok", project_id: project.project_id });
+        }
+      }
+      if (parts[0] === "api" && parts[1] === "projects" && parts[3] === "refs") {
+        const project = readProject(projectsPath, parts[2]);
+        if (request.method === "POST" && parts.length === 4) {
+          const body = await readBody(request);
+          project.ref_ids.push(normalizeRefId(body.ref_id));
+        } else if (request.method === "DELETE" && parts.length === 5) {
+          const refId = normalizeRefId(parts[4]);
+          project.ref_ids = project.ref_ids.filter((id) => id !== refId);
+        } else {
+          throw new Error("Unsupported project reference operation.");
+        }
+        return sendJson(response, { status: "ok", project: writeProject(projectsPath, project) });
+      }
+      if (request.method === "GET" && parts[0] === "api" && parts[1] === "references" && parts.length === 3) {
+        const refId = normalizeRefId(parts[2]);
+        const kindFlag = /^\d{4}\./.test(refId) ? "--arxiv-id" : /^10\./.test(refId) ? "--doi" : "--isbn";
+        const summary = await run("/bin/zsh", [summaryScript, kindFlag, refId]);
+        return sendJson(response, { status: "ok", ref_id: refId, summary });
+      }
+      if (request.method === "GET" && parts[0] === "api" && parts[1] === "projects" && parts[3] === "bib") {
+        const project = readProject(projectsPath, parts[2]);
+        const temporaryBib = path.join(os.tmpdir(), `litxr-${process.pid}-${Date.now()}.bib`);
+        try {
+          await run("/bin/zsh", [bibScript, "--output", temporaryBib, "--ref-ids", project.ref_ids.map(canonicalRefId).join(",")]);
+          const bib = fs.readFileSync(temporaryBib);
+          response.writeHead(200, { "Content-Type": "application/x-bibtex; charset=utf-8", "Content-Disposition": `attachment; filename="${project.project_id}.bib"`, "Cache-Control": "no-store" });
+          return response.end(bib);
+        } finally {
+          if (fs.existsSync(temporaryBib)) fs.unlinkSync(temporaryBib);
+        }
+      }
+      sendJson(response, { status: "error", error: "Not found" }, 404);
+    } catch (error) {
+      sendJson(response, { status: "error", error: error.message }, 400);
+    }
+  });
+
+  server.listen(args.port, "127.0.0.1", () => {
+    const url = `http://127.0.0.1:${args.port}/`;
+    process.stdout.write(`projects_path=${projectsPath}\nurl=${url}\nPress Ctrl-C to stop.\n`);
+    if (args.browser) {
+      const opener = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", url]] : ["xdg-open", [url]];
+      execFile(opener[0], opener[1], () => {});
+    }
+  });
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.message}\n`);
+  process.exitCode = 1;
+});

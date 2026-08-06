@@ -1,3 +1,10 @@
+# litxr 0.1.8.15
+
+- Added `scripts/serve_literature_projects.js`, a localhost-only project
+  library UI for user-managed project JSON files. It supports project and
+  reference membership management, LitXR reference summaries, and BibTeX
+  export without modifying the canonical thin or digest stores.
+
 # litxr 0.1.8.14
 
 - Hardened V5 anchor-reference guidance and validation with explicit canonical
