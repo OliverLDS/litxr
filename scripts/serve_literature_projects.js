@@ -56,6 +56,12 @@ function canonicalRefId(refId) {
   return `isbn:${refId}`;
 }
 
+function normalizeTag(value) {
+  const tag = String(value || "").trim().replace(/\s+/g, " ");
+  if (!tag || tag.length > 64 || /[\r\n\t]/.test(tag)) throw new Error(`Invalid project tag: ${tag || "[empty]"}`);
+  return tag;
+}
+
 function projectIdFor(name, existingIds) {
   const base = String(name || "")
     .normalize("NFKD")
@@ -76,7 +82,61 @@ function validateProject(project, filePath) {
   if (path.basename(filePath) !== `${projectId}.json`) throw new Error(`Filename does not match project_id: ${filePath}`);
   if (!name) throw new Error(`Empty project name in ${filePath}`);
   const refIds = [...new Set((project.ref_ids || []).map(normalizeRefId))];
-  return { schema_version: 1, project_id: projectId, name, ref_ids: refIds };
+  const tags = [];
+  const tagByKey = new Map();
+  for (const rawTag of Array.isArray(project.tags) ? project.tags : []) {
+    const tag = normalizeTag(rawTag);
+    const key = tag.toLocaleLowerCase();
+    if (!tagByKey.has(key)) {
+      tagByKey.set(key, tag);
+      tags.push(tag);
+    }
+  }
+  const refTags = {};
+  const rawRefTags = project.ref_tags && typeof project.ref_tags === "object" ? project.ref_tags : {};
+  for (const refId of refIds) {
+    const values = Array.isArray(rawRefTags[refId]) ? rawRefTags[refId] : [];
+    const selected = [];
+    for (const rawTag of values) {
+      const tag = normalizeTag(rawTag);
+      const key = tag.toLocaleLowerCase();
+      if (!tagByKey.has(key)) {
+        tagByKey.set(key, tag);
+        tags.push(tag);
+      }
+      const canonicalTag = tagByKey.get(key);
+      if (!selected.includes(canonicalTag)) selected.push(canonicalTag);
+    }
+    if (selected.length > 2) throw new Error(`A project reference may have at most two tags: ${refId}`);
+    if (selected.length) refTags[refId] = selected;
+  }
+  return { schema_version: 2, project_id: projectId, name, ref_ids: refIds, tags, ref_tags: refTags };
+}
+
+function setProjectReferenceTags(project, refId, requestedTags) {
+  if (!project.ref_ids.includes(refId)) throw new Error("Reference is not in project: " + refId);
+  if (!Array.isArray(requestedTags)) throw new Error("Project tags must be an array.");
+  const available = new Map(project.tags.map((tag) => [tag.toLocaleLowerCase(), tag]));
+  const tags = [];
+  for (const rawTag of requestedTags) {
+    const key = normalizeTag(rawTag).toLocaleLowerCase();
+    if (!available.has(key)) throw new Error("Unknown project tag: " + rawTag);
+    const tag = available.get(key);
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  if (tags.length > 2) throw new Error("A reference may have at most two project tags.");
+  if (tags.length) project.ref_tags[refId] = tags;
+  else delete project.ref_tags[refId];
+}
+
+function addProjectTag(project, refId, rawTag) {
+  if (!project.ref_ids.includes(refId)) throw new Error("Reference is not in project: " + refId);
+  const tag = normalizeTag(rawTag);
+  const existing = project.tags.find((value) => value.toLocaleLowerCase() === tag.toLocaleLowerCase());
+  const canonicalTag = existing || tag;
+  if (!existing) project.tags.push(canonicalTag);
+  const current = project.ref_tags[refId] || [];
+  setProjectReferenceTags(project, refId, [...current, canonicalTag]);
 }
 
 function referenceCachePath(projectsPath) {
@@ -220,25 +280,38 @@ async function hydrateReference(summaryScript, refId) {
   return { title: titleFromSummary(summary, refId), summary, has_digest: hasDigest, cached_at: new Date().toISOString() };
 }
 
+async function chooseDigestReportPath(defaultName) {
+  const script = [
+    "on run argv",
+    "  set selectedFile to choose file name with prompt \"Save project digest report\" default name (item 1 of argv)",
+    "  return POSIX path of selectedFile",
+    "end run"
+  ].join("\n");
+  return (await run("/usr/bin/osascript", ["-e", script, defaultName])).trim();
+}
+
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LitXR Project Library</title>
 <style>:root{--ink:#17231f;--forest:#173b35;--paper:#fffdf7;--sand:#f4f0e8;--line:#bdc7be}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--sand);font:15px Georgia,serif}header{height:62px;padding:0 22px;display:flex;align-items:center;gap:12px;background:var(--forest);color:#f7f0dc}h1{font-size:20px;margin:0}header button{margin-left:auto}main{--detail-width:42%;height:calc(100vh - 62px);display:grid;grid-template-columns:260px minmax(320px,1fr) 6px minmax(320px,var(--detail-width))}main.projects-hidden{grid-template-columns:0 minmax(320px,1fr) 6px minmax(320px,var(--detail-width))}section,aside{min-width:0;overflow:auto;background:var(--paper);border-right:1px solid var(--line)}main.projects-hidden>section:first-child{visibility:hidden;overflow:hidden;border:0}aside{border-right:0}.panel-resizer{background:var(--line);cursor:col-resize;transition:background .15s}.panel-resizer:hover,.panel-resizer.dragging{background:#648c7a}.head{position:sticky;top:0;z-index:2;padding:16px;background:var(--paper);border-bottom:1px solid var(--line)}.head h2{margin:0 0 10px;font-size:17px;color:var(--forest)}button,input{font:inherit}button{cursor:pointer;border:1px solid #8ca095;background:#f7f0dc;color:var(--forest);padding:6px 9px;border-radius:3px}input{min-width:0;border:1px solid var(--line);padding:7px}.row,.actions{display:flex;gap:6px}.row input{flex:1}.actions{margin-top:10px}.actions button{font-size:12px}.list{padding:10px}.item{width:100%;text-align:left;padding:10px;border:0;border-bottom:1px solid #e1e5dc;background:transparent;border-radius:0}.item.active{background:#e7eee5}.item strong,.item small{display:block}.item strong{line-height:1.28}.digest-marker{display:inline-grid;place-items:center;width:13px;height:13px;margin-left:5px;border-radius:50%;background:#2f6b58;color:#fff;font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;vertical-align:1px}.item small,.empty,.ref{color:#64736a}.empty{padding:22px;line-height:1.5}.detail{padding:20px}.detail-header{display:flex;align-items:flex-start;gap:10px}.detail h2{margin:0 0 5px;color:var(--forest);font-size:21px}.detail-body{line-height:1.55}.detail-body h1,.detail-body h2,.detail-body h3{color:var(--forest);margin:1.25em 0 .4em}.detail-body h1{font-size:21px}.detail-body h2{font-size:18px}.detail-body h3{font-size:16px}.detail-body p{margin:.55em 0}.detail-body ol,.detail-body ul{padding-left:1.35em}.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.icon{margin-left:auto;padding:4px 7px;font-size:16px;line-height:1}.detail-actions{margin-top:18px;display:flex;gap:8px}@media(max-width:900px){main,main.projects-hidden{display:block;height:auto}main>section:first-child{max-height:45vh}main.projects-hidden>section:first-child{display:none}.panel-resizer{display:none}aside{max-height:55vh;border-top:1px solid var(--line)}}</style></head>
-<body><header><h1>LitXR Project Library</h1><button id="toggle-projects" type="button">Hide projects</button></header><main id="app-main"><section><div class="head"><h2>Projects</h2><div class="row"><input id="project-name" placeholder="New project name"><button id="add-project">Add</button></div><div class="actions"><button id="delete" disabled>Delete</button></div></div><div id="projects" class="list"></div></section><section><div class="head"><h2 id="refs-title">References</h2><div class="row"><input id="ref-id" placeholder="Bare arXiv ID, DOI, or ISBN"><button id="add-ref" disabled>Add</button></div><div class="actions"><button id="export" disabled>Export .bib</button><button id="sort-refs" disabled>Sort by ID</button></div></div><div id="refs" class="list"></div></section><div id="panel-resizer" class="panel-resizer" role="separator" aria-label="Resize reference and summary panels" aria-orientation="vertical"></div><aside><div id="detail" class="empty">Select a reference to view its summary.</div></aside></main>
+<body><header><h1>LitXR Project Library</h1><button id="toggle-projects" type="button">Hide projects</button></header><main id="app-main"><section><div class="head"><h2>Projects</h2><div class="row"><input id="project-name" placeholder="New project name"><button id="add-project">Add</button></div><div class="actions"><button id="delete" disabled>Delete</button></div></div><div id="projects" class="list"></div></section><section><div class="head"><h2 id="refs-title">References</h2><div class="row"><input id="ref-id" placeholder="Bare arXiv ID, DOI, or ISBN"><button id="add-ref" disabled>Add</button></div><div class="actions"><button id="export" disabled>Export .bib</button><button id="export-digest" disabled>Export digest .md</button><button id="sort-refs" disabled>Sort by ID</button><select id="tag-filter" disabled><option value="">All tags</option></select></div></div><div id="refs" class="list"></div></section><div id="panel-resizer" class="panel-resizer" role="separator" aria-label="Resize reference and summary panels" aria-orientation="vertical"></div><aside><div id="detail" class="empty">Select a reference to view its summary.</div></aside></main>
 <script>
-const state={projects:[],projectId:null,refId:null,sortByRefId:false};
+const state={projects:[],projectId:null,refId:null,sortByRefId:false,tagFilter:""};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,options={}){const response=await fetch(url,{...options,headers:{'Content-Type':'application/json'}});const data=await response.json();if(!response.ok)throw new Error(data.error||('HTTP '+response.status));return data}
 const selected=()=>state.projects.find(p=>p.project_id===state.projectId)||null;
 function summaryHtml(summary){const out=[],paragraph=[];let list='';const flush=()=>{if(paragraph.length){out.push('<p>'+paragraph.join(' ')+'</p>');paragraph.length=0}};const close=()=>{if(list){out.push('</'+list+'>');list=''}};for(const raw of String(summary).split(/\\r?\\n/)){const line=raw.trim();if(!line){flush();close();continue}if(/^(ref_id|title|digest_present):/i.test(line)||line==='research_schema')continue;if(line==='abstract'){flush();close();out.push('<h3>Abstract</h3>');continue}const heading=line.match(/^(#{1,3})\\s+(.+)/);if(heading){flush();close();out.push('<h'+heading[1].length+'>'+esc(heading[2])+'</h'+heading[1].length+'>');continue}const ordered=line.match(/^\\d+\\.\\s+(.+)/);const bullet=line.match(/^[-*]\\s+(.+)/);if(ordered||bullet){flush();const type=ordered?'ol':'ul';if(list&&list!==type)close();if(!list){out.push('<'+type+'>');list=type}out.push('<li>'+esc((ordered||bullet)[1])+'</li>');continue}close();paragraph.push(esc(line))}flush();close();return out.join('')}
-function render(){const projects=document.getElementById('projects');projects.innerHTML=state.projects.length?state.projects.map(p=>'<button class="item '+(p.project_id===state.projectId?'active':'')+'" data-project="'+p.project_id+'"><strong>'+esc(p.name)+'</strong><small>'+p.ref_ids.length+' references</small></button>').join(''):'<div class="empty">No projects yet.</div>';projects.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{state.projectId=b.dataset.project;state.refId=null;state.sortByRefId=false;render();document.getElementById('detail').className='empty';document.getElementById('detail').textContent='Select a reference to view its summary.'});const project=selected();document.getElementById('delete').disabled=!project;document.getElementById('add-ref').disabled=!project;document.getElementById('export').disabled=!project||!project.ref_ids.length;document.getElementById('sort-refs').disabled=!project||!project.ref_ids.length;document.getElementById('refs-title').textContent=project?project.name:'References';const refIds=project&&state.sortByRefId?[...project.ref_ids].sort((a,b)=>a.localeCompare(b)):project?.ref_ids;const refs=document.getElementById('refs');refs.innerHTML=!project?'<div class="empty">Select a project.</div>':refIds.length?refIds.map(id=>{const cached=project.reference_cache?.[id];const marker=cached?.has_digest?'<span class="digest-marker" title="Cached LLM digest" aria-label="Cached LLM digest">D</span>':'';return '<button class="item '+(id===state.refId?'active':'')+'" data-ref="'+esc(id)+'"><strong>'+esc(cached?.title||id)+marker+'</strong><small>'+esc(id)+'</small></button>'}).join(''):'<div class="empty">This project has no references.</div>';refs.querySelectorAll('[data-ref]').forEach(b=>b.onclick=()=>showRef(b.dataset.ref))}
+function render(){const projects=document.getElementById('projects');projects.innerHTML=state.projects.length?state.projects.map(p=>'<button class="item '+(p.project_id===state.projectId?'active':'')+'" data-project="'+p.project_id+'"><strong>'+esc(p.name)+'</strong><small>'+p.ref_ids.length+' references</small></button>').join(''):'<div class="empty">No projects yet.</div>';projects.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{state.projectId=b.dataset.project;state.refId=null;state.sortByRefId=false;state.tagFilter="";render();document.getElementById('detail').className='empty';document.getElementById('detail').textContent='Select a reference to view its summary.'});const project=selected();if(project&&!project.tags.includes(state.tagFilter))state.tagFilter="";document.getElementById('delete').disabled=!project;document.getElementById('add-ref').disabled=!project;document.getElementById('export').disabled=!project||!project.ref_ids.length;document.getElementById('export-digest').disabled=!project||!project.ref_ids.length;document.getElementById('sort-refs').disabled=!project||!project.ref_ids.length;const filter=document.getElementById('tag-filter');filter.disabled=!project||!project.tags.length;filter.innerHTML='<option value="">All tags</option>'+(project?project.tags.map(tag=>'<option value="'+esc(tag)+'">'+esc(tag)+'</option>').join(''):'');filter.value=state.tagFilter;filter.onchange=()=>{state.tagFilter=filter.value;render()};document.getElementById('refs-title').textContent=project?project.name:'References';let refIds=project?project.ref_ids:[];if(state.tagFilter)refIds=refIds.filter(id=>(project.ref_tags?.[id]||[]).includes(state.tagFilter));if(state.sortByRefId)refIds=[...refIds].sort((a,b)=>a.localeCompare(b));const refs=document.getElementById('refs');refs.innerHTML=!project?'<div class="empty">Select a project.</div>':refIds.length?refIds.map(id=>{const cached=project.reference_cache?.[id];const marker=cached?.has_digest?'<span class="digest-marker" title="Cached LLM digest" aria-label="Cached LLM digest">D</span>':'';return '<button class="item '+(id===state.refId?'active':'')+'" data-ref="'+esc(id)+'"><strong>'+esc(cached?.title||id)+marker+'</strong><small>'+esc(id)+'</small></button>'}).join(''):'<div class="empty">No references match this tag.</div>';refs.querySelectorAll('[data-ref]').forEach(b=>b.onclick=()=>showRef(b.dataset.ref))}
 async function reload(preferred=state.projectId){const data=await api('/api/projects');state.projects=data.projects;state.projectId=state.projects.some(p=>p.project_id===preferred)?preferred:(state.projects[0]?.project_id||null);render()}
-function showDetail(refId,entry){const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<div class="detail-header"><div><h2>'+esc(entry.title)+'</h2><div class="ref">'+esc(refId)+'</div></div><button id="refresh-ref" class="icon" title="Refresh cached reference" aria-label="Refresh cached reference">↻</button></div><div class="detail-body">'+summaryHtml(entry.summary)+'</div><div class="detail-actions"><button id="remove-ref">Remove from project</button></div>';document.getElementById('refresh-ref').onclick=refreshRef;document.getElementById('remove-ref').onclick=removeRef}
+function tagEditor(project,refId){const selectedTags=project.ref_tags?.[refId]||[];const options=project.tags.length?project.tags.map((tag,index)=>'<label><input type="checkbox" data-project-tag="'+index+'" '+(selectedTags.includes(tag)?'checked':'')+'> '+esc(tag)+'</label>').join('<br>'):'<span class="ref">No project tags yet.</span>';return '<div class="detail-actions"><strong>Project tags</strong></div><div id="project-tag-options">'+options+'</div><div class="row" style="margin-top:8px"><input id="new-project-tag" placeholder="New tag"><button id="add-project-tag" type="button">+</button></div>'}
+async function saveReferenceTags(refId,body){const project=selected();if(!project)return;try{await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(refId)+'/tags',{method:'POST',body:JSON.stringify(body)});await reload(project.project_id);await showRef(refId)}catch(error){alert(error.message)}}
+function showDetail(refId,entry){const project=selected();const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<div class="detail-header"><div><h2>'+esc(entry.title)+'</h2><div class="ref">'+esc(refId)+'</div></div><button id="refresh-ref" class="icon" title="Refresh cached reference" aria-label="Refresh cached reference">↻</button></div><div class="detail-body">'+summaryHtml(entry.summary)+'</div>'+tagEditor(project,refId)+'<div class="detail-actions"><button id="remove-ref">Remove from project</button></div>';document.getElementById('refresh-ref').onclick=refreshRef;document.getElementById('remove-ref').onclick=removeRef;document.querySelectorAll('[data-project-tag]').forEach(input=>input.onchange=()=>{const tags=[...document.querySelectorAll('[data-project-tag]:checked')].map(box=>project.tags[Number(box.dataset.projectTag)]);saveReferenceTags(refId,{tags})});document.getElementById('add-project-tag').onclick=()=>{const input=document.getElementById('new-project-tag');if(input.value.trim())saveReferenceTags(refId,{add_tag:input.value.trim()})}}
 async function showRef(id){const project=selected();if(!project)return;state.refId=id;render();const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<p>Loading cached reference...</p>';try{const data=await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(id));await reload(project.project_id);state.refId=id;render();showDetail(id,data.reference)}catch(error){detail.className='empty';detail.textContent=error.message}}
 async function refreshRef(){const project=selected();if(!project||!state.refId)return;const detail=document.getElementById('detail');detail.innerHTML='<p>Refreshing cached reference...</p>';try{const data=await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(state.refId)+'/refresh',{method:'POST'});await reload(project.project_id);showDetail(state.refId,data.reference)}catch(error){detail.className='empty';detail.textContent=error.message}}
 async function addProject(){const input=document.getElementById('project-name');if(!input.value.trim())return;try{const data=await api('/api/projects',{method:'POST',body:JSON.stringify({name:input.value.trim()})});input.value='';await reload(data.project.project_id)}catch(e){alert(e.message)}}
 async function deleteProject(){const p=selected();if(p&&confirm('Delete project '+p.name+'?')){await api('/api/projects/'+p.project_id,{method:'DELETE'});state.projectId=null;await reload()}}
 async function addRef(){const p=selected(),input=document.getElementById('ref-id');if(p&&input.value.trim()){try{const data=await api('/api/projects/'+p.project_id+'/refs',{method:'POST',body:JSON.stringify({ref_id:input.value.trim()})});input.value='';await reload(p.project_id);showRef(data.ref_id)}catch(e){alert(e.message)}}}
 async function removeRef(){const p=selected();if(p&&state.refId){await api('/api/projects/'+p.project_id+'/refs/'+encodeURIComponent(state.refId),{method:'DELETE'});state.refId=null;const detail=document.getElementById('detail');detail.className='empty';detail.textContent='Select a reference to view its summary.';await reload(p.project_id)}}
-document.getElementById('add-project').onclick=addProject;document.getElementById('delete').onclick=deleteProject;document.getElementById('add-ref').onclick=addRef;document.getElementById('export').onclick=()=>{const p=selected();if(p)location.href='/api/projects/'+p.project_id+'/bib'};document.getElementById('sort-refs').onclick=()=>{state.sortByRefId=true;render()};reload().catch(e=>alert(e.message));
+async function exportDigestReport(){const project=selected();if(!project)return;try{const data=await api('/api/projects/'+project.project_id+'/digest-report',{method:'POST'});alert('Written: '+data.output_path)}catch(error){alert(error.message)}}
+document.getElementById('add-project').onclick=addProject;document.getElementById('delete').onclick=deleteProject;document.getElementById('add-ref').onclick=addRef;document.getElementById('export').onclick=()=>{const p=selected();if(p)location.href='/api/projects/'+p.project_id+'/bib'};document.getElementById('export-digest').onclick=exportDigestReport;document.getElementById('sort-refs').onclick=()=>{state.sortByRefId=true;render()};reload().catch(e=>alert(e.message));
 const appMain=document.getElementById('app-main');
 const toggleProjects=document.getElementById('toggle-projects');
 toggleProjects.onclick=()=>{const hidden=appMain.classList.toggle('projects-hidden');toggleProjects.textContent=hidden?'Show projects':'Hide projects'};
@@ -262,6 +335,7 @@ async function main() {
   const scriptDir = __dirname;
   const summaryScript = path.join(scriptDir, "report_ref_summary.sh");
   const bibScript = path.join(scriptDir, "write_bib_by_ref_ids.sh");
+  const digestReportScript = path.join(scriptDir, "report_ref_digest_field_from_ref_ids.R");
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -289,6 +363,18 @@ async function main() {
           return sendJson(response, { status: "ok", project_id: project.project_id });
         }
       }
+      if (request.method === "POST" && parts[0] === "api" && parts[1] === "projects" && parts[3] === "digest-report") {
+        const project = readProject(projectsPath, parts[2]);
+        if (!project.ref_ids.length) throw new Error("Project has no references.");
+        const outputPath = await chooseDigestReportPath(project.project_id + "_digest_report.md");
+        await run("Rscript", [
+          digestReportScript,
+          "--fields", "summary,key_findings,citation_logic_nodes",
+          "--ref-ids", project.ref_ids.join(","),
+          "--output", outputPath
+        ]);
+        return sendJson(response, { status: "ok", output_path: outputPath });
+      }
       if (parts[0] === "api" && parts[1] === "projects" && parts[3] === "refs") {
         const project = readProject(projectsPath, parts[2]);
         if (request.method === "POST" && parts.length === 4) {
@@ -304,6 +390,12 @@ async function main() {
         } else if (request.method === "DELETE" && parts.length === 5) {
           const refId = normalizeRefId(parts[4]);
           project.ref_ids = project.ref_ids.filter((id) => id !== refId);
+          delete project.ref_tags[refId];
+        } else if (request.method === "POST" && parts.length === 6 && parts[5] === "tags") {
+          const refId = normalizeRefId(parts[4]);
+          const body = await readBody(request);
+          if (Object.hasOwn(body, "add_tag")) addProjectTag(project, refId, body.add_tag);
+          else setProjectReferenceTags(project, refId, body.tags);
         } else if (request.method === "GET" && parts.length === 5) {
           const refId = normalizeRefId(parts[4]);
           if (!project.ref_ids.includes(refId)) throw new Error(`Reference is not in project: ${refId}`);
