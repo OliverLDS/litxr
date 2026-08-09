@@ -17,7 +17,7 @@ usage <- function() {
       "  Rscript scripts/report_ref_digest_field_from_ref_ids.R --fields FIELD1,FIELD2 --ref-ids ID1,ID2 --output PATH",
       "",
       "Options:",
-      "  --fields LIST    Comma-separated digest fields: summary, key_findings, citation_logic_nodes.",
+      "  --fields LIST    Comma-separated digest fields: summary, motivation, theoretical_mechanism, key_findings, citation_logic_nodes.",
       "  --field FIELD    Backward-compatible single-field form.",
       "  --ref-ids LIST   Comma/space-separated bare or canonical ref_ids.",
       "  --output PATH    Required Markdown output path.",
@@ -60,7 +60,7 @@ parse_ref_ids <- function(value) {
 parse_fields <- function(value) {
   fields <- tolower(trimws(unlist(strsplit(as.character(value %||% ""), ",", fixed = TRUE), use.names = FALSE)))
   fields <- unique(fields[nzchar(fields)])
-  allowed <- c("summary", "key_findings", "citation_logic_nodes")
+  allowed <- c("summary", "motivation", "theoretical_mechanism", "key_findings", "citation_logic_nodes")
   if (!length(fields) || any(!fields %in% allowed)) {
     stop("--fields must contain only: ", paste(allowed, collapse = ", "), call. = FALSE)
   }
@@ -73,7 +73,14 @@ scalar_lines <- function(value) {
 }
 
 field_label <- function(field) {
-  switch(field, summary = "Summary", key_findings = "Key Findings", citation_logic_nodes = "Citation Logic Nodes")
+  switch(
+    field,
+    summary = "Summary",
+    motivation = "Motivation",
+    theoretical_mechanism = "Theoretical Mechanism",
+    key_findings = "Key Findings",
+    citation_logic_nodes = "Citation Logic Nodes"
+  )
 }
 
 render_field_lines <- function(digest, field) {
@@ -81,6 +88,14 @@ render_field_lines <- function(digest, field) {
     field,
     summary = {
       value <- scalar_lines(digest$summary)
+      if (length(value)) paste0("- ", value[[1L]]) else "- [missing]"
+    },
+    motivation = {
+      value <- scalar_lines(digest$motivation)
+      if (length(value)) paste0("- ", value[[1L]]) else "- [missing]"
+    },
+    theoretical_mechanism = {
+      value <- scalar_lines(digest$theoretical_mechanism)
       if (length(value)) paste0("- ", value[[1L]]) else "- [missing]"
     },
     key_findings = {

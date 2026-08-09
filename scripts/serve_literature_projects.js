@@ -369,7 +369,7 @@ async function main() {
         const outputPath = await chooseDigestReportPath(project.project_id + "_digest_report.md");
         await run("Rscript", [
           digestReportScript,
-          "--fields", "summary,key_findings,citation_logic_nodes",
+          "--fields", "summary,motivation,theoretical_mechanism,key_findings,citation_logic_nodes",
           "--ref-ids", project.ref_ids.join(","),
           "--output", outputPath
         ]);
