@@ -24,7 +24,7 @@ Notes:
   - The parser is strict; the route is determined by the flag, not by guessing.
   - The script resolves the ref JSON filename from index/ref_arxiv.fst,
     index/ref_doi.fst, or index/ref_isbn.fst before reading the abstract.
-  - Key mode reports Summary, Motivation, Theoretical Mechanism,
+  - Key mode reports Summary, Motivation, Theoretical Mechanism, Key Findings,
     Anchor References, and Citation Logic Nodes.
   - Complete mode reports the full markdown-style research schema rendering.
 EOF
@@ -239,8 +239,93 @@ if (is.list(row) && length(row)) {
 }
 if (is.na(title) || !nzchar(title)) title <- ref_id
 
+apa_scalar <- function(value) {
+  if (is.null(value) || !length(value)) return(NA_character_)
+  value <- as.character(value[[1L]])
+  if (is.na(value) || !nzchar(trimws(value))) NA_character_ else trimws(value)
+}
+
+apa_author <- function(value) {
+  value <- trimws(as.character(value))
+  if (!nzchar(value)) return(NA_character_)
+  if (grepl(",", value, fixed = TRUE)) {
+    parts <- trimws(strsplit(value, ",", fixed = TRUE)[[1L]])
+    family <- parts[[1L]]
+    given <- paste(parts[-1L], collapse = " ")
+  } else {
+    parts <- strsplit(value, "[[:space:]]+", perl = TRUE)[[1L]]
+    if (length(parts) == 1L) return(parts[[1L]])
+    family <- parts[[length(parts)]]
+    given <- paste(parts[-length(parts)], collapse = " ")
+  }
+  given_parts <- strsplit(given, "[[:space:]-]+", perl = TRUE)[[1L]]
+  given_parts <- given_parts[nzchar(given_parts)]
+  initials <- vapply(given_parts, function(part) {
+    if (grepl("\\.", part) && grepl("^[[:alpha:].]+$", part)) {
+      letters <- strsplit(gsub("[^[:alpha:]]", "", part), "", fixed = TRUE)[[1L]]
+      return(paste0(letters, ".", collapse = " "))
+    }
+    paste0(substr(part, 1L, 1L), ".")
+  }, character(1L))
+  if (length(initials)) paste(family, paste(initials, collapse = " "), sep = ", ") else family
+}
+
+apa_authors <- function(authors_list, authors) {
+  values <- if (is.list(authors_list) && length(authors_list)) {
+    as.character(authors_list[[1L]])
+  } else {
+    character()
+  }
+  values <- values[!is.na(values) & nzchar(trimws(values))]
+  if (!length(values) && !is.na(authors) && nzchar(authors)) {
+    values <- trimws(strsplit(authors, ";", fixed = TRUE)[[1L]])
+  }
+  formatted <- vapply(values, apa_author, character(1L))
+  formatted <- formatted[!is.na(formatted) & nzchar(formatted)]
+  if (!length(formatted)) return(NULL)
+  if (length(formatted) == 1L) return(formatted)
+  if (length(formatted) <= 20L) {
+    return(paste0(paste(formatted[-length(formatted)], collapse = ", "), ", & ", formatted[[length(formatted)]]))
+  }
+  paste0(paste(formatted[seq_len(19L)], collapse = ", "), ", ... ", formatted[[length(formatted)]])
+}
+
+apa7_reference <- function(row, fallback_title) {
+  authors <- apa_authors(row$authors_list, apa_scalar(row$authors))
+  year <- apa_scalar(row$year)
+  date <- if (!is.na(year)) paste0("(", year, ").") else "(n.d.)."
+  article_title <- apa_scalar(row$title)
+  if (is.na(article_title)) article_title <- fallback_title
+  venue <- apa_scalar(row$journal)
+  if (is.na(venue)) venue <- apa_scalar(row$container_title)
+  volume <- apa_scalar(row$volume)
+  issue <- apa_scalar(row$issue)
+  pages <- apa_scalar(row$pages)
+  source <- character()
+  if (!is.na(venue)) {
+    venue_text <- paste0("*", venue, "*")
+    if (!is.na(volume)) {
+      volume_text <- paste0("*", volume, "*")
+      if (!is.na(issue)) volume_text <- paste0(volume_text, "(", issue, ")")
+      venue_text <- paste(venue_text, volume_text, sep = ", ")
+    }
+    if (!is.na(pages)) venue_text <- paste(venue_text, pages, sep = ", ")
+    source <- c(source, paste0(venue_text, "."))
+  }
+  doi <- apa_scalar(row$doi)
+  url <- if (!is.na(doi)) paste0("https://doi.org/", doi) else apa_scalar(row$url)
+  if (is.na(url)) url <- apa_scalar(row$url_landing)
+  if (!is.na(url)) source <- c(source, url)
+  lead <- if (!is.null(authors)) paste0(authors, " ") else ""
+  reference <- paste(c(paste0(lead, date), paste0(article_title, "."), source), collapse = " ")
+  trimws(gsub("[[:space:]]+", " ", reference))
+}
+
+apa7 <- apa7_reference(row, title)
+
 cat(sprintf("ref_id: %s\n", ref_id))
 cat(sprintf("title: %s\n\n", title))
+cat(apa7, "\n\n", sep = "")
 cat("abstract\n")
 if (is.na(abstract) || !nzchar(trimws(abstract))) {
   cat("[missing]\n")
@@ -486,6 +571,7 @@ cat(sprintf("\ndigest_present: %s\n", if (digest_missing) "false" else "true"))
       section_scalar("Summary", digest$summary),
       section_scalar("Motivation", digest$motivation),
       section_scalar("Theoretical Mechanism", digest$theoretical_mechanism),
+      vector_lines("## Key Findings", digest$key_findings),
       inline_lines("## Anchor References", digest$anchor_references),
       inline_lines("## Citation Logic Nodes", digest$citation_logic_nodes)
     )
