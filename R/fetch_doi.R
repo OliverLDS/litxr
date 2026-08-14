@@ -165,7 +165,12 @@
   volume <- .litxr_first_nonempty_chr(attrs$volume)
   issue <- .litxr_first_nonempty_chr(attrs$issue)
   pages <- .litxr_first_nonempty_chr(attrs$page %||% attrs$pages)
-  abstract <- .litxr_first_nonempty_chr(attrs$descriptions[[1]]$description %||% attrs$description)
+  description_entry <- if (!is.null(attrs$descriptions) && length(attrs$descriptions)) {
+    attrs$descriptions[[1L]]
+  } else {
+    NULL
+  }
+  abstract <- .litxr_first_nonempty_chr(description_entry$description %||% attrs$description)
   url <- .litxr_first_nonempty_chr(attrs$url %||% attrs$landingPage %||% attrs$landing_page)
   isbn <- if (!is.null(attrs$isbn) && length(attrs$isbn)) paste(unique(as.character(unlist(attrs$isbn, use.names = FALSE))), collapse = "; ") else NA_character_
   issn <- if (!is.null(attrs$issn) && length(attrs$issn)) paste(unique(as.character(unlist(attrs$issn, use.names = FALSE))), collapse = "; ") else NA_character_

@@ -41,6 +41,22 @@ test_that("parse_crossref_entry_unified uses a typed missing publication date", 
   expect_true(is.na(records$pub_date[[2L]]))
 })
 
+test_that("DataCite metadata accepts an empty descriptions array", {
+  payload <- list(data = list(attributes = list(
+    titles = list(list(title = "Example preprint")),
+    descriptions = list(),
+    publicationYear = 2024L
+  )))
+
+  message <- litxr:::.litxr_doi_message_from_datacite(
+    payload,
+    "10.13140/rg.2.2.12274.52166"
+  )
+
+  expect_identical(message$title, "Example preprint")
+  expect_true(is.na(message$abstract))
+})
+
 test_that("invalid fallback container titles are routed to unclassified doi", {
   td <- tempfile("litxr-doi-config-")
   dir.create(td)
