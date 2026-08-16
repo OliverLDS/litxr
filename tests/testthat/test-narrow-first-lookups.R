@@ -99,6 +99,60 @@ test_that("narrow-first exact-key lookup still returns hydrated rows", {
   expect_identical(linked_rows$ref_id[[1]], "arxiv:2501.00001")
 })
 
+test_that("narrow-first lookup matches DOI payload keys without case sensitivity", {
+  td <- tempfile("litxr-doi-key-case-")
+  dir.create(td)
+  config_path <- file.path(td, "config.yaml")
+
+  old_litxr_config <- Sys.getenv("LITXR_DATA_ROOT", unset = NA_character_)
+  Sys.setenv(LITXR_DATA_ROOT = dirname(config_path))
+  on.exit({
+    if (is.na(old_litxr_config)) {
+      Sys.unsetenv("LITXR_DATA_ROOT")
+    } else {
+      Sys.setenv(LITXR_DATA_ROOT = old_litxr_config)
+    }
+  }, add = TRUE)
+
+  litxr::litxr_init()
+  cfg <- litxr::litxr_read_config()
+  collection_index <- match("journal_of_finance", vapply(cfg$collections, `[[`, character(1), "collection_id"))
+  collection <- cfg$collections[[collection_index]]
+  ref_dir <- litxr:::.litxr_resolve_local_path(cfg, collection$local_path)
+  dir.create(ref_dir, recursive = TRUE, showWarnings = FALSE)
+
+  json_filename <- "10_13140_rg_2_2_12274_52166.json"
+  jsonlite::write_json(
+    list(
+      ref_id = "doi:10.13140/RG.2.2.12274.52166",
+      source_id = "10.13140/RG.2.2.12274.52166",
+      doi = "10.13140/RG.2.2.12274.52166",
+      title = "Mixed-case DOI payload"
+    ),
+    file.path(ref_dir, json_filename),
+    auto_unbox = TRUE
+  )
+
+  doi_path <- litxr:::.litxr_ref_doi_path(cfg)
+  dir.create(dirname(doi_path), recursive = TRUE, showWarnings = FALSE)
+  fst::write_fst(
+    data.frame(
+      doi = "10.13140/rg.2.2.12274.52166",
+      collection_index = collection_index,
+      json_filename = json_filename
+    ),
+    doi_path
+  )
+
+  rows <- litxr:::.litxr_read_normalized_reference_rows_by_keys(
+    cfg,
+    "10.13140/rg.2.2.12274.52166"
+  )
+
+  expect_equal(nrow(rows), 1L)
+  expect_identical(rows$title[[1L]], "Mixed-case DOI payload")
+})
+
 test_that("wide projection aborts above the configured runtime limit", {
   td <- tempfile("litxr-wide-guard-")
   dir.create(td)

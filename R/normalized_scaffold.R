@@ -352,7 +352,15 @@
       out <- data.table::rbindlist(thin_rows, fill = TRUE)
       key_cols <- intersect(c("ref_id", "source_id", "doi"), names(out))
       if (length(key_cols)) {
-        key_mask <- Reduce(`|`, lapply(key_cols, function(col) as.character(out[[col]]) %in% keys | as.character(out[[col]]) %in% bare_keys))
+        match_keys <- unique(c(keys, bare_keys))
+        doi_keys <- grepl("^(doi:)?10\\.", match_keys, ignore.case = TRUE)
+        match_keys[doi_keys] <- tolower(match_keys[doi_keys])
+        key_mask <- Reduce(`|`, lapply(key_cols, function(col) {
+          values <- as.character(out[[col]])
+          doi_values <- grepl("^(doi:)?10\\.", values, ignore.case = TRUE)
+          values[doi_values] <- tolower(values[doi_values])
+          values %in% match_keys
+        }))
         out <- out[key_mask, ]
       }
       if (nrow(out)) {
