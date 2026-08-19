@@ -209,7 +209,11 @@
       if (is.na(isbn_value) || !nzchar(isbn_value)) {
         return(NULL)
       }
-      return(list(isbn = isbn_value))
+      return(list(
+        isbn = isbn_value,
+        collection_index = collection_index,
+        json_filename = json_filename
+      ))
     }
     return(NULL)
   }

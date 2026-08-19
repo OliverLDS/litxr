@@ -11,13 +11,19 @@
   paste0(source, ":", source_id)
 }
 
-.litxr_register_manual_collection <- function(cfg, collection_id, collection_title = NULL) {
+.litxr_register_manual_collection <- function(
+  cfg,
+  collection_id,
+  collection_title = NULL,
+  remote_channel = "manual",
+  collection_type = "manual_batch"
+) {
   title <- if (is.null(collection_title) || !nzchar(collection_title)) collection_id else collection_title
   collection <- list(
     collection_id = collection_id,
-    collection_type = "manual_batch",
+    collection_type = collection_type,
     title = title,
-    remote_channel = "manual",
+    remote_channel = remote_channel,
     local_path = file.path("ref", collection_id),
     metadata = list(),
     sync = list()

@@ -1,3 +1,11 @@
+# litxr 0.1.8.16
+
+- Added `scripts/add_isbn_ref_manually.R` for validated manual ISBN-10/ISBN-13
+  book ingest. It writes or replaces the book JSON and incrementally updates
+  only the target collection's `index/ref_isbn.fst` rows.
+- Fixed ISBN-only thin-store rows to retain their collection position and JSON
+  filename, so ISBN lookup can resolve the stored JSON without a DOI.
+
 # litxr 0.1.8.15
 
 - Added `scripts/serve_literature_projects.js`, a localhost-only project

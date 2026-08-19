@@ -141,6 +141,19 @@ refs <- data.frame(
 litxr_add_refs(refs, collection_id = "manual_books", config = cfg)
 ```
 
+For a manually entered ISBN-only book, use the CLI. It validates ISBN-10/ISBN-13,
+writes the book JSON, and incrementally refreshes `index/ref_isbn.fst` for only
+the target collection:
+
+```sh
+Rscript scripts/add_isbn_ref_manually.R \
+  --isbn 978-0134610993 \
+  --title "Artificial Intelligence: A Modern Approach" \
+  --authors "Stuart Russell; Peter Norvig" \
+  --year 2021 \
+  --publisher "Pearson"
+```
+
 ## BibTeX Export
 
 Use:
