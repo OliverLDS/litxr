@@ -63,6 +63,7 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
   nodes <- data.table::data.table(
     id = root_ids,
     ref_id = root_ids,
+    bibtex_key = .litxr_bibtex_key_for_ref_id(root_ids),
     node_type = ifelse(root_cached, "cached", "external"),
     title = NA_character_,
     summary = NA_character_,
@@ -125,6 +126,7 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
           nodes <- data.table::rbindlist(list(nodes, data.table::data.table(
             id = add_ids,
             ref_id = add_ids,
+            bibtex_key = .litxr_bibtex_key_for_ref_id(add_ids),
             node_type = ifelse(!is.na(add_hit), "cached", "external"),
             title = NA_character_,
             summary = NA_character_,

@@ -324,6 +324,7 @@ apa7_reference <- function(row, fallback_title) {
 apa7 <- apa7_reference(row, title)
 
 cat(sprintf("ref_id: %s\n", ref_id))
+cat(sprintf("bibtex_key: %s\n", litxr:::.litxr_bibtex_key_for_ref_id(ref_id)))
 cat(sprintf("title: %s\n\n", title))
 cat(apa7, "\n\n", sep = "")
 cat("abstract\n")

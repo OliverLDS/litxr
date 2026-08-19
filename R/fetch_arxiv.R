@@ -41,7 +41,7 @@ fetch_arxiv_xml <- function(
   retry_max = 6L,
   retry_backoff_seconds = 30
 ) {
-  req <- httr2::request("http://export.arxiv.org/api/query")
+  req <- httr2::request("https://export.arxiv.org/api/query")
   req <- httr2::req_error(req, is_error = function(resp) FALSE)
 
   if (!is.null(id_vec) && length(id_vec)) {

@@ -67,16 +67,25 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   core
 }
 
-.make_arxiv_citekey <- function(arxiv_id) {
-  arxiv_id <- .litxr_normalize_arxiv_ref_id(arxiv_id)
-  if (is.na(arxiv_id) || !nzchar(arxiv_id)) {
-    return("ref")
-  }
-  core <- sub("^arxiv:", "", arxiv_id, ignore.case = TRUE)
-  core <- gsub("\\.", "_", core, fixed = TRUE)
+.litxr_bibtex_key_for_ref_id <- function(ref_id) {
+  ref_id <- trimws(as.character(ref_id))
+  if (!length(ref_id)) return(character())
+
+  arxiv_id <- sub("^arxiv:", "", ref_id, ignore.case = TRUE)
+  doi <- sub("^doi:", "", ref_id, ignore.case = TRUE)
+  is_arxiv <- grepl("^[0-9]{4}\\.[0-9]{4,5}(v[0-9]+)?$", arxiv_id, ignore.case = TRUE)
+  is_doi <- grepl("^10\\.", doi, ignore.case = TRUE)
+  core <- ref_id
+  core[is_arxiv] <- gsub("\\.", "_", sub("v[0-9]+$", "", arxiv_id[is_arxiv], ignore.case = TRUE))
+  core[!is_arxiv & is_doi] <- sub(".*/", "", doi[!is_arxiv & is_doi])
   core <- gsub("[^A-Za-z0-9]+", "_", core)
   core <- gsub("^_+|_+$", "", core)
-  if (!nzchar(core)) "ref" else core
+  core[is.na(core) | !nzchar(core)] <- "ref"
+  core
+}
+
+.make_arxiv_citekey <- function(arxiv_id) {
+  .litxr_bibtex_key_for_ref_id(arxiv_id)
 }
 
 .format_authors_bib <- function(authors_list) {
