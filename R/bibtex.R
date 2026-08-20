@@ -798,7 +798,9 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
       next
     }
     resolved_n <- resolved_n + 1L
-    resolved[[resolved_n]] <- result$row[1L, ]
+    row <- result$row[1L, ]
+    row[["litxr_requested_ref_id__"]] <- ref_id
+    resolved[[resolved_n]] <- row
     resolved_ref_ids[[resolved_n]] <- as.character(result$resolved_ref_id)
   }
 
@@ -921,10 +923,19 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
 #'   through a linked DOI row when one is present in the identity map and DOI
 #'   payload store. If `FALSE`, arXiv ids are exported as arXiv rows without
 #'   DOI promotion.
+#' @param bibtex_key_overrides Optional named character vector keyed by the
+#'   requested canonical ref ids. This is intended for presentation-specific
+#'   exporters; omitted values retain the deterministic default key.
 #'
 #' @return Named list describing the write status.
 #' @export
-write_bibtex_entries <- function(path, ref_ids, config = NULL, prefer_linked_doi = TRUE) {
+write_bibtex_entries <- function(
+  path,
+  ref_ids,
+  config = NULL,
+  prefer_linked_doi = TRUE,
+  bibtex_key_overrides = NULL
+) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
   candidates <- .litxr_bibtex_candidate_sets(ref_ids)
@@ -951,6 +962,21 @@ write_bibtex_entries <- function(path, ref_ids, config = NULL, prefer_linked_doi
     prefer_linked_doi = prefer_linked_doi
   )
   rows <- resolved$rows
+  if (!is.null(bibtex_key_overrides) && nrow(rows)) {
+    bibtex_key_overrides <- as.character(bibtex_key_overrides)
+    override_names <- names(bibtex_key_overrides)
+    if (is.null(override_names) || any(is.na(override_names) | !nzchar(override_names))) {
+      stop("`bibtex_key_overrides` must be a named character vector.", call. = FALSE)
+    }
+    requested_ref_ids <- as.character(rows$litxr_requested_ref_id__)
+    overrides <- unname(bibtex_key_overrides[requested_ref_ids])
+    use_override <- !is.na(overrides) & nzchar(overrides)
+    if (any(use_override)) {
+      rows$bib_key__ <- if ("bib_key__" %in% names(rows)) as.character(rows$bib_key__) else rep(NA_character_, nrow(rows))
+      rows$bib_key__[use_override] <- overrides[use_override]
+    }
+  }
+  if ("litxr_requested_ref_id__" %in% names(rows)) rows$litxr_requested_ref_id__ <- NULL
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
 
   if (!nrow(rows)) {

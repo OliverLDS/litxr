@@ -4,7 +4,13 @@
 \alias{write_bibtex_entries}
 \title{Write BibTeX entries for canonical reference ids}
 \usage{
-write_bibtex_entries(path, ref_ids, config = NULL, prefer_linked_doi = TRUE)
+write_bibtex_entries(
+  path,
+  ref_ids,
+  config = NULL,
+  prefer_linked_doi = TRUE,
+  bibtex_key_overrides = NULL
+)
 }
 \arguments{
 \item{path}{Output \code{.bib} file path.}
@@ -18,6 +24,10 @@ omitted, \code{litxr} reads \code{LITXR_DATA_ROOT}.}
 through a linked DOI row when one is present in the identity map and DOI
 payload store. If \code{FALSE}, arXiv ids are exported as arXiv rows without
 DOI promotion.}
+
+\item{bibtex_key_overrides}{Optional named character vector keyed by the
+requested canonical ref ids. This is intended for presentation-specific
+exporters; omitted values retain the deterministic default key.}
 }
 \value{
 Named list describing the write status.

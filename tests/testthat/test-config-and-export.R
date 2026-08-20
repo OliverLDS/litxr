@@ -932,6 +932,16 @@ bib_arxiv_no_link <- paste(readLines(out_arxiv_no_link, warn = FALSE), collapse 
 stopifnot(grepl("@unpublished\\{2501_00001,", bib_arxiv_no_link))
 stopifnot(grepl("https://arxiv.org", bib_arxiv_no_link, fixed = TRUE))
 
+out_arxiv_override <- file.path(td_export, "references_arxiv_override.bib")
+litxr::write_bibtex_entries(
+  out_arxiv_override,
+  "arxiv:2501.00001",
+  config = cfg_export,
+  bibtex_key_overrides = c("arxiv:2501.00001" = "Project_Key")
+)
+bib_arxiv_override <- paste(readLines(out_arxiv_override, warn = FALSE), collapse = "\n")
+stopifnot(grepl("@article\\{Project_Key,", bib_arxiv_override))
+
 existing <- data.table::copy(record)
 existing[["title"]] <- "Old Title"
 existing[["note"]] <- "keep me"

@@ -172,6 +172,67 @@ function bibtexKeyFromSummary(summary) {
   return match ? match[1].trim() : "";
 }
 
+function shortTitleOverridesPath(projectsPath) {
+  return path.join(path.dirname(projectsPath), "literature_graph_short_titles.json");
+}
+
+function readShortTitleOverrides(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const sidecar = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const rawTitles = sidecar && typeof sidecar.short_titles === "object" && sidecar.short_titles ? sidecar.short_titles : null;
+  if (!rawTitles || Array.isArray(rawTitles)) throw new Error(`Invalid short-title sidecar: ${filePath}`);
+  const overrides = {};
+  const seen = new Map();
+  for (const [rawRefId, rawKey] of Object.entries(rawTitles)) {
+    const refId = normalizeRefId(rawRefId);
+    const key = String(rawKey || "").trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid short-title key for ${refId}: ${key || "[empty]"}`);
+    const duplicateOf = seen.get(key.toLocaleLowerCase());
+    if (duplicateOf && duplicateOf !== refId) throw new Error(`Duplicate short-title key ${key}: ${duplicateOf}, ${refId}`);
+    seen.set(key.toLocaleLowerCase(), refId);
+    overrides[refId] = key;
+  }
+  return overrides;
+}
+
+function writeShortTitleOverride(filePath, refId, value, defaultKey) {
+  const overrides = readShortTitleOverrides(filePath);
+  const key = String(value || "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error("Short title must use only letters, digits, and underscores.");
+  }
+  for (const [otherRefId, otherKey] of Object.entries(overrides)) {
+    if (otherRefId !== refId && otherKey.toLocaleLowerCase() === key.toLocaleLowerCase()) {
+      throw new Error(`Short title is already used by ${otherRefId}: ${key}`);
+    }
+  }
+  if (key === defaultKey) delete overrides[refId];
+  else overrides[refId] = key;
+  const shortTitles = {};
+  for (const id of Object.keys(overrides).sort()) shortTitles[id] = overrides[id];
+  fs.writeFileSync(filePath, JSON.stringify({ schema_version: 1, short_titles: shortTitles }, null, 2) + "\n");
+  return overrides;
+}
+
+function effectiveReference(entry, refId, shortTitleOverrides) {
+  return { ...entry, bibtex_key: shortTitleOverrides[refId] || entry.bibtex_key };
+}
+
+function projectBibtexKeyOverrides(project, cache, shortTitleOverrides) {
+  const overrides = {};
+  const seen = new Map();
+  for (const refId of project.ref_ids) {
+    const entry = cache.references[refId];
+    const key = shortTitleOverrides[refId] || entry?.bibtex_key;
+    if (!key) continue;
+    const duplicateOf = seen.get(key.toLocaleLowerCase());
+    if (duplicateOf && duplicateOf !== refId) throw new Error(`Project BibTeX key collision ${key}: ${duplicateOf}, ${refId}`);
+    seen.set(key.toLocaleLowerCase(), refId);
+    if (shortTitleOverrides[refId]) overrides[canonicalRefId(refId)] = shortTitleOverrides[refId];
+  }
+  return overrides;
+}
+
 function validateReferenceCache(cache, filePath) {
   const rawEntries = cache && typeof cache.references === "object" && cache.references ? cache.references : {};
   const references = {};
@@ -351,7 +412,7 @@ async function reload(preferred=state.projectId){const data=await api('/api/proj
 function tagEditor(project,refId){const selectedTags=project.ref_tags?.[refId]||[];const options=project.tags.length?project.tags.map((tag,index)=>'<label><input type="checkbox" data-project-tag="'+index+'" '+(selectedTags.includes(tag)?'checked':'')+'> '+esc(tag)+'</label>').join('<br>'):'<span class="ref">No project tags yet.</span>';return '<div class="detail-actions"><strong>Project tags</strong></div><div id="project-tag-options">'+options+'</div><div class="row" style="margin-top:8px"><input id="new-project-tag" placeholder="New tag"><button id="add-project-tag" type="button">+</button></div>'}
 async function saveReferenceTags(refId,body){const project=selected();if(!project)return;try{await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(refId)+'/tags',{method:'POST',body:JSON.stringify(body)});await reload(project.project_id);await showRef(refId)}catch(error){alert(error.message)}}
 async function renameProjectTag(oldTag,newTag){const project=selected();if(!project)return;try{await api('/api/projects/'+project.project_id+'/tags/'+encodeURIComponent(oldTag)+'/rename',{method:'POST',body:JSON.stringify({tag:newTag})});await reload(project.project_id);if(state.refId)await showRef(state.refId)}catch(error){alert(error.message)}}
-function showDetail(refId,entry){const project=selected();const detail=document.getElementById('detail');const cite=entry.bibtex_key?'<button id="copy-citekey" class="citekey" type="button" title="Copy @'+esc(entry.bibtex_key)+'">@'+esc(entry.bibtex_key)+'</button>':'';detail.className='detail';detail.innerHTML='<div class="detail-header"><div><h2>'+esc(entry.title)+'</h2><div class="ref">'+esc(refId)+' '+cite+'</div></div><button id="refresh-ref" class="icon" title="Refresh cached reference" aria-label="Refresh cached reference">↻</button></div><div class="detail-body">'+summaryHtml(entry.summary)+'</div>'+tagEditor(project,refId)+'<div class="detail-actions"><button id="remove-ref">Remove from project</button></div>';document.getElementById('refresh-ref').onclick=refreshRef;document.getElementById('remove-ref').onclick=removeRef;const copyButton=document.getElementById('copy-citekey');if(copyButton)copyButton.onclick=async()=>{await navigator.clipboard.writeText('@'+entry.bibtex_key);copyButton.textContent='Copied';setTimeout(()=>{copyButton.textContent='@'+entry.bibtex_key},900)};document.querySelectorAll('[data-project-tag]').forEach(input=>input.onchange=()=>{const tags=[...document.querySelectorAll('[data-project-tag]:checked')].map(box=>project.tags[Number(box.dataset.projectTag)]);saveReferenceTags(refId,{tags})});document.getElementById('add-project-tag').onclick=()=>{const input=document.getElementById('new-project-tag');if(input.value.trim())saveReferenceTags(refId,{add_tag:input.value.trim()})}}
+function showDetail(refId,entry){const project=selected();const detail=document.getElementById('detail');const cite=entry.bibtex_key?'<span id="citekey-controls"><button id="copy-citekey" class="citekey" type="button" title="Copy @'+esc(entry.bibtex_key)+'">@'+esc(entry.bibtex_key)+'</button><button id="edit-short-title" class="citekey" type="button" title="Edit short title" aria-label="Edit short title">&#9998;</button></span>':'';detail.className='detail';detail.innerHTML='<div class="detail-header"><div><h2>'+esc(entry.title)+'</h2><div class="ref">'+esc(refId)+' '+cite+'</div></div><button id="refresh-ref" class="icon" title="Refresh cached reference" aria-label="Refresh cached reference">↻</button></div><div class="detail-body">'+summaryHtml(entry.summary)+'</div>'+tagEditor(project,refId)+'<div class="detail-actions"><button id="remove-ref">Remove from project</button></div>';document.getElementById('refresh-ref').onclick=refreshRef;document.getElementById('remove-ref').onclick=removeRef;const copyButton=document.getElementById('copy-citekey');if(copyButton)copyButton.onclick=async()=>{await navigator.clipboard.writeText('@'+entry.bibtex_key);copyButton.textContent='Copied';setTimeout(()=>{copyButton.textContent='@'+entry.bibtex_key},900)};const editButton=document.getElementById('edit-short-title');if(editButton)editButton.onclick=()=>{const controls=document.getElementById('citekey-controls');controls.innerHTML='<input id="short-title-edit" class="citekey" aria-label="Short title">';const input=document.getElementById('short-title-edit');input.value=entry.bibtex_key;let saving=false;const save=async()=>{if(saving)return;saving=true;try{const data=await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(refId)+'/short-title',{method:'POST',body:JSON.stringify({short_title:input.value.trim()})});await reload(project.project_id);state.refId=refId;showDetail(refId,data.reference)}catch(error){alert(error.message);saving=false;input.focus()}};input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();save()}else if(event.key==='Escape'){event.preventDefault();showDetail(refId,entry)}};input.onblur=save;input.focus();input.select()};document.querySelectorAll('[data-project-tag]').forEach(input=>input.onchange=()=>{const tags=[...document.querySelectorAll('[data-project-tag]:checked')].map(box=>project.tags[Number(box.dataset.projectTag)]);saveReferenceTags(refId,{tags})});document.getElementById('add-project-tag').onclick=()=>{const input=document.getElementById('new-project-tag');if(input.value.trim())saveReferenceTags(refId,{add_tag:input.value.trim()})}}
 async function showRef(id){const project=selected();if(!project)return;state.refId=id;render();const detail=document.getElementById('detail');detail.className='detail';detail.innerHTML='<p>Loading cached reference...</p>';try{const data=await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(id));await reload(project.project_id);state.refId=id;render();showDetail(id,data.reference)}catch(error){detail.className='empty';detail.textContent=error.message}}
 async function refreshRef(){const project=selected();if(!project||!state.refId)return;const detail=document.getElementById('detail');detail.innerHTML='<p>Refreshing cached reference...</p>';try{const data=await api('/api/projects/'+project.project_id+'/refs/'+encodeURIComponent(state.refId)+'/refresh',{method:'POST'});await reload(project.project_id);showDetail(state.refId,data.reference)}catch(error){detail.className='empty';detail.textContent=error.message}}
 async function addProject(){const input=document.getElementById('project-name');if(!input.value.trim())return;try{const data=await api('/api/projects',{method:'POST',body:JSON.stringify({name:input.value.trim()})});input.value='';await reload(data.project.project_id)}catch(e){alert(e.message)}}
@@ -379,6 +440,7 @@ async function main() {
   if (!args.projectsPath) throw new Error("--projects-path is required.");
   if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) throw new Error("--port must be an integer from 1 to 65535.");
   const projectsPath = path.resolve(args.projectsPath);
+  const shortTitlesPath = shortTitleOverridesPath(projectsPath);
   if (!fs.existsSync(projectsPath)) {
     const parent = path.dirname(projectsPath);
     if (!fs.existsSync(parent)) throw new Error(`Parent directory does not exist: ${parent}`);
@@ -456,6 +518,17 @@ async function main() {
           const body = await readBody(request);
           if (Object.hasOwn(body, "add_tag")) addProjectTag(project, refId, body.add_tag);
           else setProjectReferenceTags(project, refId, body.tags);
+        } else if (request.method === "POST" && parts.length === 6 && parts[5] === "short-title") {
+          const refId = normalizeRefId(parts[4]);
+          if (!project.ref_ids.includes(refId)) throw new Error(`Reference is not in project: ${refId}`);
+          let cache = readReferenceCache(projectsPath);
+          if (!cache.references[refId] || !cache.references[refId].bibtex_key) {
+            cache.references[refId] = await hydrateReference(summaryScript, refId);
+            cache = writeReferenceCache(projectsPath, cache);
+          }
+          const body = await readBody(request);
+          const overrides = writeShortTitleOverride(shortTitlesPath, refId, body.short_title, cache.references[refId].bibtex_key);
+          return sendJson(response, { status: "ok", ref_id: refId, reference: effectiveReference(cache.references[refId], refId, overrides) });
         } else if (request.method === "GET" && parts.length === 5) {
           const refId = normalizeRefId(parts[4]);
           if (!project.ref_ids.includes(refId)) throw new Error(`Reference is not in project: ${refId}`);
@@ -464,14 +537,14 @@ async function main() {
             cache.references[refId] = await hydrateReference(summaryScript, refId);
             cache = writeReferenceCache(projectsPath, cache);
           }
-          return sendJson(response, { status: "ok", ref_id: refId, reference: cache.references[refId] });
+          return sendJson(response, { status: "ok", ref_id: refId, reference: effectiveReference(cache.references[refId], refId, readShortTitleOverrides(shortTitlesPath)) });
         } else if (request.method === "POST" && parts.length === 6 && parts[5] === "refresh") {
           const refId = normalizeRefId(parts[4]);
           if (!project.ref_ids.includes(refId)) throw new Error(`Reference is not in project: ${refId}`);
           const cache = readReferenceCache(projectsPath);
           cache.references[refId] = await hydrateReference(summaryScript, refId);
           writeReferenceCache(projectsPath, cache);
-          return sendJson(response, { status: "ok", ref_id: refId, reference: cache.references[refId] });
+          return sendJson(response, { status: "ok", ref_id: refId, reference: effectiveReference(cache.references[refId], refId, readShortTitleOverrides(shortTitlesPath)) });
         } else {
           throw new Error("Unsupported project reference operation.");
         }
@@ -480,13 +553,19 @@ async function main() {
       if (request.method === "GET" && parts[0] === "api" && parts[1] === "projects" && parts[3] === "bib") {
         const project = readProject(projectsPath, parts[2]);
         const temporaryBib = path.join(os.tmpdir(), `litxr-${process.pid}-${Date.now()}.bib`);
+        const overrides = projectBibtexKeyOverrides(project, readReferenceCache(projectsPath), readShortTitleOverrides(shortTitlesPath));
+        const temporaryOverrides = Object.keys(overrides).length ? path.join(os.tmpdir(), `litxr-${process.pid}-${Date.now()}-keys.json`) : null;
         try {
-          await run("/bin/zsh", [bibScript, "--output", temporaryBib, "--ref-ids", project.ref_ids.map(canonicalRefId).join(",")]);
+          if (temporaryOverrides) fs.writeFileSync(temporaryOverrides, JSON.stringify(overrides));
+          const bibArgs = [bibScript, "--output", temporaryBib, "--ref-ids", project.ref_ids.map(canonicalRefId).join(",")];
+          if (temporaryOverrides) bibArgs.push("--bibtex-key-overrides", temporaryOverrides);
+          await run("/bin/zsh", bibArgs);
           const bib = fs.readFileSync(temporaryBib);
           response.writeHead(200, { "Content-Type": "application/x-bibtex; charset=utf-8", "Content-Disposition": `attachment; filename="${project.project_id}.bib"`, "Cache-Control": "no-store" });
           return response.end(bib);
         } finally {
           if (fs.existsSync(temporaryBib)) fs.unlinkSync(temporaryBib);
+          if (temporaryOverrides && fs.existsSync(temporaryOverrides)) fs.unlinkSync(temporaryOverrides);
         }
       }
       sendJson(response, { status: "error", error: "Not found" }, 404);
