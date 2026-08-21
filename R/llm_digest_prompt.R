@@ -111,6 +111,16 @@
     ), collapse = "\n"))
   }
 
+  if (startsWith(ref_id, "openreview:")) {
+    openreview_id <- sub("^openreview:", "", ref_id, ignore.case = TRUE)
+    return(paste(c(
+      "OpenReview-specific hint:",
+      sprintf("- Forum page: https://openreview.net/forum?id=%s", openreview_id),
+      sprintf("- PDF full text: https://openreview.net/pdf?id=%s", openreview_id),
+      "Use the forum page and its linked PDF first."
+    ), collapse = "\n"))
+  }
+
   if (is.na(linked_arxiv_ref_id) || !nzchar(linked_arxiv_ref_id)) {
     if (!is.null(cfg)) {
       linked_arxiv_ref_id <- .litxr_task_ref_id(cfg, ref_id, task = "fulltext")

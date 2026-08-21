@@ -164,7 +164,7 @@
 }
 
 .litxr_sync_thin_rows_from_payload <- function(payload, branch = c("arxiv", "doi"), collection_index = NA_integer_, json_filename = NA_character_) {
-  branch <- match.arg(branch, c("arxiv", "doi", "isbn"))
+  branch <- match.arg(branch, c("arxiv", "doi", "isbn", "openreview"))
   ref_id <- .litxr_sync_scalar_chr(payload$ref_id)
   source_id <- .litxr_sync_scalar_chr(payload$source_id)
   arxiv_versioned <- .litxr_sync_scalar_chr(payload$arxiv_id_versioned)
@@ -173,6 +173,16 @@
     collection_index <- NA_integer_
   }
   json_filename <- .litxr_sync_scalar_chr(json_filename)
+
+  if (identical(branch, "openreview")) {
+    openreview_id <- .litxr_bare_openreview_id(ref_id = ref_id, source_id = source_id)
+    if (is.na(openreview_id) || !nzchar(openreview_id)) return(NULL)
+    return(list(
+      openreview_id = openreview_id,
+      collection_index = collection_index,
+      json_filename = json_filename
+    ))
+  }
 
   if (identical(branch, "arxiv")) {
     arxiv_value <- .litxr_bare_arxiv_id(ref_id = ref_id, source_id = source_id, arxiv_versioned = arxiv_versioned)
@@ -362,16 +372,19 @@
   arxiv_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "arxiv"))
   doi_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "crossref"))
   isbn_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "isbn"))
+  openreview_branch_folders <- intersect(folders, .litxr_collection_ids_by_remote_channel(cfg, "openreview"))
   collections <- .litxr_config_collections(cfg)
   collection_ids_cfg <- vapply(collections, function(collection) as.character(collection$collection_id %||% collection$journal_id %||% NA_character_), character(1))
 
   arxiv_rows_list <- list()
   doi_rows_list <- list()
   isbn_rows_list <- list()
+  openreview_rows_list <- list()
 
   arxiv_count <- 0L
   doi_count <- 0L
   isbn_count <- 0L
+  openreview_count <- 0L
 
   for (folder in arxiv_branch_folders) {
     collection_index <- match(folder, collection_ids_cfg)
@@ -423,10 +436,27 @@
       }
     }
   }
+  for (folder in openreview_branch_folders) {
+    collection_index <- match(folder, collection_ids_cfg)
+    files <- .litxr_sync_json_files_after(file.path(root, folder), json_mtime_after = json_mtime_after)
+    for (path in files) {
+      rows <- .litxr_sync_thin_rows_from_payload(
+        jsonlite::fromJSON(path, simplifyVector = FALSE),
+        branch = "openreview",
+        collection_index = collection_index,
+        json_filename = basename(path)
+      )
+      if (!is.null(rows)) {
+        openreview_count <- openreview_count + 1L
+        openreview_rows_list[[openreview_count]] <- rows
+      }
+    }
+  }
 
   arxiv_collection_rows <- if (length(arxiv_rows_list)) data.table::rbindlist(arxiv_rows_list, fill = TRUE) else data.table::data.table(arxiv_id = character(), arxiv_version = integer(), collection_index = integer(), json_filename = character(), doi = character())
   doi_rows <- if (length(doi_rows_list)) data.table::rbindlist(doi_rows_list, fill = TRUE) else data.table::data.table(doi = character(), collection_index = integer(), json_filename = character())
   isbn_rows <- if (length(isbn_rows_list)) data.table::rbindlist(isbn_rows_list, fill = TRUE) else data.table::data.table(isbn = character(), collection_index = integer(), json_filename = character())
+  openreview_rows <- if (length(openreview_rows_list)) data.table::rbindlist(openreview_rows_list, fill = TRUE) else data.table::data.table(openreview_id = character(), collection_index = integer(), json_filename = character())
 
   if (nrow(arxiv_collection_rows)) {
     arxiv_collection_rows$arxiv_version <- suppressWarnings(as.integer(arxiv_collection_rows$arxiv_version))
@@ -462,16 +492,24 @@
       )
     }
   }
+  if (nrow(openreview_rows)) {
+    dup_openreview <- duplicated(openreview_rows$openreview_id)
+    if (any(dup_openreview)) {
+      stop("Duplicate OpenReview id(s) found while rebuilding thin OpenReview store: ", paste(unique(openreview_rows$openreview_id[dup_openreview]), collapse = ", "), call. = FALSE)
+    }
+  }
 
   list(
     selected_collection_ids = folders,
     arxiv_folders = arxiv_branch_folders,
     doi_folders = doi_branch_folders,
     isbn_folders = isbn_branch_folders,
+    openreview_folders = openreview_branch_folders,
     arxiv_rows = arxiv_rows,
     arxiv_collection_rows = arxiv_collection_rows,
     doi_rows = doi_rows,
-    isbn_rows = isbn_rows
+    isbn_rows = isbn_rows,
+    openreview_rows = openreview_rows
   )
 }
 
@@ -639,6 +677,7 @@
   arxiv_collection_rows <- inputs$arxiv_collection_rows
   doi_rows <- inputs$doi_rows
   isbn_rows <- inputs$isbn_rows
+  openreview_rows <- inputs$openreview_rows
   current_mode <- if (is.null(json_mtime_after) && is.null(collection_ids)) "full" else "incremental"
   remove_missing <- is.null(json_mtime_after) && is.null(collection_ids)
   diff_dir <- .litxr_ensure_project_log_dir(cfg)
@@ -704,6 +743,15 @@
       json_filename = character()
     )
   }
+  openreview_rows_write <- if (nrow(openreview_rows)) {
+    data.table::data.table(
+      openreview_id = as.character(openreview_rows$openreview_id),
+      collection_index = as.integer(openreview_rows$collection_index),
+      json_filename = as.character(openreview_rows$json_filename)
+    )
+  } else {
+    data.table::data.table(openreview_id = character(), collection_index = integer(), json_filename = character())
+  }
 
   arxiv_store <- .litxr_upsert_scaffold_rows(.litxr_ref_arxiv_path(cfg), arxiv_rows_write, "arxiv_id", remove_missing = remove_missing)
   if (nrow(arxiv_collection_rows)) {
@@ -742,6 +790,7 @@
   }
   doi_store <- .litxr_upsert_scaffold_rows(.litxr_ref_doi_path(cfg), doi_rows_write, "doi", remove_missing = remove_missing)
   isbn_store <- .litxr_upsert_scaffold_rows(.litxr_ref_isbn_path(cfg), isbn_rows_write, "isbn", remove_missing = remove_missing)
+  openreview_store <- .litxr_upsert_scaffold_rows(.litxr_ref_openreview_path(cfg), openreview_rows_write, "openreview_id", remove_missing = remove_missing)
   if (remove_missing || nrow(identities)) {
     identity_store <- .litxr_upsert_project_ref_identity_map(cfg, identities, diff_dir = diff_dir, remove_missing = remove_missing)
   } else {
@@ -775,6 +824,9 @@
       paste(isbn_store$removed, collapse = ", "),
       call. = FALSE
     )
+  }
+  if (remove_missing && length(openreview_store$removed)) {
+    warning("ref_openreview.fst will drop OpenReview id(s) missing from current local JSON: ", paste(openreview_store$removed, collapse = ", "), call. = FALSE)
   }
 
   arxiv_removed_path <- if (remove_missing && length(arxiv_store$removed)) {
@@ -819,6 +871,16 @@
   } else {
     NA_character_
   }
+  openreview_removed_path <- if (remove_missing && length(openreview_store$removed)) {
+    path <- file.path(diff_dir, "ref_openreview_removed.tsv")
+    utils::write.table(data.table::data.table(openreview_id = openreview_store$removed), file = path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    path
+  } else NA_character_
+  openreview_added_path <- if (length(openreview_store$added)) {
+    path <- file.path(diff_dir, "ref_openreview_added.tsv")
+    utils::write.table(data.table::data.table(openreview_id = openreview_store$added), file = path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
+    path
+  } else NA_character_
   identity_removed_path <- if (remove_missing && length(identity_store$removed)) {
     path <- file.path(diff_dir, "ref_identity_map_removed.tsv")
     path
@@ -843,7 +905,7 @@
         collection_id = report_collection_id,
         rebuilt_collection_index = FALSE,
         collection_ref_dir = report_collection_ref_dir,
-        fetched_jsons = inputs$fetched_jsons %||% (nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows)),
+        fetched_jsons = inputs$fetched_jsons %||% (nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows) + nrow(openreview_rows)),
         unique_arxiv_rows = nrow(arxiv_rows),
         identity_pairs = nrow(identities),
         ref_arxiv_added = length(arxiv_store$added),
@@ -866,6 +928,10 @@
       ref_isbn = list(
         added = isbn_added_path,
         removed = isbn_removed_path
+      ),
+      ref_openreview = list(
+        added = openreview_added_path,
+        removed = openreview_removed_path
       )
     ),
     update_log_path = .litxr_project_collection_thin_sync_log_path(cfg),
@@ -874,27 +940,32 @@
       ref_arxiv = .litxr_ref_arxiv_path(cfg),
       ref_doi = .litxr_ref_doi_path(cfg),
       ref_isbn = .litxr_ref_isbn_path(cfg),
+      ref_openreview = .litxr_ref_openreview_path(cfg),
       ref_arxiv_removed = arxiv_removed_path,
       ref_arxiv_added = arxiv_added_path,
       ref_doi_removed = doi_removed_path,
       ref_doi_added = doi_added_path,
       ref_isbn_removed = isbn_removed_path,
       ref_isbn_added = isbn_added_path,
+      ref_openreview_removed = openreview_removed_path,
+      ref_openreview_added = openreview_added_path,
       ref_identity_map_removed = identity_removed_path,
       ref_identity_map_added = identity_added_path
     ),
     row_counts = list(
-      project_references = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows),
+      project_references = nrow(arxiv_rows) + nrow(doi_rows) + nrow(isbn_rows) + nrow(openreview_rows),
       project_reference_collections = nrow(identities),
       identities = nrow(identity_store$rows),
       ref_arxiv = nrow(arxiv_store$rows),
       ref_doi = nrow(doi_store$rows),
-      ref_isbn = nrow(isbn_store$rows)
+      ref_isbn = nrow(isbn_store$rows),
+      ref_openreview = nrow(openreview_store$rows)
     ),
     diffs = list(
       ref_arxiv = list(added = length(arxiv_store$added), removed = length(arxiv_store$removed)),
       ref_doi = list(added = length(doi_store$added), removed = length(doi_store$removed)),
-      ref_isbn = list(added = length(isbn_store$added), removed = length(isbn_store$removed))
+      ref_isbn = list(added = length(isbn_store$added), removed = length(isbn_store$removed)),
+      ref_openreview = list(added = length(openreview_store$added), removed = length(openreview_store$removed))
     )
   )
 }

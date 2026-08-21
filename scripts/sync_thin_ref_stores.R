@@ -40,7 +40,7 @@ usage <- function() {
       "",
       "Behavior:",
       "  - Incremental mode is used when --collection, --collection-id, --json-mtime-after, or --cuttime is supplied.",
-      "  - Full mode rewrites ref_identity_map.fst, ref_arxiv.fst, and ref_doi.fst from all local JSON.",
+      "  - Full mode rewrites ref_identity_map.fst, ref_arxiv.fst, ref_doi.fst, ref_isbn.fst, and ref_openreview.fst from all local JSON.",
       "  - Full mode requires a double confirmation in the terminal before any write occurs.",
       "  - Progress logs are written to stderr; compact JSON is written to stdout.",
       sep = "\n"
@@ -102,7 +102,7 @@ confirm_full_mode <- function() {
       call. = FALSE
     )
   }
-  first <- read_stdin_line("Full mode will rewrite ref_identity_map.fst, ref_arxiv.fst, and ref_doi.fst. Type FULL to continue: ")
+  first <- read_stdin_line("Full mode will rewrite ref_identity_map.fst, ref_arxiv.fst, ref_doi.fst, ref_isbn.fst, and ref_openreview.fst. Type FULL to continue: ")
   if (!identical(first, "FULL")) {
     stop("Full mode confirmation failed.", call. = FALSE)
   }

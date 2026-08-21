@@ -1,3 +1,14 @@
+# litxr 0.1.8.17
+
+- Added OpenReview as a first-class reference identifier type, keyed as
+  `openreview:<note_id>`, with `ref_openreview.fst`, thin-store sync, strict
+  lookup, BibTeX export, digest prompts, and Project Library hydration.
+- Added OpenReview Note-id fetch CLIs. API requests can use
+  `OPENREVIEW_ACCESS_TOKEN` when available; browser-challenge-gated access is
+  reported clearly instead of treated as an ordinary missing record.
+- Added a focused OpenReview thin-store fixture covering canonical resolution,
+  prompt source hints, and BibTeX export.
+
 # litxr 0.1.8.16
 
 - Added `scripts/add_isbn_ref_manually.R` for validated manual ISBN-10/ISBN-13

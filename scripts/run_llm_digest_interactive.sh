@@ -15,7 +15,7 @@ Usage:
   scripts/run_llm_digest_interactive.sh --ref-id REF_ID [--json_path ~/Downloads/litxr_schema.json] [--prompt-version v5.1] [--return-format download_json_file|inline_raw_json]
 
 Options:
-  --ref-id REF_ID       Bare arXiv id or bare DOI to build or revise.
+  --ref-id REF_ID       Bare arXiv/DOI id or canonical openreview: Note id to build or revise.
   --json_path PATH      Downloaded JSON path to ingest.
                         Default: ~/Downloads/litxr_schema.json
   --prompt-version V    Prompt template version metadata to include.

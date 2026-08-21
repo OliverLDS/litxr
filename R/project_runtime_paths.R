@@ -529,6 +529,7 @@
   ref_id <- sub("^arxiv:", "", ref_id, ignore.case = TRUE)
   ref_id <- sub("^doi:", "", ref_id, ignore.case = TRUE)
   ref_id <- sub("^isbn:", "", ref_id, ignore.case = TRUE)
+  ref_id <- sub("^openreview:", "", ref_id, ignore.case = TRUE)
   ref_id <- trimws(tolower(ref_id))
   if (!nzchar(ref_id)) {
     NA_character_

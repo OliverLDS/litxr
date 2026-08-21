@@ -107,7 +107,7 @@ usage <- function() {
       "",
       "Options:",
       "  --ref-id REF_ID     Ref id to ingest for.",
-      "                      Bare arXiv ids like 2510.22085 are accepted.",
+      "                      Bare arXiv ids and canonical openreview: Note ids are accepted.",
       "  --json-path PATH    Downloaded JSON file to ingest.",
       "                      Default: ~/Downloads/litxr_schema.json",
       "  --json-raw JSON     Raw JSON text to ingest inline.",

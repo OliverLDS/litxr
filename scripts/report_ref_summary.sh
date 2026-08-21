@@ -10,11 +10,13 @@ Usage:
   scripts/report_ref_summary.sh --arxiv-id ARXIV_ID [--report key|complete]
   scripts/report_ref_summary.sh --doi DOI [--report key|complete]
   scripts/report_ref_summary.sh --isbn ISBN [--report key|complete]
+  scripts/report_ref_summary.sh --openreview-id NOTE_ID [--report key|complete]
 
 Options:
   --arxiv-id ID  Strict arXiv id lookup. Use a bare arXiv id such as 2202.01677.
   --doi DOI      Strict DOI lookup. Use the raw DOI string, without `doi:` or URL.
   --isbn ISBN    Strict ISBN lookup. Use the raw ISBN string.
+  --openreview-id NOTE_ID  Strict OpenReview Note-id lookup. Use the bare Note id.
   --report MODE  Report mode: key or complete. Default: key.
   --key          Report key research-schema fields only. This is the default.
   --complete     Report the complete research-schema digest.
@@ -23,7 +25,7 @@ Options:
 Notes:
   - The parser is strict; the route is determined by the flag, not by guessing.
   - The script resolves the ref JSON filename from index/ref_arxiv.fst,
-    index/ref_doi.fst, or index/ref_isbn.fst before reading the abstract.
+    index/ref_doi.fst, index/ref_isbn.fst, or index/ref_openreview.fst before reading the abstract.
   - Key mode reports Summary, Motivation, Theoretical Mechanism, Key Findings,
     Anchor References, and Citation Logic Nodes.
   - Complete mode reports the full markdown-style research schema rendering.
@@ -32,7 +34,7 @@ EOF
 fi
 
 if [[ $# -lt 1 ]]; then
-  print -u2 "usage: $0 --arxiv-id ARXIV_ID|--doi DOI|--isbn ISBN [--report key|complete]"
+  print -u2 "usage: $0 --arxiv-id ARXIV_ID|--doi DOI|--isbn ISBN|--openreview-id NOTE_ID [--report key|complete]"
   exit 1
 fi
 
@@ -43,16 +45,16 @@ report_mode="key"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
-      print -u2 "usage: $0 --arxiv-id ARXIV_ID|--doi DOI|--isbn ISBN [--report key|complete]"
+      print -u2 "usage: $0 --arxiv-id ARXIV_ID|--doi DOI|--isbn ISBN|--openreview-id NOTE_ID [--report key|complete]"
       exit 0
       ;;
-    --arxiv-id|--doi|--isbn)
+    --arxiv-id|--doi|--isbn|--openreview-id)
       if [[ $# -lt 2 ]]; then
         print -u2 "Missing value for $1"
         exit 1
       fi
       if [[ -n "$ref_kind" ]]; then
-        print -u2 "Only one of --arxiv-id, --doi, or --isbn may be supplied"
+        print -u2 "Only one reference identifier may be supplied"
         exit 1
       fi
       ref_kind="${1#--}"
@@ -91,7 +93,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ref_kind" ]]; then
-  print -u2 "Missing --arxiv-id, --doi, or --isbn"
+  print -u2 "Missing --arxiv-id, --doi, --isbn, or --openreview-id"
   exit 1
 fi
 
@@ -108,7 +110,7 @@ report_mode <- args[[3]]
 if (!nzchar(ref_kind) || !nzchar(ref_value)) {
   stop("One strict reference identifier is required.", call. = FALSE)
 }
-if (!ref_kind %in% c("arxiv-id", "doi", "isbn")) {
+if (!ref_kind %in% c("arxiv-id", "doi", "isbn", "openreview-id")) {
   stop("Unsupported ref kind: ", ref_kind, call. = FALSE)
 }
 
@@ -118,13 +120,15 @@ resolve_strict_reference_row <- function(cfg, ref_kind, ref_value) {
     ref_kind,
     "arxiv-id" = litxr:::.litxr_ref_arxiv_path(cfg),
     "doi" = litxr:::.litxr_ref_doi_path(cfg),
-    "isbn" = litxr:::.litxr_ref_isbn_path(cfg)
+    "isbn" = litxr:::.litxr_ref_isbn_path(cfg),
+    "openreview-id" = litxr:::.litxr_ref_openreview_path(cfg)
   )
   key_col <- switch(
     ref_kind,
     "arxiv-id" = "arxiv_id",
     "doi" = "doi",
-    "isbn" = "isbn"
+    "isbn" = "isbn",
+    "openreview-id" = "openreview_id"
   )
   rows <- litxr:::.litxr_read_scaffold_table_safe(thin_path)
   if (!nrow(rows)) {
@@ -206,7 +210,8 @@ resolve_strict_reference_row <- function(cfg, ref_kind, ref_value) {
     ref_kind,
     "arxiv-id" = paste0("arxiv:", key_value),
     "doi" = paste0("doi:", key_value),
-    "isbn" = paste0("isbn:", key_value)
+    "isbn" = paste0("isbn:", key_value),
+    "openreview-id" = paste0("openreview:", key_value)
   )
   list(
     ref_id = ref_id,

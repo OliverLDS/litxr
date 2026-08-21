@@ -92,6 +92,9 @@
     ref_ids,
     ignore.case = TRUE
   )
+  openreview_input <- grepl("^openreview:", ref_ids, ignore.case = TRUE)
+  openreview_ids <- sub("^openreview:", "", ref_ids[openreview_input], ignore.case = TRUE)
+  openreview_ids <- unique(openreview_ids[nzchar(openreview_ids)])
   arxiv_rows <- if (any(arxiv_input)) {
     .litxr_read_fst_table_safe(
       .litxr_ref_arxiv_path(cfg),
@@ -100,10 +103,19 @@
   } else {
     data.table::data.table()
   }
-  doi_rows <- if (any(!arxiv_input)) {
+  doi_input <- !arxiv_input & !openreview_input
+  doi_rows <- if (any(doi_input)) {
     .litxr_read_fst_table_safe(
       .litxr_ref_doi_path(cfg),
       columns = c("doi", "collection_index", "json_filename")
+    )
+  } else {
+    data.table::data.table()
+  }
+  openreview_rows <- if (length(openreview_ids)) {
+    .litxr_read_fst_table_safe(
+      .litxr_ref_openreview_path(cfg),
+      columns = c("openreview_id", "collection_index", "json_filename")
     )
   } else {
     data.table::data.table()
@@ -158,6 +170,32 @@
         collection_id = collection_ids[idx],
         collection_index = idx,
         json_filename = as.character(doi_rows$json_filename),
+        json_path = json_path
+      )
+    }
+  }
+  if (nrow(openreview_rows) && "openreview_id" %in% names(openreview_rows)) {
+    openreview_rows <- openreview_rows[
+      !is.na(openreview_rows$collection_index) &
+        !is.na(openreview_rows$openreview_id) &
+        nzchar(openreview_rows$openreview_id) &
+        as.character(openreview_rows$openreview_id) %in% openreview_ids,
+      ,
+      drop = FALSE
+    ]
+    if (!is.null(collection_filter)) {
+      openreview_rows <- openreview_rows[openreview_rows$collection_index == collection_filter, , drop = FALSE]
+    }
+    if (nrow(openreview_rows)) {
+      idx <- suppressWarnings(as.integer(openreview_rows$collection_index))
+      valid <- !is.na(idx) & idx >= 1L & idx <= length(collection_ref_dirs)
+      json_path <- rep(NA_character_, nrow(openreview_rows))
+      json_path[valid] <- file.path(collection_ref_dirs[idx[valid]], as.character(openreview_rows$json_filename[valid]))
+      parts[[length(parts) + 1L]] <- data.table::data.table(
+        ref_id = paste0("openreview:", as.character(openreview_rows$openreview_id)),
+        collection_id = collection_ids[idx],
+        collection_index = idx,
+        json_filename = as.character(openreview_rows$json_filename),
         json_path = json_path
       )
     }

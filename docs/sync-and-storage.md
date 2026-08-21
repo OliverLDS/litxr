@@ -22,6 +22,7 @@ Under `project.data_root/`:
 - `index/ref_arxiv_<collection>.fst`: collection-local arXiv payload table
 - `index/ref_doi.fst`: project-level DOI payload table
 - `index/ref_isbn.fst`: project-level ISBN payload table
+- `index/ref_openreview.fst`: project-level OpenReview Note-id payload table
 - `index/llm_digest.fst`: thin digest index
 - `log/`: collection fetch logs, thin-sync logs, and manual update logs
 - `corpus/`: raw corpus, lexical indexes, and embedding caches
@@ -49,6 +50,21 @@ Journal convenience wrappers still exist:
 - `litxr_sync_journal()`
 - `litxr_repair_journal()`
 - `litxr_read_journal()`
+
+## OpenReview
+
+OpenReview is an ID-addressed source rather than a collection feed. Use:
+
+```sh
+zsh scripts/sync_openreview_ref_json_by_ids.sh --openreview-id s9z0HzWJJp
+```
+
+This writes `ref/openreview/openreview_s9z0HzWJJp.json` and incrementally
+updates `index/ref_openreview.fst`, whose key column is the bare OpenReview
+Note id. `OPENREVIEW_ACCESS_TOKEN` can authenticate API requests when
+available. A browser-verification challenge can still block unattended access;
+in that case, use manually verified metadata from an authoritative proceedings
+or publisher page.
 
 ## Crossref
 

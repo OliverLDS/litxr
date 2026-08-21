@@ -306,7 +306,8 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
   specs <- list(
     list(path = .litxr_ref_arxiv_path(cfg), key = "arxiv_id"),
     list(path = .litxr_ref_doi_path(cfg), key = "doi"),
-    list(path = .litxr_ref_isbn_path(cfg), key = "isbn")
+    list(path = .litxr_ref_isbn_path(cfg), key = "isbn"),
+    list(path = .litxr_ref_openreview_path(cfg), key = "openreview_id")
   )
   locations <- lapply(specs, function(spec) {
     rows <- .litxr_read_fst_table_safe(spec$path, columns = c(spec$key, "collection_index", "json_filename"))
@@ -319,7 +320,7 @@ litxr_build_literature_graph <- function(ref_ids = NULL, config = NULL, max_dept
     valid <- !is.na(collection_index) & collection_index >= 1L & collection_index <= length(ref_dirs)
     if (!any(valid)) return(NULL)
     data.table::data.table(
-      ref_id = as.character(rows[[spec$key]][valid]),
+      ref_id = if (identical(spec$key, "openreview_id")) paste0("openreview:", as.character(rows[[spec$key]][valid])) else as.character(rows[[spec$key]][valid]),
       json_path = file.path(ref_dirs[collection_index[valid]], as.character(rows$json_filename[valid]))
     )
   })

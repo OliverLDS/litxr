@@ -97,7 +97,7 @@ Project-level data lives under `project.data_root/`, including:
 
 - `ref/<collection_id>/` for reference JSON
 - `index/ref_identity_map.fst`, `index/ref_arxiv.fst`, `index/ref_doi.fst`,
-  and `index/ref_isbn.fst` for thin reference indexes
+  `index/ref_isbn.fst`, and `index/ref_openreview.fst` for thin reference indexes
 - `index/llm_digest.fst` and `index/literature_anchor_edges.fst` for digest
   and literature-relationship indexes
 - `digest/llm/` for current LLM digest JSON

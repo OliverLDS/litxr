@@ -25,6 +25,7 @@ litxr_sync_collection <- function(
     journal$remote_channel,
     crossref = .litxr_sync_crossref_journal(journal),
     arxiv = .litxr_sync_arxiv_journal(journal),
+    openreview = stop("OpenReview records are fetched by explicit Note id. Use scripts/sync_openreview_ref_json_by_ids.sh.", call. = FALSE),
     stop("Unsupported remote channel: ", journal$remote_channel, call. = FALSE)
   )
 
@@ -67,6 +68,9 @@ litxr_sync_all <- function(config = NULL) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
   collections <- .litxr_config_collections(cfg)
+  collections <- Filter(function(collection) {
+    as.character(collection$remote_channel) %in% c("crossref", "arxiv")
+  }, collections)
   results <- stats::setNames(
     lapply(collections, function(journal) {
       litxr_sync_collection(
@@ -216,6 +220,7 @@ litxr_repair_collection <- function(
     journal$remote_channel,
     crossref = .litxr_sync_crossref_journal(journal),
     arxiv = .litxr_sync_arxiv_journal(journal),
+    openreview = stop("OpenReview records are fetched by explicit Note id. Use scripts/sync_openreview_ref_json_by_ids.sh.", call. = FALSE),
     stop("Unsupported remote channel: ", journal$remote_channel, call. = FALSE)
   )
 

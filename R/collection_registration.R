@@ -5,6 +5,10 @@
   source <- row[["source"]]
   source_id <- row[["source_id"]]
 
+  if (!is.na(source) && identical(tolower(source), "openreview") && !is.na(source_id) && nzchar(source_id)) {
+    return(paste0("openreview:", source_id))
+  }
+
   if (!is.na(doi) && nzchar(doi)) return(paste0("doi:", doi))
   if (!is.na(isbn) && nzchar(isbn)) return(paste0("isbn:", isbn))
   if (!is.na(url) && nzchar(url)) return(paste0("url:", url))

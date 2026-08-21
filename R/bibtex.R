@@ -175,7 +175,7 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   ref_ids <- as.character(ref_ids)
   ref_ids <- ref_ids[!is.na(ref_ids) & nzchar(trimws(ref_ids))]
   if (!length(ref_ids)) {
-    return(list(arxiv_ids = character(), doi_ids = character(), isbn_ids = character()))
+    return(list(arxiv_ids = character(), doi_ids = character(), isbn_ids = character(), openreview_ids = character()))
   }
   routes <- lapply(ref_ids, .litxr_route_ref_id)
   key_types <- vapply(routes, function(x) as.character(x$key_type), character(1))
@@ -183,7 +183,8 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   list(
     arxiv_ids = unique(vapply(key_values[key_types == "arxiv_id" & !is.na(key_values) & nzchar(key_values)], .litxr_bare_arxiv_id, character(1))),
     doi_ids = unique(vapply(key_values[key_types == "doi" & !is.na(key_values) & nzchar(key_values)], .litxr_bare_doi, character(1))),
-    isbn_ids = unique(sub("^isbn:", "", vapply(key_values[key_types == "isbn" & !is.na(key_values) & nzchar(key_values)], .litxr_normalize_isbn_ref_id, character(1)), ignore.case = TRUE))
+    isbn_ids = unique(sub("^isbn:", "", vapply(key_values[key_types == "isbn" & !is.na(key_values) & nzchar(key_values)], .litxr_normalize_isbn_ref_id, character(1)), ignore.case = TRUE)),
+    openreview_ids = unique(key_values[key_types == "openreview" & !is.na(key_values) & nzchar(key_values)])
   )
 }
 
@@ -572,6 +573,9 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   } else if (identical(key_col, "isbn")) {
     table$isbn <- as.character(table$isbn)
     table <- table[!is.na(table$isbn) & nzchar(table$isbn) & table$isbn %in% keys, , drop = FALSE]
+  } else if (identical(key_col, "openreview_id")) {
+    table$openreview_id <- as.character(table$openreview_id)
+    table <- table[!is.na(table$openreview_id) & nzchar(table$openreview_id) & table$openreview_id %in% keys, , drop = FALSE]
   }
   if (!nrow(table)) {
     return(data.table::data.table())
@@ -601,17 +605,20 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   table
 }
 
-.litxr_bibtex_scaffold_cache <- function(cfg, arxiv_ids = character(), doi_ids = character(), isbn_ids = character()) {
+.litxr_bibtex_scaffold_cache <- function(cfg, arxiv_ids = character(), doi_ids = character(), isbn_ids = character(), openreview_ids = character()) {
   arxiv_ids <- unique(as.character(arxiv_ids))
   arxiv_ids <- arxiv_ids[!is.na(arxiv_ids) & nzchar(arxiv_ids)]
   doi_ids <- unique(tolower(as.character(doi_ids)))
   doi_ids <- doi_ids[!is.na(doi_ids) & nzchar(doi_ids)]
   isbn_ids <- unique(as.character(isbn_ids))
   isbn_ids <- isbn_ids[!is.na(isbn_ids) & nzchar(isbn_ids)]
+  openreview_ids <- unique(as.character(openreview_ids))
+  openreview_ids <- openreview_ids[!is.na(openreview_ids) & nzchar(openreview_ids)]
   arxiv <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_arxiv_path(cfg), "arxiv_id", arxiv_ids)
   doi <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_doi_path(cfg), "doi", doi_ids)
   isbn <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_isbn_path(cfg), "isbn", isbn_ids)
-  list(arxiv = arxiv, doi = doi, isbn = isbn)
+  openreview <- .litxr_bibtex_scaffold_table_cached(cfg, .litxr_ref_openreview_path(cfg), "openreview_id", openreview_ids)
+  list(arxiv = arxiv, doi = doi, isbn = isbn, openreview = openreview)
 }
 
 .litxr_bibtex_scaffold_key_value <- function(key_col, key) {
@@ -632,6 +639,9 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
       return(NA_character_)
     }
     return(sub("^isbn:", "", isbn_ref_id, ignore.case = TRUE))
+  }
+  if (identical(key_col, "openreview_id")) {
+    return(.litxr_bare_openreview_id(ref_id = key))
   }
   trimws(key)
 }
@@ -740,6 +750,18 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   list(row = row, resolved_ref_id = isbn_id, warning = NULL)
 }
 
+.litxr_bibtex_resolve_openreview_row <- function(cfg, ref_id, scaffold_cache = NULL) {
+  openreview_id <- .litxr_bare_openreview_id(ref_id = ref_id)
+  if (is.na(openreview_id) || !nzchar(openreview_id)) {
+    return(list(row = NULL, resolved_ref_id = NA_character_, warning = NULL))
+  }
+  if (is.null(scaffold_cache)) {
+    scaffold_cache <- .litxr_bibtex_scaffold_cache(cfg, openreview_ids = openreview_id)
+  }
+  row <- .litxr_bibtex_row_from_scaffold_cache(cfg, scaffold_cache$openreview, "openreview_id", openreview_id, prefer_doi_key = FALSE)
+  list(row = row, resolved_ref_id = paste0("openreview:", openreview_id), warning = NULL)
+}
+
 .litxr_bibtex_resolve_row <- function(cfg, ref_id, scaffold_cache = NULL, link_maps = NULL, prefer_linked_doi = TRUE) {
   route <- .litxr_route_ref_id(ref_id)
   key_type <- route$key_type
@@ -756,6 +778,9 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
     if (!is.null(isbn_row$row) && nrow(isbn_row$row)) {
       return(isbn_row)
     }
+  }
+  if (identical(key_type, "openreview")) {
+    return(.litxr_bibtex_resolve_openreview_row(cfg, key_value, scaffold_cache = scaffold_cache))
   }
 
   list(row = NULL, resolved_ref_id = NA_character_, warning = NULL)
@@ -951,7 +976,8 @@ write_bibtex_entries <- function(
     cfg,
     arxiv_ids = candidates$arxiv_ids,
     doi_ids = unique(c(candidates$doi_ids, linked_doi_ids)),
-    isbn_ids = candidates$isbn_ids
+    isbn_ids = candidates$isbn_ids,
+    openreview_ids = candidates$openreview_ids
   )
 
   resolved <- .litxr_bibtex_rows_for_write(
@@ -963,11 +989,12 @@ write_bibtex_entries <- function(
   )
   rows <- resolved$rows
   if (!is.null(bibtex_key_overrides) && nrow(rows)) {
-    bibtex_key_overrides <- as.character(bibtex_key_overrides)
     override_names <- names(bibtex_key_overrides)
     if (is.null(override_names) || any(is.na(override_names) | !nzchar(override_names))) {
       stop("`bibtex_key_overrides` must be a named character vector.", call. = FALSE)
     }
+    bibtex_key_overrides <- as.character(bibtex_key_overrides)
+    names(bibtex_key_overrides) <- override_names
     requested_ref_ids <- as.character(rows$litxr_requested_ref_id__)
     overrides <- unname(bibtex_key_overrides[requested_ref_ids])
     use_override <- !is.na(overrides) & nzchar(overrides)
@@ -1041,7 +1068,8 @@ write_bibtex_entries <- function(
     cfg,
     arxiv_ids = final_candidates$arxiv_ids,
     doi_ids = unique(c(final_candidates$doi_ids, linked_doi_ids)),
-    isbn_ids = final_candidates$isbn_ids
+    isbn_ids = final_candidates$isbn_ids,
+    openreview_ids = final_candidates$openreview_ids
   )
 
   result_entries <- parsed$entries

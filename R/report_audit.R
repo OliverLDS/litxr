@@ -122,14 +122,15 @@
 
 .litxr_thin_index_health_report <- function(cfg, oversized_mb = 25) {
   thin_paths <- data.table::data.table(
-    index_name = c("ref_identity_map", "ref_arxiv", "ref_doi", "ref_isbn"),
+    index_name = c("ref_identity_map", "ref_arxiv", "ref_doi", "ref_isbn", "ref_openreview"),
     path = c(
       .litxr_project_ref_identity_index_path(cfg),
       .litxr_ref_arxiv_path(cfg),
       .litxr_ref_doi_path(cfg),
-      .litxr_ref_isbn_path(cfg)
+      .litxr_ref_isbn_path(cfg),
+      .litxr_ref_openreview_path(cfg)
     ),
-    reader = c("fst", "fst", "fst", "fst")
+    reader = c("fst", "fst", "fst", "fst", "fst")
   )
   data.table::rbindlist(lapply(seq_len(nrow(thin_paths)), function(i) {
     .litxr_index_health_rows(

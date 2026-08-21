@@ -39,18 +39,20 @@ function parseArgs(args) {
 }
 
 function normalizeRefId(value) {
-  const refId = String(value || "")
-    .trim()
-    .replace(/^(arxiv|doi|isbn):/i, "")
-    .toLowerCase();
+  const rawRefId = String(value || "").trim();
+  const openreview = rawRefId.match(/^openreview:([A-Za-z0-9_-]+)$/i);
+  if (openreview) return `openreview:${openreview[1]}`;
+  const refId = rawRefId.replace(/^(arxiv|doi|isbn):/i, "").toLowerCase();
   const arxiv = /^\d{4}\.\d{4,5}$/.test(refId);
   const doi = /^10\.\d{4,9}\/\S+$/.test(refId);
   const isbn = /^(?:\d{9}[\dx]|\d{13})$/.test(refId.replace(/[- ]/g, ""));
-  if (!arxiv && !doi && !isbn) throw new Error(`Unsupported bare reference id: ${refId}`);
+  if (!arxiv && !doi && !isbn) throw new Error(`Unsupported reference id: ${rawRefId}`);
   return isbn ? refId.replace(/[- ]/g, "") : refId;
 }
 
-function canonicalRefId(refId) {
+function canonicalRefId(refId, originalValue = refId) {
+  if (/^openreview:/i.test(refId)) return refId;
+  if (/^openreview:/i.test(String(originalValue))) return `openreview:${refId}`;
   if (/^\d{4}\.\d{4,5}$/.test(refId)) return `arxiv:${refId}`;
   if (/^10\./.test(refId)) return `doi:${refId}`;
   return `isbn:${refId}`;
@@ -327,11 +329,16 @@ function migrateProjectReferenceCaches(projectsPath) {
   return sharedCache;
 }
 
-function projectForClient(project, cache) {
+function projectForClient(project, cache, shortTitleOverrides = {}) {
   const visibleCache = {};
   for (const refId of project.ref_ids) {
     const entry = cache.references[refId];
-    if (entry) visibleCache[refId] = { title: entry.title, has_digest: entry.has_digest, cached_at: entry.cached_at };
+    if (entry) visibleCache[refId] = {
+      title: entry.title,
+      short_title: shortTitleOverrides[refId] || entry.bibtex_key,
+      has_digest: entry.has_digest,
+      cached_at: entry.cached_at
+    };
   }
   return { ...project, reference_cache: visibleCache };
 }
@@ -366,9 +373,9 @@ function run(command, args) {
   });
 }
 
-function summaryArgs(refId) {
-  const kindFlag = /^\d{4}\./.test(refId) ? "--arxiv-id" : /^10\./.test(refId) ? "--doi" : "--isbn";
-  return [kindFlag, refId];
+function summaryArgs(refId, canonicalRefId) {
+  const kindFlag = /^openreview:/i.test(canonicalRefId) ? "--openreview-id" : /^\d{4}\./.test(refId) ? "--arxiv-id" : /^10\./.test(refId) ? "--doi" : "--isbn";
+  return [kindFlag, /^openreview:/i.test(canonicalRefId) ? canonicalRefId.replace(/^openreview:/i, "") : refId];
 }
 
 function titleFromSummary(summary, refId) {
@@ -376,8 +383,8 @@ function titleFromSummary(summary, refId) {
   return match ? match[1].trim() : refId;
 }
 
-async function hydrateReference(summaryScript, refId) {
-  const summary = await run("/bin/zsh", [summaryScript, ...summaryArgs(refId)]);
+async function hydrateReference(summaryScript, refId, canonicalRefId = refId) {
+  const summary = await run("/bin/zsh", [summaryScript, ...summaryArgs(refId, canonicalRefId)]);
   const hasDigest = /^digest_present:\s*true\s*$/mi.test(summary);
   return {
     title: titleFromSummary(summary, refId),
@@ -425,7 +432,7 @@ document.getElementById('add-project').onclick=addProject;document.getElementByI
 const tagManagerButton=document.createElement('button');tagManagerButton.id='manage-tags';tagManagerButton.type='button';tagManagerButton.title='Manage project tags';tagManagerButton.setAttribute('aria-label','Manage project tags');tagManagerButton.innerHTML='&#9881;';tagManagerButton.style.cssText='padding:4px 7px;font-size:14px;line-height:1';document.getElementById('tag-filter').insertAdjacentElement('afterend',tagManagerButton);tagManagerButton.onclick=showTagManager;const tagSeparatorStyle=document.createElement('style');tagSeparatorStyle.textContent='.tag-separator{margin:0 4px}';document.head.appendChild(tagSeparatorStyle);
 const titleSearchRow=document.createElement('div');titleSearchRow.className='row';titleSearchRow.style.marginTop='8px';titleSearchRow.innerHTML='<input id="title-search" placeholder="Search titles" aria-label="Search project titles"><div id="title-search-results" hidden></div>';document.getElementById('ref-id').parentElement.insertAdjacentElement('afterend',titleSearchRow);const titleSearchInput=document.getElementById('title-search'),titleSearchResults=document.getElementById('title-search-results');const titleSearchStyle=document.createElement('style');titleSearchStyle.textContent='.search-results{position:absolute;z-index:3;left:16px;right:16px;max-height:176px;overflow:auto;border:1px solid var(--line);background:#fffdf7;box-shadow:0 8px 18px rgba(0,0,0,.12)}.search-result{display:block;width:100%;padding:6px 8px;text-align:left;border:0;border-bottom:1px solid #e1e5dc;border-radius:0;background:transparent;font-size:12px}.search-result:last-child{border-bottom:0}.search-result:hover{background:#e7eee5}';document.head.appendChild(titleSearchStyle);function renderTitleSearch(){const project=selected(),query=state.titleSearch.trim().toLocaleLowerCase();titleSearchInput.disabled=!project;titleSearchInput.value=state.titleSearch;if(!project||!query){titleSearchResults.hidden=true;titleSearchResults.innerHTML='';return}const matches=project.ref_ids.filter(id=>String(project.reference_cache?.[id]?.title||'').toLocaleLowerCase().includes(query)).slice(0,12);titleSearchResults.hidden=!matches.length;titleSearchResults.innerHTML=matches.map(id=>'<button class="search-result" type="button" data-title-search-ref="'+esc(id)+'"><strong>'+esc(project.reference_cache?.[id]?.title||id)+'</strong><small class="ref">'+esc(id)+'</small></button>').join('');titleSearchResults.querySelectorAll('[data-title-search-ref]').forEach(button=>button.onclick=()=>{const id=button.dataset.titleSearchRef;state.tagFilter='';state.refId=id;state.titleSearch='';render();[...document.querySelectorAll('#refs [data-ref]')].find(item=>item.dataset.ref===id)?.scrollIntoView({block:'center'});showRef(id)})}titleSearchInput.oninput=()=>{state.titleSearch=titleSearchInput.value;renderTitleSearch()};const baseRender=render;render=function(){baseRender();document.getElementById('sort-refs').textContent=state.sortByRefId?'Order: Ref ID':'Order: Added';renderTitleSearch()};document.getElementById('sort-refs').onclick=()=>{state.sortByRefId=!state.sortByRefId;render()};
 titleSearchRow.style.position='relative';titleSearchStyle.textContent+='.search-results{left:0;right:0;top:100%}';
-renderTitleSearch=()=>{const project=selected(),query=state.titleSearch.trim();titleSearchInput.disabled=!project;titleSearchInput.value=state.titleSearch;titleSearchInput.classList.remove('title-search-invalid');titleSearchInput.removeAttribute('title');if(!project||!query){titleSearchResults.hidden=true;titleSearchResults.innerHTML='';return}let pattern;try{pattern=new RegExp(query,'i')}catch(error){titleSearchInput.classList.add('title-search-invalid');titleSearchInput.title='Invalid regular expression';titleSearchResults.hidden=true;titleSearchResults.innerHTML='';return}const matches=project.ref_ids.filter(id=>pattern.test(String(project.reference_cache?.[id]?.title||''))).slice(0,12);titleSearchResults.hidden=!matches.length;titleSearchResults.innerHTML=matches.map(id=>'<button class="search-result" type="button" data-title-search-ref="'+esc(id)+'"><strong>'+esc(project.reference_cache?.[id]?.title||id)+'</strong><small class="ref">'+esc(id)+'</small></button>').join('');titleSearchResults.querySelectorAll('[data-title-search-ref]').forEach(button=>button.onclick=()=>{const id=button.dataset.titleSearchRef;state.tagFilter='';state.refId=id;state.titleSearch='';render();[...document.querySelectorAll('#refs [data-ref]')].find(item=>item.dataset.ref===id)?.scrollIntoView({block:'center'});showRef(id)})};titleSearchStyle.textContent+='.title-search-invalid{border-color:#a34032;background:#fff4ef}';
+renderTitleSearch=()=>{const project=selected(),query=state.titleSearch.trim();titleSearchInput.disabled=!project;titleSearchInput.value=state.titleSearch;titleSearchInput.classList.remove('title-search-invalid');titleSearchInput.removeAttribute('title');if(!project||!query){titleSearchResults.hidden=true;titleSearchResults.innerHTML='';return}let pattern;try{pattern=new RegExp(query,'i')}catch(error){titleSearchInput.classList.add('title-search-invalid');titleSearchInput.title='Invalid regular expression';titleSearchResults.hidden=true;titleSearchResults.innerHTML='';return}const matches=project.ref_ids.filter(id=>{const cached=project.reference_cache?.[id];return pattern.test(String(cached?.title||''))||pattern.test(String(cached?.short_title||''))}).slice(0,12);titleSearchResults.hidden=!matches.length;titleSearchResults.innerHTML=matches.map(id=>{const cached=project.reference_cache?.[id],shortTitle=cached?.short_title;return '<button class="search-result" type="button" data-title-search-ref="'+esc(id)+'"><strong>'+esc(cached?.title||id)+'</strong><small class="ref">'+esc(id)+(shortTitle?' | '+esc(shortTitle):'')+'</small></button>'}).join('');titleSearchResults.querySelectorAll('[data-title-search-ref]').forEach(button=>button.onclick=()=>{const id=button.dataset.titleSearchRef;state.tagFilter='';state.refId=id;state.titleSearch='';render();[...document.querySelectorAll('#refs [data-ref]')].find(item=>item.dataset.ref===id)?.scrollIntoView({block:'center'});showRef(id)})};titleSearchStyle.textContent+='.title-search-invalid{border-color:#a34032;background:#fff4ef}';
 titleSearchRow.style.display='block';titleSearchInput.style.width='100%';titleSearchStyle.textContent+='.search-results{position:static;width:100%;margin-top:0;box-shadow:none}';
 const appMain=document.getElementById('app-main');
 const toggleProjects=document.getElementById('toggle-projects');
@@ -463,7 +470,8 @@ async function main() {
       }
       if (request.method === "GET" && parts.join("/") === "api/projects") {
         const cache = readReferenceCache(projectsPath);
-        return sendJson(response, { status: "ok", projects: readProjects(projectsPath).map((project) => projectForClient(project, cache)) });
+        const shortTitleOverrides = readShortTitleOverrides(shortTitlesPath);
+        return sendJson(response, { status: "ok", projects: readProjects(projectsPath).map((project) => projectForClient(project, cache, shortTitleOverrides)) });
       }
       if (request.method === "POST" && parts.join("/") === "api/projects") {
         const body = await readBody(request);

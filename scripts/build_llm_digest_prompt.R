@@ -55,7 +55,7 @@ usage <- function() {
       "",
       "Options:",
       "  --ref-id REF_ID     Canonical litxr ref_id to build a digest prompt for.",
-      "                      Bare arXiv ids like 2510.22085 are accepted as-is.",
+      "                      Bare arXiv ids and canonical openreview: Note ids are accepted.",
       "  --mode MODE         Either `create` or `revise`. Default: create",
       "  --prompt-version V  Prompt template version metadata to include.",
       "                      Default: v5.1",

@@ -144,7 +144,7 @@ needed_ids <- unique(digest_ref_ids[nzchar(digest_ref_ids)])
 needed_columns <- unique(c("ref_id", fields))
 digests <- litxr:::litxr_read_llm_digests(cfg, ref_ids = needed_ids, columns = needed_columns)
 if (nrow(digests)) {
-  digests$lookup_ref_id <- sub("^(arxiv|doi|isbn):", "", as.character(digests$ref_id), ignore.case = TRUE)
+  digests$lookup_ref_id <- sub("^(arxiv|doi|isbn|openreview):", "", as.character(digests$ref_id), ignore.case = TRUE)
 }
 
 output_path <- path.expand(args$output)

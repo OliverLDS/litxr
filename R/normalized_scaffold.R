@@ -10,6 +10,25 @@
   file.path(.litxr_project_index_dir(cfg), "ref_isbn.fst")
 }
 
+.litxr_ref_openreview_path <- function(cfg) {
+  file.path(.litxr_project_index_dir(cfg), "ref_openreview.fst")
+}
+
+.litxr_bare_openreview_id <- function(ref_id = NULL, source_id = NULL) {
+  candidates <- c(source_id, ref_id)
+  candidates <- as.character(candidates)
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+  if (!length(candidates)) return(NA_character_)
+  for (candidate in candidates) {
+    candidate <- trimws(candidate)
+    candidate <- sub("^openreview:", "", candidate, ignore.case = TRUE)
+    candidate <- sub("^https?://openreview\\.net/forum\\?id=", "", candidate, ignore.case = TRUE)
+    candidate <- sub("[&#?].*$", "", candidate)
+    if (grepl("^[A-Za-z0-9_-]+$", candidate)) return(candidate)
+  }
+  NA_character_
+}
+
 .litxr_ref_arxiv_collection_path <- function(cfg, collection_id) {
   collection_id <- as.character(collection_id)[[1L]]
   if (is.na(collection_id) || !nzchar(collection_id)) {
@@ -124,6 +143,11 @@
   ref_id <- trimws(ref_id)
   if (!nzchar(ref_id)) {
     return(list(key_type = "isbn", key_value = NA_character_, ref_id = NA_character_))
+  }
+
+  openreview_id <- .litxr_bare_openreview_id(ref_id = ref_id)
+  if (!is.na(openreview_id) && (grepl("^openreview:", ref_id, ignore.case = TRUE) || grepl("^https?://openreview\\.net/forum\\?id=", ref_id, ignore.case = TRUE))) {
+    return(list(key_type = "openreview", key_value = openreview_id, ref_id = paste0("openreview:", openreview_id)))
   }
 
   is_doi_like <- grepl("^doi:", ref_id, ignore.case = TRUE) ||
@@ -325,7 +349,8 @@
     keys,
     sub("^arxiv:", "", keys, ignore.case = TRUE),
     sub("^doi:", "", keys, ignore.case = TRUE),
-    sub("^isbn:", "", keys, ignore.case = TRUE)
+    sub("^isbn:", "", keys, ignore.case = TRUE),
+    sub("^openreview:", "", keys, ignore.case = TRUE)
   ))
   bare_keys <- bare_keys[!is.na(bare_keys) & nzchar(bare_keys)]
   thin_locations <- tryCatch(
