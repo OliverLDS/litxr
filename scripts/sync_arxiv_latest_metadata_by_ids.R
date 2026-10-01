@@ -100,7 +100,11 @@ remote_rows <- list()
 remote_count <- 0L
 for (start in seq.int(1L, length(arxiv_ids), by = args$batch_size)) {
   batch_ids <- arxiv_ids[start:min(start + args$batch_size - 1L, length(arxiv_ids))]
-  feed <- litxr::fetch_arxiv_xml(id_vec = batch_ids)
+  litxr:::.litxr_arxiv_delay(3)
+  feed <- litxr::fetch_arxiv_xml(
+    id_vec = batch_ids,
+    cooldown_path = litxr:::.litxr_arxiv_api_cooldown_path(cfg)
+  )
   entries <- xml2::xml_find_all(feed, ".//*[local-name()='entry']")
   for (entry in entries) {
     row <- litxr::parse_arxiv_entry_unified(entry)

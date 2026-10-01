@@ -93,7 +93,7 @@ usage <- function() {
       "  --start DATE       Inclusive start date for arXiv submittedDate filtering.",
       "  --end DATE         Inclusive end date for arXiv submittedDate filtering.",
       "  --page-size N      Page size for arXiv API calls.",
-      "  --sleep-seconds S  Delay between arXiv requests.",
+      "  --sleep-seconds S  Delay between arXiv requests; must be at least 3 seconds.",
       "  --search-query Q   Override the configured arXiv search query.",
       "  --force            Re-run days already recorded in the collection history.",
       "  -h, --help         Show this help message.",
@@ -268,9 +268,11 @@ sleep_seconds <- if (is.null(parsed$sleep_seconds)) {
 } else {
   as.numeric(parsed$sleep_seconds)
 }
-if (is.na(sleep_seconds) || sleep_seconds < 0) {
-  stop("`--sleep-seconds` must be non-negative.", call. = FALSE)
+if (is.na(sleep_seconds) || sleep_seconds < 3) {
+  stop("`--sleep-seconds` must be at least 3 seconds for arXiv API pacing.", call. = FALSE)
 }
+
+journal$sync$cooldown_path <- litxr:::.litxr_arxiv_api_cooldown_path(cfg)
 
 base_query <- if (has_text(parsed$search_query)) parsed$search_query else journal$sync$search_query
 if (!has_text(base_query)) {

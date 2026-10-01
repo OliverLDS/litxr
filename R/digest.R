@@ -1,4 +1,10 @@
- .litxr_empty_llm_digest_index <- function() {
+.litxr_strip_chatgpt_content_references <- function(text) {
+  text <- as.character(text)
+  if (!length(text)) return(text)
+  gsub(":chatgpt-content-reference\\{[^}]*\\}", "", text, perl = TRUE)
+}
+
+.litxr_empty_llm_digest_index <- function() {
   data.table::data.table(
     ref_id = character(),
     json_filename = character(),

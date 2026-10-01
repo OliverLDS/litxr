@@ -15,7 +15,7 @@ Options:
   --start DATE       Inclusive start date for arXiv submittedDate filtering.
   --end DATE         Inclusive end date for arXiv submittedDate filtering.
   --page-size N      Page size for arXiv API calls.
-  --sleep-seconds S  Delay between arXiv requests.
+  --sleep-seconds S  Delay between arXiv requests; must be at least 3 seconds.
   --search-query Q   Override the configured arXiv search query.
   --force            Re-run days already recorded in the collection history.
   -h, --help         Show this help message.

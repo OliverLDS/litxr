@@ -19,6 +19,9 @@ litxr_sync_collection <- function(
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
   journal <- .litxr_get_journal(cfg, collection_id)
+  if (identical(journal$remote_channel, "arxiv")) {
+    journal$sync$cooldown_path <- .litxr_arxiv_api_cooldown_path(cfg)
+  }
   local_path <- .litxr_collection_ref_dir(cfg, journal$collection_id %||% journal$journal_id)
   started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
   incoming <- switch(
@@ -207,6 +210,7 @@ litxr_repair_collection <- function(
   started_at <- format(Sys.time(), tz = "UTC", usetz = TRUE)
 
   if (identical(journal$remote_channel, "arxiv")) {
+    journal$sync$cooldown_path <- .litxr_arxiv_api_cooldown_path(cfg)
     base_query <- if (is.null(search_query)) journal$sync$search_query else search_query
     journal$sync$search_query <- .litxr_build_arxiv_search_query(base_query, submitted_from, submitted_to)
     if (!is.null(start)) journal$sync$start <- as.integer(start)
@@ -1077,7 +1081,8 @@ litxr_add_refs <- function(
 
   limit <- if (is.null(journal$sync$limit)) Inf else as.integer(journal$sync$limit)
   batch_size <- if (is.null(journal$sync$rows)) 100L else as.integer(journal$sync$rows)
-  delay_seconds <- if (is.null(journal$sync$delay_seconds)) 3 else as.numeric(journal$sync$delay_seconds)
+  delay_seconds <- max(3, if (is.null(journal$sync$delay_seconds)) 3 else as.numeric(journal$sync$delay_seconds))
+  cooldown_path <- if (is.null(journal$sync$cooldown_path)) NULL else as.character(journal$sync$cooldown_path[[1L]])
   start <- if (is.null(journal$sync$start)) 0L else as.integer(journal$sync$start)
   sort_by <- if (is.null(journal$sync$sort_by)) NULL else as.character(journal$sync$sort_by)
   sort_order <- if (is.null(journal$sync$sort_order)) NULL else as.character(journal$sync$sort_order)
@@ -1094,7 +1099,8 @@ litxr_add_refs <- function(
       start = start,
       max_results = request_n,
       sort_by = sort_by,
-      sort_order = sort_order
+      sort_order = sort_order,
+      cooldown_path = cooldown_path
     )
 
     total_results_node <- xml2::xml_find_first(feed, ".//*[local-name()='totalResults']")
@@ -2207,6 +2213,19 @@ litxr_add_refs <- function(
 
 .litxr_read_embedding_shard_parts <- function(paths, shard_key, read_matrix = TRUE) {
   shard_paths <- .litxr_embedding_shard_paths(paths, shard_key)
+  root_manifest <- if (file.exists(paths$manifest)) {
+    jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE)
+  } else {
+    list()
+  }
+  root_shards <- root_manifest$shards
+  if (is.list(root_shards) && !is.null(root_shards) && !(shard_key %in% names(root_shards))) {
+    return(list(
+      metadata = .litxr_empty_embedding_metadata(),
+      matrix = if (isTRUE(read_matrix)) matrix(numeric(), nrow = 0L, ncol = as.integer(root_manifest$dimension %||% 0L)) else NULL,
+      manifest = list()
+    ))
+  }
   shard_manifest <- if (file.exists(shard_paths$manifest)) jsonlite::fromJSON(shard_paths$manifest, simplifyVector = FALSE) else list()
   metadata <- if (file.exists(shard_paths$metadata)) {
     .litxr_normalize_embedding_metadata(fst::read_fst(shard_paths$metadata, as.data.table = TRUE))
@@ -2274,6 +2293,11 @@ litxr_add_refs <- function(
 .litxr_embedding_shard_keys <- function(paths) {
   if (is.null(paths$shards_dir) || !dir.exists(paths$shards_dir)) {
     return(character())
+  }
+  if (file.exists(paths$manifest)) {
+    manifest <- jsonlite::fromJSON(paths$manifest, simplifyVector = FALSE)
+    manifest_keys <- names(manifest$shards)
+    return(manifest_keys[dir.exists(file.path(paths$shards_dir, manifest_keys))])
   }
   entries <- list.files(paths$shards_dir, full.names = FALSE)
   entries[dir.exists(file.path(paths$shards_dir, entries))]

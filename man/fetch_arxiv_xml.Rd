@@ -12,7 +12,8 @@ fetch_arxiv_xml(
   sort_by = NULL,
   sort_order = NULL,
   retry_max = 6L,
-  retry_backoff_seconds = 30
+  retry_backoff_seconds = 60,
+  cooldown_path = NULL
 )
 }
 \arguments{
@@ -32,6 +33,8 @@ fetch_arxiv_xml(
 request failure.}
 
 \item{retry_backoff_seconds}{Base backoff in seconds for arXiv rate limiting.}
+
+\item{cooldown_path}{Optional persistent endpoint-cooldown state path.}
 }
 \value{
 XML document.

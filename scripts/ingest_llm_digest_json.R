@@ -82,7 +82,7 @@ normalize_inline_json <- function(text) {
     text <- sub("^```\\s*", "", text)
     text <- sub("\\s*```\\s*$", "", text)
   }
-  text
+  litxr:::.litxr_strip_chatgpt_content_references(text)
 }
 
 first_or_null <- function(x) {
@@ -170,7 +170,8 @@ result <- tryCatch(
       if (!file.exists(json_path)) {
         stop("Downloaded JSON file not found: ", json_path, call. = FALSE)
       }
-      digest <- jsonlite::fromJSON(json_path, simplifyVector = FALSE)
+      json_text <- paste(readLines(json_path, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+      digest <- jsonlite::fromJSON(normalize_inline_json(json_text), simplifyVector = FALSE)
     }
     json_ref_id <- if (!is.null(digest$ref_id) && length(digest$ref_id) && nzchar(as.character(digest$ref_id[[1]]))) {
       as.character(digest$ref_id[[1]])

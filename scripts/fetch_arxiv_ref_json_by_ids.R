@@ -141,7 +141,11 @@ fetched_rows <- list()
 
 for (start in seq.int(1L, length(fetch_ids), by = batch_size)) {
   batch_ids <- fetch_ids[start:min(start + batch_size - 1L, length(fetch_ids))]
-  feed <- litxr::fetch_arxiv_xml(id_vec = batch_ids)
+  litxr:::.litxr_arxiv_delay(3)
+  feed <- litxr::fetch_arxiv_xml(
+    id_vec = batch_ids,
+    cooldown_path = litxr:::.litxr_arxiv_api_cooldown_path(cfg)
+  )
   entries <- xml2::xml_find_all(feed, ".//*[local-name()='entry']")
   if (!length(entries)) {
     next
