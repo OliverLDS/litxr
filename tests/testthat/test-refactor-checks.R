@@ -299,6 +299,49 @@ test_that("BibTeX export scalarizes list-valued fields without leaking vector sy
   expect_false(any(grepl("list\\(", bib, fixed = FALSE)))
 })
 
+test_that("BibTeX field overrides apply only while rendering", {
+  row <- data.table::data.table(
+    ref_id = "doi:10.1000/example",
+    source = "crossref",
+    source_id = "10.1000/example",
+    entry_type = "article",
+    title = "Fetched Title",
+    authors = "Jane Doe",
+    authors_list = list("Jane Doe"),
+    year = 2024L,
+    journal = "Fetched Journal",
+    container_title = "Fetched Journal",
+    publisher = NA_character_,
+    volume = NA_character_,
+    issue = NA_character_,
+    pages = NA_character_,
+    doi = "10.1000/example",
+    isbn = NA_character_,
+    issn = NA_character_,
+    url = "https://example.org",
+    note = NA_character_,
+    url_landing = NA_character_,
+    url_pdf = NA_character_,
+    bib_fields__ = list(list(
+      entry_type = "book",
+      title = "Manual Title",
+      author = "Jane Doe; John Smith",
+      publisher = "Manual Press",
+      edition = "2",
+      location = "Upper Saddle River, NJ"
+    ))
+  )
+
+  bib <- paste(litxr:::.litxr_row_to_bibtex(row), collapse = "\n")
+  expect_match(bib, "@book\\{10_1000_example,")
+  expect_match(bib, "title = \\{Manual Title\\}")
+  expect_match(bib, "author = \\{Jane Doe and John Smith\\}")
+  expect_match(bib, "publisher = \\{Manual Press\\}")
+  expect_match(bib, "edition = \\{2\\}")
+  expect_match(bib, "location = \\{Upper Saddle River, NJ\\}")
+  expect_false(grepl("Fetched Title", bib, fixed = TRUE))
+})
+
 test_that("arxiv and DOI id fetch nodes parse and advertise strict id mode", {
   arxiv_script <- normalizePath(file.path("..", "..", "scripts", "fetch_arxiv_ref_json_by_ids.R"), mustWork = TRUE)
   doi_fetch_script <- normalizePath(file.path("..", "..", "scripts", "fetch_doi_ref_json_by_ids.R"), mustWork = TRUE)
@@ -322,4 +365,24 @@ test_that("arxiv and DOI id fetch nodes parse and advertise strict id mode", {
   expect_true(any(grepl("--collection ID", doi_sync_help, fixed = TRUE)))
   expect_true(any(grepl("Writes fetched records as JSON files directly under ref/COLLECTION_ID", doi_sync_help, fixed = TRUE)))
   expect_false(any(grepl("--doi", doi_sync_help, fixed = TRUE)))
+})
+
+test_that("embedding readers ignore an uncommitted shard directory", {
+  td <- tempfile("litxr-shards-")
+  shards_dir <- file.path(td, "shards")
+  dir.create(file.path(shards_dir, "2020"), recursive = TRUE)
+  dir.create(file.path(shards_dir, "2021"), recursive = TRUE)
+  file.create(file.path(shards_dir, "2021", "manifest.json"))
+  manifest_path <- file.path(td, "manifest.json")
+  jsonlite::write_json(
+    list(dimension = 2L, shards = list(`2020` = list(records = 1L))),
+    manifest_path,
+    auto_unbox = TRUE
+  )
+  paths <- list(shards_dir = shards_dir, manifest = manifest_path)
+
+  expect_identical(litxr:::.litxr_embedding_shard_keys(paths), "2020")
+  orphan <- litxr:::.litxr_read_embedding_shard_parts(paths, "2021", read_matrix = FALSE)
+  expect_equal(nrow(orphan$metadata), 0L)
+  expect_null(orphan$matrix)
 })

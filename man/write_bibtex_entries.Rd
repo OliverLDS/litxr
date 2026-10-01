@@ -9,7 +9,8 @@ write_bibtex_entries(
   ref_ids,
   config = NULL,
   prefer_linked_doi = TRUE,
-  bibtex_key_overrides = NULL
+  bibtex_key_overrides = NULL,
+  bibtex_field_overrides = NULL
 )
 }
 \arguments{
@@ -28,6 +29,10 @@ DOI promotion.}
 \item{bibtex_key_overrides}{Optional named character vector keyed by the
 requested canonical ref ids. This is intended for presentation-specific
 exporters; omitted values retain the deterministic default key.}
+
+\item{bibtex_field_overrides}{Optional named list keyed by requested
+canonical ref ids. Each value is a named character list of BibTeX field
+overrides. These are applied after resolving source metadata.}
 }
 \value{
 Named list describing the write status.

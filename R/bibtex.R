@@ -853,7 +853,17 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   }
   scalar <- .litxr_scalar_chr
 
+  field_overrides <- row[["bib_fields__"]]
+  if (is.list(field_overrides) && length(field_overrides) == 1L && is.list(field_overrides[[1L]])) {
+    field_overrides <- field_overrides[[1L]]
+  }
+  if (is.null(field_overrides)) field_overrides <- list()
+
   entry_type <- scalar(row[["entry_type"]])
+  entry_type_override <- scalar(field_overrides[["entry_type"]])
+  if (!is.null(entry_type_override) && !is.na(entry_type_override) && nzchar(entry_type_override)) {
+    entry_type <- entry_type_override
+  }
   if (is.null(entry_type) || is.na(entry_type) || !nzchar(entry_type)) {
     entry_type <- .litxr_entry_type_from_source(row[["source"]])
   }
@@ -917,6 +927,22 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
   if (entry_type == "techreport") fields["institution"] <- publisher
   if (entry_type == "phdthesis") fields["school"] <- publisher
 
+  field_overrides[["entry_type"]] <- NULL
+  if (length(field_overrides)) {
+    override_names <- names(field_overrides)
+    for (name in override_names) {
+      value <- scalar(field_overrides[[name]])
+      if (is.null(value) || is.na(value) || !nzchar(value)) next
+      if (identical(name, "author")) {
+        authors <- trimws(strsplit(value, ";", fixed = TRUE)[[1L]])
+        authors <- authors[nzchar(authors)]
+        fields[[name]] <- .bibtex_escape(.format_authors_bib(authors))
+      } else {
+        fields[[name]] <- if (identical(name, "title")) .bibtex_escape(value) else value
+      }
+    }
+  }
+
   fields <- fields[!is.na(fields) & nzchar(fields)]
 
   lines <- sprintf("  %s = {%s},", names(fields), fields)
@@ -951,6 +977,9 @@ read_bibtex_entries <- function(path, config = NULL, prefer_linked_arxiv = TRUE)
 #' @param bibtex_key_overrides Optional named character vector keyed by the
 #'   requested canonical ref ids. This is intended for presentation-specific
 #'   exporters; omitted values retain the deterministic default key.
+#' @param bibtex_field_overrides Optional named list keyed by requested
+#'   canonical ref ids. Each value is a named character list of BibTeX field
+#'   overrides. These are applied after resolving source metadata.
 #'
 #' @return Named list describing the write status.
 #' @export
@@ -959,7 +988,8 @@ write_bibtex_entries <- function(
   ref_ids,
   config = NULL,
   prefer_linked_doi = TRUE,
-  bibtex_key_overrides = NULL
+  bibtex_key_overrides = NULL,
+  bibtex_field_overrides = NULL
 ) {
   cfg <- if (is.character(config)) litxr_read_config(config) else config
   if (is.null(cfg)) cfg <- litxr_read_config()
@@ -1001,6 +1031,28 @@ write_bibtex_entries <- function(
     if (any(use_override)) {
       rows$bib_key__ <- if ("bib_key__" %in% names(rows)) as.character(rows$bib_key__) else rep(NA_character_, nrow(rows))
       rows$bib_key__[use_override] <- overrides[use_override]
+    }
+  }
+  if (!is.null(bibtex_field_overrides) && nrow(rows)) {
+    override_names <- names(bibtex_field_overrides)
+    if (is.null(override_names) || any(is.na(override_names) | !nzchar(override_names))) {
+      stop("`bibtex_field_overrides` must be a named list.", call. = FALSE)
+    }
+    rows$bib_fields__ <- vector("list", nrow(rows))
+    requested_ref_ids <- as.character(rows$litxr_requested_ref_id__)
+    for (i in seq_len(nrow(rows))) {
+      fields <- bibtex_field_overrides[[requested_ref_ids[[i]]]]
+      if (is.null(fields)) next
+      if (!is.list(fields) || is.null(names(fields)) || any(!grepl("^[A-Za-z][A-Za-z0-9_-]*$", names(fields)))) {
+        stop("Each `bibtex_field_overrides` value must be a named list of valid BibTeX field names.", call. = FALSE)
+      }
+      values <- vapply(fields, function(value) {
+        if (is.null(value) || !length(value)) return(NA_character_)
+        value <- as.character(value[[1L]])
+        if (is.na(value)) NA_character_ else trimws(value)
+      }, character(1))
+      fields <- as.list(values[!is.na(values) & nzchar(values)])
+      if (length(fields)) rows$bib_fields__[[i]] <- fields
     }
   }
   if ("litxr_requested_ref_id__" %in% names(rows)) rows$litxr_requested_ref_id__ <- NULL

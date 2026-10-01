@@ -5,7 +5,7 @@ set -eu
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   cat <<'EOF'
 Usage:
-  scripts/write_bib_by_ref_ids.sh --output PATH --ref-ids REF1,REF2 [--config PATH] [--no-linked-doi] [--bibtex-key-overrides PATH]
+  scripts/write_bib_by_ref_ids.sh --output PATH --ref-ids REF1,REF2 [--config PATH] [--no-linked-doi] [--bibtex-key-overrides PATH] [--bibtex-field-overrides PATH]
 
 Options:
   --output PATH       Target BibTeX file path.
@@ -14,6 +14,7 @@ Options:
   --config PATH       Optional litxr config path or parsed config source.
   --no-linked-doi     Export arXiv ids without promoting to linked DOI rows.
   --bibtex-key-overrides PATH  Optional JSON object mapping canonical ref ids to keys.
+  --bibtex-field-overrides PATH  Optional JSON object mapping canonical ref ids to field objects.
   -h, --help          Show this help message.
 
 Behavior:
@@ -28,6 +29,7 @@ ref_ids_raw=""
 config_value=""
 prefer_linked_doi=1
 bibtex_key_overrides_path=""
+bibtex_field_overrides_path=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,6 +72,14 @@ while [[ $# -gt 0 ]]; do
       bibtex_key_overrides_path="$2"
       shift 2
       ;;
+    --bibtex-field-overrides)
+      if [[ $# -lt 2 ]]; then
+        print -u2 "Missing value for --bibtex-field-overrides"
+        exit 1
+      fi
+      bibtex_field_overrides_path="$2"
+      shift 2
+      ;;
     --*)
       print -u2 "Unknown argument: $1"
       exit 1
@@ -90,13 +100,14 @@ if [[ -z "$ref_ids_raw" ]]; then
   exit 1
 fi
 
-Rscript - "$output_path" "$ref_ids_raw" "$config_value" "$prefer_linked_doi" "$bibtex_key_overrides_path" <<'EOF'
+Rscript - "$output_path" "$ref_ids_raw" "$config_value" "$prefer_linked_doi" "$bibtex_key_overrides_path" "$bibtex_field_overrides_path" <<'EOF'
 args <- commandArgs(trailingOnly = TRUE)
 output_path <- args[[1]]
 ref_ids_raw <- args[[2]]
 config_value <- args[[3]]
 prefer_linked_doi <- identical(args[[4]], "1")
 bibtex_key_overrides_path <- args[[5]]
+bibtex_field_overrides_path <- args[[6]]
 
 emit_json <- function(x) {
   cat(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", pretty = FALSE), "\n", sep = "")
@@ -125,6 +136,17 @@ if (!is.na(config_value) && nzchar(config_value)) {
   cfg <- config_value
 }
 
+bibtex_field_overrides <- NULL
+if (!is.na(bibtex_field_overrides_path) && nzchar(bibtex_field_overrides_path)) {
+  if (!file.exists(bibtex_field_overrides_path)) {
+    stop("BibTeX field overrides file not found: ", bibtex_field_overrides_path, call. = FALSE)
+  }
+  bibtex_field_overrides <- jsonlite::fromJSON(bibtex_field_overrides_path, simplifyVector = FALSE)
+  if (!is.list(bibtex_field_overrides) || is.null(names(bibtex_field_overrides))) {
+    stop("BibTeX field overrides JSON must be an object of canonical ref ids to field objects.", call. = FALSE)
+  }
+}
+
 bibtex_key_overrides <- NULL
 if (!is.na(bibtex_key_overrides_path) && nzchar(bibtex_key_overrides_path)) {
   if (!file.exists(bibtex_key_overrides_path)) {
@@ -143,7 +165,8 @@ result <- litxr::write_bibtex_entries(
   ref_ids,
   config = cfg,
   prefer_linked_doi = prefer_linked_doi,
-  bibtex_key_overrides = bibtex_key_overrides
+  bibtex_key_overrides = bibtex_key_overrides,
+  bibtex_field_overrides = bibtex_field_overrides
 )
 emit_json(result)
 EOF
